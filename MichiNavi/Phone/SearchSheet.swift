@@ -3,10 +3,15 @@ import SwiftUI
 
 /// iPhone 側の目的地検索。CarPlay の `CPSearchTemplate` と同じ
 /// `SearchService` を使うので、候補の出方が両画面で揃う。
+///
+/// 入力が空のときはお気に入りと履歴を出す。CarPlay では走行中にキーボードが
+/// 塞がれるため、ここでお気に入りを育てておくことが実質の前提になる。
 struct SearchSheet: View {
     let onSelect: (Place) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var store = DestinationStore.shared
+
     @State private var query = ""
     @State private var suggestions: [MKLocalSearchCompletion] = []
     @State private var isResolving = false
@@ -19,20 +24,10 @@ struct SearchSheet: View {
                     Text(errorMessage).foregroundStyle(.red)
                 }
 
-                ForEach(suggestions, id: \.self) { suggestion in
-                    Button {
-                        select(suggestion)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(suggestion.title).foregroundStyle(.primary)
-                            if !suggestion.subtitle.isEmpty {
-                                Text(suggestion.subtitle)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .disabled(isResolving)
+                if query.isEmpty {
+                    savedDestinations
+                } else {
+                    suggestionRows
                 }
             }
             .searchable(text: $query, prompt: "住所・施設名で検索")
@@ -50,6 +45,78 @@ struct SearchSheet: View {
                 SearchService.shared.suggest(text, near: currentRegion) { suggestions = $0 }
             }
         }
+    }
+
+    // MARK: - お気に入りと履歴
+
+    @ViewBuilder
+    private var savedDestinations: some View {
+        if store.favorites.isEmpty, store.recents.isEmpty {
+            ContentUnavailableView("目的地の履歴はまだありません",
+                                   systemImage: "mappin.slash",
+                                   description: Text("案内を始めるとここに残ります。\n星を付けると CarPlay のお気に入りに並びます。"))
+        } else {
+            if !store.favorites.isEmpty {
+                Section("お気に入り") {
+                    ForEach(store.favorites) { place in row(for: place) }
+                }
+            }
+
+            if !store.recents.isEmpty {
+                Section("最近の目的地") {
+                    ForEach(store.recents) { place in row(for: place) }
+                }
+            }
+        }
+    }
+
+    private func row(for place: Place) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                onSelect(place)
+            } label: {
+                summary(name: place.name, detail: place.subtitle)
+            }
+            .buttonStyle(.plain)
+            .disabled(isResolving)
+
+            Button {
+                store.toggleFavorite(place)
+            } label: {
+                let isFavorite = store.isFavorite(place)
+                Image(systemName: isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(isFavorite ? .yellow : .secondary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(store.isFavorite(place) ? "お気に入りから外す" : "お気に入りに追加")
+        }
+    }
+
+    // MARK: - 入力中の候補
+
+    private var suggestionRows: some View {
+        ForEach(suggestions, id: \.self) { suggestion in
+            Button {
+                select(suggestion)
+            } label: {
+                summary(name: suggestion.title, detail: suggestion.subtitle)
+            }
+            .buttonStyle(.plain)
+            .disabled(isResolving)
+        }
+    }
+
+    private func summary(name: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).foregroundStyle(.primary)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func select(_ suggestion: MKLocalSearchCompletion) {

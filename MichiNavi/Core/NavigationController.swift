@@ -102,6 +102,8 @@ final class NavigationController: ObservableObject {
     // MARK: - 案内の開始と終了
 
     func startNavigation(with route: NavRoute) {
+        // 実際に案内を始めた地点だけを履歴に残す。ルートを見ただけでは残さない。
+        DestinationStore.shared.remember(route.destination)
         guidance = GuidanceEngine(route: route)
         announcedStepIndex = nil
         progress = nil

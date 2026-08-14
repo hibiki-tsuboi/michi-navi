@@ -59,6 +59,28 @@ final class SearchService: NSObject {
         return try await places(for: request)
     }
 
+    /// 現在地のまわりをカテゴリで探す（ガソリンスタンド、駐車場など）。
+    /// キーボードが使えない走行中でも目的地を選べるようにするための入口。
+    func nearby(pointsOfInterest: [MKPointOfInterestCategory],
+                around coordinate: CLLocationCoordinate2D,
+                radius: CLLocationDistance = 10_000) async throws -> [Place] {
+        let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: radius)
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: pointsOfInterest)
+
+        let response = try await MKLocalSearch(request: request).start()
+        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+        // 運転中は近い順が唯一まともな並び。MapKit は距離順を保証しない。
+        return response.mapItems
+            .map { Place(mapItem: $0) }
+            .sorted { lhs, rhs in
+                origin.distance(from: CLLocation(latitude: lhs.coordinate.latitude,
+                                                 longitude: lhs.coordinate.longitude))
+                    < origin.distance(from: CLLocation(latitude: rhs.coordinate.latitude,
+                                                       longitude: rhs.coordinate.longitude))
+            }
+    }
+
     private func places(for request: MKLocalSearch.Request) async throws -> [Place] {
         let response = try await MKLocalSearch(request: request).start()
         return response.mapItems.map { Place(mapItem: $0) }

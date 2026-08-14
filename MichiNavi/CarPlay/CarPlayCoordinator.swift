@@ -18,8 +18,11 @@ final class CarPlayCoordinator: NSObject {
     private let mapTemplate = CPMapTemplate()
 
     private let navigation = NavigationController.shared
-    private let search = SearchService.shared
     private let location = LocationService.shared
+
+    /// 車が今どこまで UI を制限しているか（走行中のキーボード封じなど）を教えてくれる。
+    private var sessionConfiguration: CPSessionConfiguration?
+    private var destinations: CarPlayDestinationBrowser?
 
     private var navigationSession: CPNavigationSession?
     private var currentTrip: CPTrip?
@@ -37,6 +40,14 @@ final class CarPlayCoordinator: NSObject {
     func start() {
         window.rootViewController = mapViewController
 
+        let configuration = CPSessionConfiguration(delegate: self)
+        sessionConfiguration = configuration
+        destinations = CarPlayDestinationBrowser(
+            interfaceController: interfaceController,
+            sessionConfiguration: configuration,
+            onSelect: { [weak self] in self?.navigation.requestRoutes(to: $0) },
+            onError: { [weak self] in self?.presentAlert(message: $0) })
+
         mapTemplate.mapDelegate = self
         mapTemplate.automaticallyHidesNavigationBar = false
         applyIdleButtons()
@@ -49,6 +60,8 @@ final class CarPlayCoordinator: NSObject {
 
     func stop() {
         cancellables.removeAll()
+        destinations = nil
+        sessionConfiguration = nil
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
@@ -225,7 +238,7 @@ final class CarPlayCoordinator: NSObject {
     private func applyIdleButtons() {
         mapTemplate.mapButtons = [panButton, zoomInButton, zoomOutButton]
         mapTemplate.leadingNavigationBarButtons = []
-        mapTemplate.trailingNavigationBarButtons = [searchButton]
+        mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
     private func applyNavigatingButtons() {
@@ -234,8 +247,8 @@ final class CarPlayCoordinator: NSObject {
         mapTemplate.trailingNavigationBarButtons = [endNavigationButton]
     }
 
-    private var searchButton: CPBarButton {
-        CPBarButton(title: "検索") { [weak self] _ in self?.presentSearch() }
+    private var destinationsButton: CPBarButton {
+        CPBarButton(title: "目的地") { [weak self] _ in self?.destinations?.present() }
     }
 
     private var endNavigationButton: CPBarButton {
@@ -278,13 +291,7 @@ final class CarPlayCoordinator: NSObject {
         return button
     }
 
-    // MARK: - 検索
-
-    private func presentSearch() {
-        let searchTemplate = CPSearchTemplate()
-        searchTemplate.delegate = self
-        interfaceController.pushTemplate(searchTemplate, animated: true, completion: nil)
-    }
+    // MARK: - 通知
 
     private func presentAlert(message: String) {
         let alert = CPAlertTemplate(titleVariants: [message],
@@ -346,55 +353,16 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     }
 }
 
-// MARK: - CPSearchTemplateDelegate
+// MARK: - CPSessionConfigurationDelegate
 
-extension CarPlayCoordinator: CPSearchTemplateDelegate {
-    func searchTemplate(_ searchTemplate: CPSearchTemplate,
-                        updatedSearchText searchText: String,
-                        completionHandler: @escaping ([CPListItem]) -> Void) {
-        search.suggest(searchText, near: currentRegion) { completions in
-            // CarPlay の検索結果は運転中の安全のため件数が制限される。
-            let items = completions.prefix(12).map { completion -> CPListItem in
-                let item = CPListItem(text: completion.title, detailText: completion.subtitle)
-                item.userInfo = completion
-                return item
-            }
-            completionHandler(Array(items))
-        }
-    }
-
-    func searchTemplate(_ searchTemplate: CPSearchTemplate,
-                        selectedResult item: CPListItem,
-                        completionHandler: @escaping () -> Void) {
-        guard let completion = item.userInfo as? MKLocalSearchCompletion else {
-            completionHandler()
-            return
-        }
-
-        Task {
-            defer { completionHandler() }
-            do {
-                let places = try await search.resolve(completion)
-                guard let place = places.first else {
-                    presentAlert(message: "場所が特定できませんでした")
-                    return
-                }
-                interfaceController.popToRootTemplate(animated: true, completion: nil)
-                navigation.requestRoutes(to: place)
-            } catch {
-                presentAlert(message: error.localizedDescription)
-            }
-        }
-    }
-
-    func searchTemplateSearchButtonPressed(_ searchTemplate: CPSearchTemplate) {
-        interfaceController.popToRootTemplate(animated: true, completion: nil)
-    }
-
-    /// 現在地まわりを検索範囲にすると、同名チェーン店で近い順に出る。
-    private var currentRegion: MKCoordinateRegion? {
-        guard let coordinate = location.location?.coordinate else { return nil }
-        return MKCoordinateRegion(center: coordinate, latitudinalMeters: 20_000, longitudinalMeters: 20_000)
+extension CarPlayCoordinator: CPSessionConfigurationDelegate {
+    /// 走行の開始・停止に合わせて車が UI 制限を掛け外しする。
+    /// キーボードが塞がれると検索ボタンを出す意味が無くなるので、
+    /// 目的地リストを作り直させる。
+    func sessionConfiguration(_ sessionConfiguration: CPSessionConfiguration,
+                              limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface) {
+        guard case .idle = navigation.phase else { return }
+        applyIdleButtons()
     }
 }
 

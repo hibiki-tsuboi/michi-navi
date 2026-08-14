@@ -143,14 +143,15 @@ final class CarPlayMapViewController: UIViewController {
         }
     }
 
-    /// パン操作。CarPlay はタッチではなくノブ／トラックパッドの方向入力で来る。
-    func pan(by translation: CGPoint) {
+    /// パン操作。指のドラッグ（タッチ対応の車）とノブ／トラックパッドの方向入力の
+    /// どちらもここに来る。指に追従させたいドラッグ中は `animated: false` で呼ぶ。
+    ///
+    /// 画面を動かした向きに地図の中身が付いてくるよう、中心は逆向きへ動かす。
+    func pan(by translation: CGPoint, animated: Bool = true) {
         isFollowingUser = false
-        let center = mapView.convert(mapView.center, toCoordinateFrom: mapView)
-        var point = mapView.convert(center, toPointTo: mapView)
-        point.x -= translation.x
-        point.y -= translation.y
-        mapView.setCenter(mapView.convert(point, toCoordinateFrom: mapView), animated: true)
+        let point = CGPoint(x: mapView.bounds.midX - translation.x,
+                            y: mapView.bounds.midY - translation.y)
+        mapView.setCenter(mapView.convert(point, toCoordinateFrom: mapView), animated: animated)
     }
 
     /// テンプレートが重なっている領域を避けるための余白。

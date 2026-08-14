@@ -138,6 +138,16 @@ CarPlay 層は触らずに済む設計。
 - **CarPlay の `upcomingManeuvers` は 2 件までしか表示されない**ので 2 件で切っている。
 - **CarPlay の地図では中心合わせ・全体表示で `view.safeAreaInsets` を必ず差し引く**。
   テンプレート（上部バー・案内カード）が地図の上に重なるため、引かないと自車位置が裏に隠れる。
+- **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or
+  drag events in the base view」）。`MKMapView` に自前のジェスチャを付ける手は使えず、入力は
+  すべて `CPMapTemplateDelegate` 経由。指のドラッグは `didUpdatePanGestureWithTranslation`
+  で来るが、**届くかどうかは車次第**（ノブ／トラックパッドしか無い車がある）。
+  `translation` は `UIPanGestureRecognizer` と同じくジェスチャ開始からの累積値なので、
+  前回との差分にしてから地図へ渡す。そのまま渡すと動かすほど加速する。
+- **パンボタンは外せない**（ガイド p.33）。タッチでドラッグできる車があっても、ノブしか無い
+  車のために「パン UI へ入るボタン」を必ず 1 つ置くことが要件。
+- **`mapButtons` は 4 つまで。パン UI に入ると先頭 2 つしか残らない**（超過ぶんは配列の
+  末尾から順に隠される）。並び順が表示に直結するので、パン UI で用の無いものほど後ろへ置く。
 - **`CarPlayCoordinator.beginSessionIfNeeded` の二重開始ガードを外さない**。
   iPhone 側で案内を始めた場合も同じ経路を通る。
 - リルートは失敗しても案内を止めない（次の位置更新で再試行）。多重計算は

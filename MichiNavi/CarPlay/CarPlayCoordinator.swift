@@ -30,6 +30,8 @@ final class CarPlayCoordinator: NSObject {
     /// `pauseTrip` を出したかどうか。自分で止めたときだけ再開する。
     /// 止めていないのに `resumeTrip` を投げると CarPlay 側の状態と食い違う。
     private var isTripPaused = false
+    /// ドラッグ中に受け取った累積移動量。差分を出すために覚えておく。
+    private var lastPanTranslation: CGPoint = .zero
     private var cancellables = Set<AnyCancellable>()
 
     init(interfaceController: CPInterfaceController, window: CPWindow) {
@@ -326,8 +328,14 @@ final class CarPlayCoordinator: NSObject {
 
     // MARK: - ボタン
 
+    /// 並び順に意味がある。**パン UI に入ると先頭 2 つしか残らない**
+    /// （超過ぶんは配列の末尾から順に隠される）ので、パン UI 側で用の無いものほど後ろに置く。
+    /// パンボタン自身はパン UI の中では押しても意味が無いため最後。
+    ///
+    /// 現在地ボタンを案内中と同じ位置（先頭）に置くのは、指でドラッグして地図を
+    /// 動かしたあと自車位置に戻る手段が他に無いため。案内中と押す場所も揃う。
     private func applyIdleButtons() {
-        mapTemplate.mapButtons = [panButton, zoomInButton, zoomOutButton]
+        mapTemplate.mapButtons = [recenterButton, zoomInButton, zoomOutButton, panButton]
         mapTemplate.leadingNavigationBarButtons = []
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
@@ -445,10 +453,31 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         }
     }
 
+    // MARK: 指でのドラッグ
+
+    /// タッチに対応した車では、**パン UI に入らなくても**指の動きがそのまま届く。
+    /// ただし届くかどうかは車次第（ノブやトラックパッドしか無い車もある）なので、
+    /// パンボタンは外せない。ガイド p.33 が「パン UI へ入るボタンを必ず置くこと」を
+    /// 求めているのはこのため。
+
+    func mapTemplateDidBeginPanGesture(_ mapTemplate: CPMapTemplate) {
+        lastPanTranslation = .zero
+    }
+
+    /// `translation` は `UIPanGestureRecognizer` と同じく**ジェスチャ開始からの累積値**。
+    /// そのまま渡すと動かすほど加速するので、前回との差分だけを地図へ送る。
+    /// 指に貼り付いて見えるよう、ドラッグ中はアニメーションを掛けない。
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdatePanGestureWithTranslation translation: CGPoint,
                      velocity: CGPoint) {
-        mapViewController.pan(by: translation)
+        mapViewController.pan(by: CGPoint(x: translation.x - lastPanTranslation.x,
+                                          y: translation.y - lastPanTranslation.y),
+                              animated: false)
+        lastPanTranslation = translation
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didEndPanGestureWithVelocity velocity: CGPoint) {
+        lastPanTranslation = .zero
     }
 
     /// ノブやボタンでの方向入力。1 回あたり画面の約 1/4 だけ動かす。

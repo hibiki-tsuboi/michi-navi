@@ -264,6 +264,12 @@ final class CarPlayCoordinator: NSObject {
         }
     }
 
+    private var donePanningButton: CPBarButton {
+        CPBarButton(title: "完了") { [weak self] _ in
+            self?.mapTemplate.dismissPanningInterface(animated: true)
+        }
+    }
+
     private var overviewButton: CPBarButton {
         CPBarButton(title: "全体表示") { [weak self] _ in
             guard let route = self?.navigation.currentRoute else { return }
@@ -333,12 +339,24 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
 
     // MARK: パン操作
 
+    /// **パン UI から抜ける導線は必ずこちらで出す**。CarPlay が自前で「完了」を出すのは
+    /// POI テンプレートだけで、`CPMapTemplate` には無い。出さないと地図を動かしたきり
+    /// 元の画面に戻れなくなる。パン中は CarPlay が map ボタンを隠すので、
+    /// 置き換えるのはナビゲーションバーのボタンだけでよい。
     func mapTemplateDidShowPanningInterface(_ mapTemplate: CPMapTemplate) {
         mapViewController.setFollowingUser(false)
+        mapTemplate.leadingNavigationBarButtons = []
+        mapTemplate.trailingNavigationBarButtons = [donePanningButton]
     }
 
     func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
         mapViewController.recenter()
+        // パンに入る前のボタンへ戻す。案内中に入った場合もあるので状態を見て選ぶ。
+        if case .navigating = navigation.phase {
+            applyNavigatingButtons()
+        } else {
+            applyIdleButtons()
+        }
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate,

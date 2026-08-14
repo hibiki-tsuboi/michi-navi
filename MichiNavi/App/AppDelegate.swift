@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         LocationService.shared.requestAuthorization()
         LocationService.shared.startUpdating()
+        // iPhone 画面と CarPlay 画面のどちらから案内を始めても読み上げるよう、
+        // シーンではなくアプリの起動時に購読を始める。
+        VoiceGuidance.shared.start()
         return true
     }
 }

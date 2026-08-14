@@ -40,6 +40,17 @@ enum Formatters {
         arrivalTime.string(from: date)
     }
 
+    /// 読み上げ用の距離。「300メートル」「1.5キロ」。
+    /// `distanceText` の "300 m" は読み上げると不自然になるため別に用意する。
+    static func spokenDistance(_ meters: CLLocationDistance) -> String {
+        guard meters >= 1000 else { return "\(Int(meters.rounded()))メートル" }
+
+        let kilometers = meters / 1000
+        // ちょうど 1km は「1.0キロ」ではなく「1キロ」と読ませる。
+        guard kilometers != kilometers.rounded() else { return "\(Int(kilometers))キロ" }
+        return String(format: "%.1fキロ", kilometers)
+    }
+
     /// 「12 km・24分・15:30 着」のような 1 行サマリー。
     static func routeSummary(distance meters: CLLocationDistance, duration seconds: TimeInterval) -> String {
         let arrival = arrivalText(Date(timeIntervalSinceNow: seconds))

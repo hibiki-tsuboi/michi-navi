@@ -35,27 +35,33 @@ iPhone 画面（SwiftUI）と CarPlay 画面（UIKit + CarPlay テンプレー�
 新機能を足すときは、まず「状態は NavigationController、見た目は各 UI」に割り振る。
 
 ```
-idle ──requestRoutes──> calculating ──> previewing ──startNavigation──> navigating
- ^                                                                          │
- └──────────────── cancelNavigation / 到着 ─────────────────────────────────┘
+idle ──requestRoutes──> calculating ──> previewing ──startNavigation(with:)──> navigating
+ ^                                                                                 │
+ └──────────────── cancelNavigation / 到着 ────────────────────────────────────────┘
 ```
+
+案内へ入る道は 2 本ある。`requestRoutes(to:)` は previewing で止まり、どのルートで行くかを
+利用者が選ぶ。`startNavigation(to:)` は計算からそのまま navigating へ入る（先頭のルートを使う）。
+後者は CarPlay Dashboard のショートカットのように、**提示画面を見てもらえない場所**からの入口。
 
 Combine の使い分けにも意味がある:
 
 - `@Published`（`phase` / `progress` / `lastError`）= **いまの状態**。購読側は再描画すればよい。
 - `PassthroughSubject`（`maneuverChanged` / `arrived`）= **その瞬間の出来事**。
-  音声読み上げや `CPManeuver` の差し替えのように、1 回だけ起こしたい副作用に使う。
+  `CPManeuver` の差し替えのように、1 回だけ起こしたい副作用に使う。
+  音声案内はこれではなく `progress` を見ている（後述）。
 
 ### レイヤの責務
 
 | ディレクトリ | 責務 | 制約 |
 | --- | --- | --- |
-| `Core/` | 位置・検索・経路計算・進捗計算・状態管理 | UI 非依存。CarPlay も SwiftUI も import しない |
-| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換 | 案内ロジックを持たない |
+| `Core/` | 位置・検索・経路計算・進捗計算・状態管理・目的地の保存・音声案内 | UI 非依存。CarPlay も SwiftUI も import しない |
+| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイと Dashboard の 2 画面ぶん | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 3 つ: `NavigationController.shared` / `LocationService.shared` /
-`SearchService.shared`。特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
+共有シングルトンは 5 つ: `NavigationController.shared` / `LocationService.shared` /
+`SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared`。
+特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 ### `GuidanceEngine`（経路上の進捗計算）
 
@@ -68,6 +74,34 @@ Combine の使い分けにも意味がある:
 - 逸脱判定 = 中心線から 50m 超が **3 回連続**（GPS の跳ねでの誤リルート防止）。到着判定 = 残り 30m。
 - 前提として `NavRoute` は、steps の座標を連結した `coordinates` と、各 step の終端添字
   `stepEndIndices` を持つ。この 2 つが進捗計算の土台。
+
+### 音声案内（`VoicePromptScheduler` / `VoiceGuidance`）
+
+「どこで何を読むか」（純ロジック）と「実際に鳴らす」（オーディオセッション）を分けてある。
+`VoiceGuidance.shared.start()` を `AppDelegate` から 1 回呼ぶだけで動きだし、あとは
+`phase` / `progress` / `arrived` を購読して自走する。`NavigationController` 側は音声を知らない。
+
+- 予告は 1km / 500m / 200m / まもなく の 4 段階。**区間がしきい値の 1.4 倍より長いときだけ**
+  予告するので、300m の区間で「1キロ先」とは言わない。読んだしきい値は step ごとに記録し、
+  GPS が飛んで一気に近づいても、通り過ぎた予告を後追いで読まない。
+- リルートは `phase` のルート ID が変わったことで判定する。専用のイベントは足していない。
+- **オーディオセッションは鳴らす瞬間だけ有効にする**。カテゴリ設定
+  （`.playback` / `.voicePrompt` / `[.interruptSpokenAudioAndMixWithOthers, .duckOthers]`）は
+  1 度きり、読み上げごとに切り替えるのは有効・無効だけ。終わったら
+  `notifyOthersOnDeactivation` 付きで即座に手放す。**有効なままにすると音楽がダックされ続け、
+  ポッドキャストは一時停止したままになる。**
+- `session.promptStyle` はセッションを有効化する**前**に見る。`none`（通話中・Siri 中）なら
+  何もせず返るので、「鳴らす音が無いのにセッションを有効化しない」というガイドラインの
+  要求も同時に満たす。`short` のときは音声ファイルを同梱せずに済ませるため、16bit PCM の
+  WAV をその場で組み立ててトーンを鳴らす。
+
+### 目的地の保存（`DestinationStore`）
+
+履歴とお気に入りを UserDefaults に置くだけの薄い層。履歴は案内開始時に自動で積む。
+`Place` の同一性がこの土台になっているので、**`Place.id` を init で振り直さないこと**。
+`MKMapItem` の識別子、無ければ名前と座標（小数 5 桁 ≒ 1m に丸め）から組み立てる。
+UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に入り判定も壊れる。丸めるのは
+測位のわずかな揺れで別物にしないため。
 
 ### MapKit の制約と、その回避策
 
@@ -99,6 +133,20 @@ CarPlay 層は触らずに済む設計。
 - **`CarPlayCoordinator.beginSessionIfNeeded` の二重開始ガードを外さない**。
   iPhone 側で案内を始めた場合も同じ経路を通る。
 - リルートは失敗しても案内を止めない（次の位置更新で再試行）。`isRerouting` で多重計算を防ぐ。
+- **走行中はキーボードが塞がれる**。`CPSessionConfiguration.limitedUserInterfaces` に
+  `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
+  押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に
+  たどり着ける経路（お気に入り・履歴・周辺カテゴリ）を必ず残す。**
+- **Dashboard のシーンは来ないことがある**。CarPlay が必要と判断したときだけ作られるので、
+  接続されない前提で書く。ショートカットは 2 つまで、かつ案内中は出せない。
+  案内カードの中身は `CPMapTemplate` + `CPNavigationSession` を使っていれば CarPlay が自前で
+  描くため、Dashboard 側が受け持つのは地図とショートカットだけ。
+- **`CarPlayMapViewController` は 2 画面で共用**。`.compact`（Dashboard）はカメラ高度を
+  近づけ、目的地ピンを出さず、経路の線を細くする。狭い画面向けの差はこのクラスに集約する。
+- **昼夜（`contentStyle`）を扱うのはセンターディスプレイ側だけ**。地図は
+  `overrideUserInterfaceStyle` に流せば trait collection 経由で切り替わり、テンプレートは
+  CarPlay が自前で切り替える。Dashboard のシーンに `contentStyle` は無く、渡される
+  `UIWindow` の trait collection が昼夜をそのまま運んでくるので、あちらでは何もしない。
 
 ## 記述の慣習
 
@@ -107,6 +155,12 @@ CarPlay 層は触らずに済む設計。
 
 ## 未実装
 
-- **音声案内**: `maneuverChanged` と `UIBackgroundModes` の `audio` は用意済みだが、
-  読み上げ本体はまだ無い。
-- **履歴・お気に入り**: `Place` は共通の目的地型として設計済みだが、保存層は無い。
+当面のゴールは CarPlay entitlement（`com.apple.developer.carplay-maps`）の申請を通すこと。
+機能を足すかどうかは「申請を止めるか」で判断する。残っているのは以下。
+
+- **英語ローカライズ**: UI 文言は日本語のみで、`.lproj` も `.xcstrings` も無い。
+- **リルート中の `pauseTrip` / `resumeTrip`**: 逸脱時は `NavigationController` が経路を
+  差し替えるだけで、`CPNavigationSession` は張り替えずに使い回している。再計算中であることを
+  CarPlay 側へ伝えていない。
+- **CarPlay Simulator での通し確認**: 音声案内・目的地選択・Dashboard はいずれもコード上の
+  対応のみで、実際に走らせた確認はまだ。

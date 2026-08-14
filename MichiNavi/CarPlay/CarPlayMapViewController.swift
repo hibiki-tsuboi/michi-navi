@@ -7,6 +7,14 @@ import MapKit
 /// そのぶんは `view.safeAreaInsets` に入ってくるので、中心合わせや全体表示では
 /// 必ずこれを差し引く。差し引かないと自車位置が案内カードの裏に隠れる。
 final class CarPlayMapViewController: UIViewController {
+    enum Style {
+        /// センターディスプレイ。目的地ピンとズーム操作を伴う。
+        case full
+        /// ダッシュボード。狭いので余計なものを描かない（ガイド p.54）。
+        case compact
+    }
+
+    private let style: Style
     private let mapView = MKMapView()
     private var routeOverlay: MKPolyline?
     private var destinationAnnotation: MKPointAnnotation?
@@ -15,9 +23,30 @@ final class CarPlayMapViewController: UIViewController {
     private(set) var isFollowingUser = true
 
     /// 追従時のカメラ高度。ズームボタンで上下する。
-    private var cameraDistance: CLLocationDistance = 500
+    private var cameraDistance: CLLocationDistance
     private let minimumCameraDistance: CLLocationDistance = 200
     private let maximumCameraDistance: CLLocationDistance = 20_000
+
+    init(style: Style = .full) {
+        self.style = style
+        // ダッシュボードは面積が小さいので、同じ高度だと何も読み取れない。近づける。
+        cameraDistance = style == .full ? 500 : 300
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("Storyboard からは生成しない")
+    }
+
+    /// 車から渡される昼夜の指定を反映する（ガイド p.35）。
+    /// MKMapView は trait collection に追従するので、上書きするだけで地図ごと切り替わる。
+    ///
+    /// センターディスプレイ専用。ダッシュボードのシーンには contentStyle が無く、
+    /// 窓の trait collection がそのまま昼夜を運んでくるので何もしなくてよい。
+    func apply(contentStyle: UIUserInterfaceStyle) {
+        overrideUserInterfaceStyle = contentStyle
+    }
 
     override func loadView() {
         mapView.delegate = self
@@ -45,6 +74,10 @@ final class CarPlayMapViewController: UIViewController {
 
         mapView.addOverlay(route.polyline, level: .aboveRoads)
         routeOverlay = route.polyline
+
+        // ダッシュボードでは目的地ピンを出さない。狭い画面では読み取れないうえ、
+        // ガイドが求める「clutter の少ない最小限の地図」から外れる。
+        guard style == .full else { return }
 
         let pin = MKPointAnnotation()
         pin.coordinate = route.destination.coordinate
@@ -136,7 +169,7 @@ extension CarPlayMapViewController: MKMapViewDelegate {
 
         let renderer = MKPolylineRenderer(polyline: polyline)
         renderer.strokeColor = UIColor.systemBlue
-        renderer.lineWidth = 10
+        renderer.lineWidth = style == .full ? 10 : 8
         renderer.lineCap = .round
         renderer.lineJoin = .round
         return renderer

@@ -12,7 +12,13 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
                                   to window: CPWindow) {
         let coordinator = CarPlayCoordinator(interfaceController: interfaceController, window: window)
         coordinator.start()
+        coordinator.apply(contentStyle: templateApplicationScene.contentStyle)
         self.coordinator = coordinator
+    }
+
+    /// 車がトンネルや日没で昼夜を切り替えてくる。
+    func contentStyleDidChange(_ contentStyle: UIUserInterfaceStyle) {
+        coordinator?.apply(contentStyle: contentStyle)
     }
 
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene,

@@ -71,8 +71,24 @@ final class NavigationController: ObservableObject {
 
     // MARK: - 目的地の設定
 
-    /// 目的地までのルートを計算して提示状態に入る。
+    /// 目的地までのルートを計算して提示状態に入る。開始するかは利用者が選ぶ。
     func requestRoutes(to destination: Place) {
+        route(to: destination) { [weak self] routes in
+            self?.phase = .previewing(routes)
+        }
+    }
+
+    /// ルートを計算してそのまま案内を始める。
+    /// CarPlay Dashboard のショートカットのように、提示画面を見てもらえない
+    /// 場所から呼ばれる想定。
+    func startNavigation(to destination: Place) {
+        route(to: destination) { [weak self] routes in
+            guard let best = routes.first else { return }
+            self?.startNavigation(with: best)
+        }
+    }
+
+    private func route(to destination: Place, then handle: @escaping ([NavRoute]) -> Void) {
         routingTask?.cancel()
         lastError = nil
         phase = .calculating(destination)
@@ -81,7 +97,7 @@ final class NavigationController: ObservableObject {
             do {
                 let routes = try await calculateRoutes(to: destination)
                 guard !Task.isCancelled else { return }
-                phase = .previewing(routes)
+                handle(routes)
             } catch is CancellationError {
                 return
             } catch {

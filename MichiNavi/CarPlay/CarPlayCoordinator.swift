@@ -58,6 +58,12 @@ final class CarPlayCoordinator: NSObject {
         observeState()
     }
 
+    /// 車から渡される昼夜の指定を地図へ流す（ガイド p.35）。
+    /// テンプレート側は CarPlay が自前で切り替えるので、こちらは地図だけでよい。
+    func apply(contentStyle: UIUserInterfaceStyle) {
+        mapViewController.apply(contentStyle: contentStyle)
+    }
+
     func stop() {
         cancellables.removeAll()
         destinations = nil

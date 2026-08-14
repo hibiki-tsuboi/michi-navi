@@ -27,6 +27,9 @@ final class CarPlayCoordinator: NSObject {
     private var navigationSession: CPNavigationSession?
     private var currentTrip: CPTrip?
     private var activeManeuver: CPManeuver?
+    /// `pauseTrip` を出したかどうか。自分で止めたときだけ再開する。
+    /// 止めていないのに `resumeTrip` を投げると CarPlay 側の状態と食い違う。
+    private var isTripPaused = false
     private var cancellables = Set<AnyCancellable>()
 
     init(interfaceController: CPInterfaceController, window: CPWindow) {
@@ -71,6 +74,7 @@ final class CarPlayCoordinator: NSObject {
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
+        isTripPaused = false
     }
 
     private func observeState() {
@@ -90,6 +94,11 @@ final class CarPlayCoordinator: NSObject {
 
         navigation.maneuverChanged
             .sink { [weak self] in self?.updateManeuvers(route: $0.route, stepIndex: $0.stepIndex) }
+            .store(in: &cancellables)
+
+        navigation.$isRerouting
+            .removeDuplicates()
+            .sink { [weak self] in self?.apply(isRerouting: $0) }
             .store(in: &cancellables)
 
         navigation.arrived
@@ -201,6 +210,7 @@ final class CarPlayCoordinator: NSObject {
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
+        isTripPaused = false
     }
 
     private func cancelSession() {
@@ -208,7 +218,74 @@ final class CarPlayCoordinator: NSObject {
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
+        isTripPaused = false
     }
+
+    // MARK: - リルート中の一時停止
+
+    /// 再計算中であることを案内カードに出す。
+    ///
+    /// 経路を張り替えるのではなく、同じ `CPNavigationSession` を一時停止して、
+    /// 新しい経路の情報を渡して再開する。セッションを作り直すと `CPTrip` から
+    /// 組み直しになり、到着予定の表示が一度途切れる。
+    private func apply(isRerouting: Bool) {
+        guard let navigationSession else { return }
+
+        if isRerouting {
+            guard !isTripPaused else { return }
+            isTripPaused = true
+            // description に nil を渡すと CarPlay 側の既定文言（英語環境なら英語）になる。
+            // 他の画面の文言に合わせて日本語で出す。
+            navigationSession.pauseTrip(for: .rerouting, description: "ルートを再検索中")
+        } else {
+            guard isTripPaused else { return }
+            isTripPaused = false
+            resume(navigationSession)
+        }
+    }
+
+    /// 引き直した経路で案内を再開する。
+    ///
+    /// `resumeTrip(updatedRouteSegments:currentSegment:rerouteReason:)`（iOS 26.4）は
+    /// 経由地ごとに経路を区切る新しいモデルで、区間をセッション開始時から
+    /// `addRouteSegments` で積んでおく前提。目的地 1 つしか扱わない現状では
+    /// 得るものが無いので、17.4 からある `CPRouteInformation` の側を使う。
+    /// デプロイメントターゲットが 26.0 である以上、新しい方は `#available` で
+    /// 分岐しないと呼べず、どのみち古い方の実装は消せない。
+    /// なお 26.4 で非推奨になったが、26.0 が下限のうちは警告も出ない。
+    private func resume(_ session: CPNavigationSession) {
+        guard let route = navigation.currentRoute, !route.steps.isEmpty else { return }
+        let stepIndex = min(navigation.progress?.stepIndex ?? 0, route.steps.count - 1)
+
+        // 全区間ぶんをここで作り、現在の 2 件はその中から取る。別々に作ると
+        // `updateEstimates(for:)` の宛先とインスタンスが食い違う。
+        let maneuvers = route.steps.enumerated().map { index, step in
+            makeManeuver(for: step,
+                         on: route,
+                         distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
+        }
+        let upcoming = Array(maneuvers[stepIndex...].prefix(2))
+
+        let tripEstimates = CPTravelEstimates(
+            distanceRemaining: .meters(navigation.progress?.distanceRemaining ?? route.distance),
+            timeRemaining: navigation.progress?.timeRemaining ?? route.expectedTravelTime)
+
+        session.resumeTrip(updatedRouteInformation: CPRouteInformation(
+            maneuvers: maneuvers,
+            laneGuidances: [],
+            currentManeuvers: upcoming,
+            currentLaneGuidance: CPLaneGuidance(),
+            trip: tripEstimates,
+            maneuverTravelEstimates: upcoming.first?.initialTravelEstimates ?? tripEstimates))
+
+        // `CPRouteInformation` は車線案内を必須で要求するので空のものを渡しているが、
+        // セッション側は「無いなら nil」がヘッダの指定。空の車線表示が残らないよう戻す。
+        session.currentLaneGuidance = nil
+        session.upcomingManeuvers = upcoming
+        activeManeuver = upcoming.first
+    }
+
+    // MARK: - 案内カード
 
     /// 次の指示（と、その次）を CarPlay の案内カードに載せる。
     /// CarPlay は 2 件までしか表示しないので 2 件で切る。
@@ -216,17 +293,25 @@ final class CarPlayCoordinator: NSObject {
         guard route.steps.indices.contains(stepIndex) else { return }
 
         let maneuvers = route.steps[stepIndex...].prefix(2).enumerated().map { offset, step in
-            let maneuver = CPManeuver()
-            maneuver.instructionVariants = [step.instruction]
-            maneuver.symbolImage = ManeuverSymbol.image(for: step.instruction)
-            maneuver.initialTravelEstimates = CPTravelEstimates(
-                distanceRemaining: .meters(offset == 0 ? currentDistanceToManeuver(default: step.distance) : step.distance),
-                timeRemaining: estimatedTime(forDistance: step.distance, on: route))
-            return maneuver
+            makeManeuver(for: step,
+                         on: route,
+                         distance: offset == 0 ? currentDistanceToManeuver(default: step.distance) : step.distance)
         }
 
         navigationSession?.upcomingManeuvers = Array(maneuvers)
         activeManeuver = maneuvers.first
+    }
+
+    private func makeManeuver(for step: NavStep,
+                              on route: NavRoute,
+                              distance: CLLocationDistance) -> CPManeuver {
+        let maneuver = CPManeuver()
+        maneuver.instructionVariants = [step.instruction]
+        maneuver.symbolImage = ManeuverSymbol.image(for: step.instruction)
+        maneuver.initialTravelEstimates = CPTravelEstimates(
+            distanceRemaining: .meters(distance),
+            timeRemaining: estimatedTime(forDistance: step.distance, on: route))
+        return maneuver
     }
 
     private func currentDistanceToManeuver(default fallback: CLLocationDistance) -> CLLocationDistance {
@@ -327,6 +412,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
+        isTripPaused = false
         navigation.cancelNavigation()
     }
 

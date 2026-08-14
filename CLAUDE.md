@@ -53,7 +53,8 @@ idle ──requestRoutes──> calculating ──> previewing ──startNaviga
 
 Combine の使い分けにも意味がある:
 
-- `@Published`（`phase` / `progress` / `lastError`）= **いまの状態**。購読側は再描画すればよい。
+- `@Published`（`phase` / `progress` / `lastError` / `isRerouting`）= **いまの状態**。
+  購読側は再描画すればよい。
 - `PassthroughSubject`（`maneuverChanged` / `arrived`）= **その瞬間の出来事**。
   `CPManeuver` の差し替えのように、1 回だけ起こしたい副作用に使う。
   音声案内はこれではなく `progress` を見ている（後述）。
@@ -139,7 +140,16 @@ CarPlay 層は触らずに済む設計。
   テンプレート（上部バー・案内カード）が地図の上に重なるため、引かないと自車位置が裏に隠れる。
 - **`CarPlayCoordinator.beginSessionIfNeeded` の二重開始ガードを外さない**。
   iPhone 側で案内を始めた場合も同じ経路を通る。
-- リルートは失敗しても案内を止めない（次の位置更新で再試行）。`isRerouting` で多重計算を防ぐ。
+- リルートは失敗しても案内を止めない（次の位置更新で再試行）。多重計算は
+  `isCalculatingReroute` で防ぐ。**公開している `isRerouting` と混同しない**。前者は計算が
+  走っているあいだだけ、後者は経路に戻るまで（失敗して再試行している最中も）立ち続ける。
+  分けてあるのは、再試行のたびに CarPlay の「再検索中」カードが点滅するのを避けるため。
+- **リルート中も `CPNavigationSession` は張り替えず、`pauseTrip` / `resumeTrip` で繋ぐ**。
+  作り直すと `CPTrip` から組み直しになり、到着予定の表示が一度途切れる。再開に使う
+  `resumeTrip(updatedRouteInformation:)` は iOS 26.4 で非推奨になったが、後継
+  （`CPRouteSegment` を経由地ごとに積むモデル）は目的地 1 つの現状では得るものが無く、
+  デプロイメントターゲットが 26.0 のうちは `#available` 分岐が要って古い実装も消せない。
+  26.0 が下限なら非推奨の警告も出ないので、当面は乗り換えない。
 - **走行中はキーボードが塞がれる**。`CPSessionConfiguration.limitedUserInterfaces` に
   `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
   押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に
@@ -178,6 +188,5 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 通しで確認済み。残っているのは以下。
 
 - **英語ローカライズ**: UI 文言は日本語のみで、`.lproj` も `.xcstrings` も無い。
-- **リルート中の `pauseTrip` / `resumeTrip`**: 逸脱時は `NavigationController` が経路を
-  差し替えるだけで、`CPNavigationSession` は張り替えずに使い回している。再計算中であることを
-  CarPlay 側へ伝えていない。
+- **リルート中の一時停止の実走確認**: `pauseTrip` / `resumeTrip` は実装したが、
+  実際に経路を外れて「再検索中」カードが出て消えるところまでは走らせていない。

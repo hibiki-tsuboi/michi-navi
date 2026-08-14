@@ -35,6 +35,14 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// 経路を外れて引き直している最中。
+    ///
+    /// 「いまの状態」なので `@Published`。CarPlay はこれを見て案内カードを
+    /// 「再検索中」に差し替える（`pauseTrip` / `resumeTrip`）。
+    /// **引き直しに失敗しても下ろさない**。次の位置更新で再試行するあいだ何度も
+    /// 上げ下げすると、カードが点滅して逆に何が起きているか分からなくなる。
+    @Published private(set) var isRerouting = false
+
     /// 案内中に次の指示が変わった瞬間だけ流れる。音声読み上げと
     /// CarPlay の `CPManeuver` 差し替えのトリガーになる。
     let maneuverChanged = PassthroughSubject<(route: NavRoute, stepIndex: Int), Never>()
@@ -49,8 +57,9 @@ final class NavigationController: ObservableObject {
     private var routingTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
-    /// リルート中に何度も計算を投げないためのフラグ。
-    private var isRerouting = false
+    /// リルート計算がいま走っているか。何度も計算を投げないためだけのフラグで、
+    /// 公開している `isRerouting` とは寿命が違う（失敗すれば即座に下りて再試行できる）。
+    private var isCalculatingReroute = false
 
     private init() {
         location.$location
@@ -91,6 +100,8 @@ final class NavigationController: ObservableObject {
     private func route(to destination: Place, then handle: @escaping ([NavRoute]) -> Void) {
         routingTask?.cancel()
         lastError = nil
+        // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
+        isRerouting = false
         phase = .calculating(destination)
 
         routingTask = Task {
@@ -128,6 +139,10 @@ final class NavigationController: ObservableObject {
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
         if let current = location.location { handle(location: current) }
+
+        // 下ろすのは最後。CarPlay はこの立ち下がりで `resumeTrip` するので、
+        // 新しい経路と最初の進捗が揃う前に下ろすと古い情報で再開してしまう。
+        isRerouting = false
     }
 
     func cancelNavigation() {
@@ -136,6 +151,7 @@ final class NavigationController: ObservableObject {
         guidance = nil
         announcedStepIndex = nil
         progress = nil
+        isCalculatingReroute = false
         isRerouting = false
         phase = .idle
         location.setNavigating(false)
@@ -168,15 +184,17 @@ final class NavigationController: ObservableObject {
 
     /// 経路を外れたときに、いまの位置から同じ目的地へ引き直す。
     private func reroute(to destination: Place) {
-        guard !isRerouting else { return }
+        guard !isCalculatingReroute else { return }
+        isCalculatingReroute = true
         isRerouting = true
 
         routingTask?.cancel()
         routingTask = Task {
-            defer { isRerouting = false }
+            defer { isCalculatingReroute = false }
             do {
                 let routes = try await calculateRoutes(to: destination)
                 guard !Task.isCancelled, let best = routes.first else { return }
+                // 経路に戻せたときだけ `isRerouting` が下りる（startNavigation の末尾）。
                 startNavigation(with: best)
             } catch {
                 // 引き直しに失敗しても案内は止めない。次の位置更新でまた試す。

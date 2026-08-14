@@ -141,6 +141,17 @@ CarPlay 層は触らずに済む設計。
   接続されない前提で書く。ショートカットは 2 つまで、かつ案内中は出せない。
   案内カードの中身は `CPMapTemplate` + `CPNavigationSession` を使っていれば CarPlay が自前で
   描くため、Dashboard 側が受け持つのは地図とショートカットだけ。
+- **`shortcutButtons` に空配列を代入しない**。CarPlay ホスト
+  （`CPSDashboardGuidanceViewController.setShortCutButtons:`）は「ちょうど 1 件」と「それ以外」で
+  レイアウトを分けていて、0 件は後者に落ちる。そこで `firstObject` / `lastObject` が nil のまま
+  制約に使われ、`NSArray` の生成で例外 → CarPlayTemplateUIHost が落ちる（iOS 26.5 で確認。
+  履歴が空のまま Dashboard を繋ぐと必ず再現する）。**案内中に隠すのは CarPlay の仕事**で、
+  `showManeuvers:` でショートカット欄を畳み `didEndTrip:` で戻すため、こちらから消さなくてよい。
+- **アプリのプロセスが落ちると CarPlay ホストも道連れになる**（シミュレータ限定・Apple 側のバグ）。
+  `CPSMapTemplateViewController._updateShareButtonVisibility` が
+  `CPSTemplateInstance` の実装していない `vehicleSupportsDestinationSharing` を
+  `respondsToSelector:` も見ずに呼ぶため。Xcode の再ビルド・再インストールのたびに
+  CarPlayTemplateUIHost のクラッシュログが増えるが、**こちらのバグではない**ので追わないこと。
 - **`CarPlayMapViewController` は 2 画面で共用**。`.compact`（Dashboard）はカメラ高度を
   近づけ、目的地ピンを出さず、経路の線を細くする。狭い画面向けの差はこのクラスに集約する。
 - **昼夜（`contentStyle`）を扱うのはセンターディスプレイ側だけ**。地図は
@@ -162,5 +173,6 @@ CarPlay 層は触らずに済む設計。
 - **リルート中の `pauseTrip` / `resumeTrip`**: 逸脱時は `NavigationController` が経路を
   差し替えるだけで、`CPNavigationSession` は張り替えずに使い回している。再計算中であることを
   CarPlay 側へ伝えていない。
-- **CarPlay Simulator での通し確認**: 音声案内・目的地選択・Dashboard はいずれもコード上の
-  対応のみで、実際に走らせた確認はまだ。
+- **CarPlay Simulator での通し確認**: Dashboard のシーン接続だけは確認済み（履歴 0 件・2 件の
+  どちらでも落ちない）。上のショートカット空配列のクラッシュはここで見つけた。
+  画面の見た目・音声案内・目的地選択は、実際に走らせた確認がまだ。

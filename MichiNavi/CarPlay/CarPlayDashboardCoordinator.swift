@@ -38,7 +38,6 @@ final class CarPlayDashboardCoordinator {
 
     func stop() {
         cancellables.removeAll()
-        dashboardController.shortcutButtons = []
     }
 
     private func observeState() {
@@ -68,19 +67,20 @@ final class CarPlayDashboardCoordinator {
             mapViewController.show(route: route)
             mapViewController.recenter()
         }
-        updateShortcuts()
     }
 
     /// ショートカットは案内していないときだけ表示される（ガイド p.54）。
     /// 押したらそのまま案内を始める。ダッシュボードを見ている人に
     /// センターディスプレイ側の確認画面を探させないため。
+    ///
+    /// **空配列を代入しないこと**。CarPlay 側は「ちょうど 1 件」と「それ以外」で
+    /// レイアウトを分けており、0 件は後者に落ちて先頭・末尾のボタンが nil のまま
+    /// 制約の配列に入る。CarPlayTemplateUIHost が `NSArray` の生成で例外を投げて落ちる
+    /// （履歴が空のまま Dashboard を繋ぐと必ず再現する）。
+    /// 隠す必要があるとき（案内中）は CarPlay が自前でやってくれる。曲がり方を出すときに
+    /// ショートカット欄を畳み、案内が終わると戻す。こちらから消しにいかなくてよい。
     private func updateShortcuts() {
-        guard case .idle = navigation.phase else {
-            dashboardController.shortcutButtons = []
-            return
-        }
-
-        dashboardController.shortcutButtons = store.recents
+        let buttons = store.recents
             .prefix(Self.maximumButtons)
             .map { place in
                 CPDashboardButton(titleVariants: [place.name],
@@ -89,6 +89,9 @@ final class CarPlayDashboardCoordinator {
                     self?.navigation.startNavigation(to: place)
                 }
             }
+        guard !buttons.isEmpty else { return }
+
+        dashboardController.shortcutButtons = buttons
     }
 
     private static let shortcutImage: UIImage = {

@@ -10,17 +10,6 @@
 		<true/>
 		<key>UISceneConfigurations</key>
 		<dict>
-			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneClassName</key>
-					<string>CPTemplateApplicationScene</string>
-					<key>UISceneConfigurationName</key>
-					<string>MichiNavi-CarPlay</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
-				</dict>
-			</array>
 			<key>CPTemplateApplicationDashboardSceneSessionRoleApplication</key>
 			<array>
 				<dict>
@@ -32,6 +21,17 @@
 					<string>$(PRODUCT_MODULE_NAME).CarPlayDashboardSceneDelegate</string>
 				</dict>
 			</array>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>MichiNavi-CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
 		</dict>
 	</dict>
 	<key>UIBackgroundModes</key>
@@ -39,9 +39,5 @@
 		<string>audio</string>
 		<string>location</string>
 	</array>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>現在地の表示と目的地までのルート案内に位置情報を使用します。</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>画面を消していても案内を続けるため、バックグラウンドでも位置情報を使用します。</string>
 </dict>
 </plist>

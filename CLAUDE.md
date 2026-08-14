@@ -11,6 +11,9 @@ MichiNavi は CarPlay 対応のカーナビ iOS アプリ。地図・検索・�
 # ビルド（動作確認済みの destination）
 xcodebuild -scheme MichiNavi -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 
+# 実機向け（署名まで通す）
+xcodebuild -scheme MichiNavi -destination 'generic/platform=iOS' build
+
 # Xcode で開く
 xed .
 ```
@@ -20,8 +23,12 @@ xed .
   迷ったら `xcodebuild -scheme MichiNavi -showdestinations` で候補を出す。
 - **テストターゲットは存在しない**。追加するまで `xcodebuild test` は使えない。
 - **CarPlay 画面の確認**: シミュレータ起動後、メニューの I/O → External Displays → CarPlay。
-  実機の CarPlay は `com.apple.developer.carplay-maps` の Apple 承認と専用プロビジョニング
-  プロファイルが必要で、承認前は実機ビルドが署名で通らない。
+  `com.apple.developer.carplay-maps` は 2026-08-15 に Apple の承認が下りたので、実機の
+  CarPlay でも動かせる。
+- **制限付き entitlement は、アカウントへの承認だけでは足りない**。App ID 側でケイパビリティを
+  有効化しないとプロビジョニングプロファイルに含まれず、承認前とまったく同じ
+  `Entitlement com.apple.developer.carplay-maps not found and could not be included in profile.`
+  で実機ビルドが落ちる。`jp.hibiki.michinavi` では設定済み。バンドル ID を増やすときは同じ作業が要る。
 - **ファイル追加は `MichiNavi/` に置くだけ**。`PBXFileSystemSynchronizedRootGroup` を使っているので
   ターゲットへの登録は自動。`project.pbxproj` を手で編集しない。
 
@@ -166,13 +173,11 @@ CarPlay 層は触らずに済む設計。
 
 ## 未実装
 
-当面のゴールは CarPlay entitlement（`com.apple.developer.carplay-maps`）の申請を通すこと。
-機能を足すかどうかは「申請を止めるか」で判断する。残っているのは以下。
+CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承認され、当面の
+ゴールだった申請は通った。同日に実機の CarPlay で画面の見た目・音声案内・目的地選択まで
+通しで確認済み。残っているのは以下。
 
 - **英語ローカライズ**: UI 文言は日本語のみで、`.lproj` も `.xcstrings` も無い。
 - **リルート中の `pauseTrip` / `resumeTrip`**: 逸脱時は `NavigationController` が経路を
   差し替えるだけで、`CPNavigationSession` は張り替えずに使い回している。再計算中であることを
   CarPlay 側へ伝えていない。
-- **CarPlay Simulator での通し確認**: Dashboard のシーン接続だけは確認済み（履歴 0 件・2 件の
-  どちらでも落ちない）。上のショートカット空配列のクラッシュはここで見つけた。
-  画面の見た目・音声案内・目的地選択は、実際に走らせた確認がまだ。

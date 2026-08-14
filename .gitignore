@@ -1,0 +1,48 @@
+# ── macOS ──
+.DS_Store
+
+# ── Xcode: ユーザー固有の状態 ──
+# ウィンドウ位置・ブレークポイント・個人スキームなど。人によって必ず衝突するため除外。
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# ── ビルド生成物 ──
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+# ── Swift Package Manager ──
+# Package.resolved は依存バージョンを固定するので、追加したら必ずコミットする。
+.build/
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+
+# ── 署名まわり（絶対にコミットしない）──
+# CarPlay entitlement の承認後、専用プロビジョニングプロファイルを扱うことになるため
+# 事故防止として先に入れておく。証明書と秘密鍵も同様。
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.certSigningRequest
+
+# ── APIキー・秘密情報 ──
+# ルート計算を MapKit 以外に差し替えるとトークンが必要になる。
+.env
+.env.*
+Secrets.xcconfig
+
+# ── fastlane（導入したら）──
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# ── Claude Code のローカル設定 ──
+# settings.json は共有してよいが、local はマシン固有の許可設定なので除外。
+.claude/settings.local.json

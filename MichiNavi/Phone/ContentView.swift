@@ -1,0 +1,201 @@
+import MapKit
+import SwiftUI
+
+/// iPhone 側の画面。CarPlay と同じ `NavigationController` を見ているので、
+/// どちらで目的地を決めても両方の画面がついてくる。
+struct ContentView: View {
+    @EnvironmentObject private var navigation: NavigationController
+    @ObservedObject private var location = LocationService.shared
+
+    @State private var cameraPosition: MapCameraPosition = .userLocation(fallback: .automatic)
+    @State private var isSearchPresented = false
+
+    var body: some View {
+        Map(position: $cameraPosition) {
+            UserAnnotation()
+
+            if let route = displayedRoute {
+                MapPolyline(route.polyline)
+                    .stroke(.blue, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                Marker(route.destination.name, coordinate: route.destination.coordinate)
+            }
+        }
+        .mapControls {
+            MapUserLocationButton()
+            MapCompass()
+        }
+        .safeAreaInset(edge: .top) { topBar }
+        .safeAreaInset(edge: .bottom) { bottomPanel }
+        .sheet(isPresented: $isSearchPresented) {
+            SearchSheet { place in
+                isSearchPresented = false
+                navigation.requestRoutes(to: place)
+            }
+        }
+        .onChange(of: navigation.phase) { _, phase in
+            // ルートが出たら全体が見えるよう引き、案内が始まったら自車に寄る。
+            switch phase {
+            case .previewing:
+                if let route = displayedRoute {
+                    cameraPosition = .rect(route.polyline.boundingMapRect.padded(by: 1.4))
+                }
+            case .navigating:
+                cameraPosition = .userLocation(followsHeading: true, fallback: .automatic)
+            default:
+                break
+            }
+        }
+    }
+
+    private var displayedRoute: NavRoute? {
+        switch navigation.phase {
+        case let .previewing(routes): routes.first
+        case let .navigating(route): route
+        default: nil
+        }
+    }
+
+    // MARK: - 上部
+
+    @ViewBuilder
+    private var topBar: some View {
+        if case let .navigating(route) = navigation.phase {
+            ManeuverBanner(route: route, progress: navigation.progress)
+                .padding(.horizontal)
+        } else {
+            Button {
+                isSearchPresented = true
+            } label: {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                    Text("目的地を検索")
+                    Spacer()
+                }
+                .padding(12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
+        }
+    }
+
+    // MARK: - 下部
+
+    @ViewBuilder
+    private var bottomPanel: some View {
+        switch navigation.phase {
+        case .idle:
+            if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
+                notice("設定アプリで位置情報の利用を許可してください")
+            }
+
+        case let .calculating(place):
+            HStack(spacing: 12) {
+                ProgressView()
+                Text("\(place.name) までのルートを計算中…")
+                Spacer()
+                Button("中止") { navigation.cancelNavigation() }
+            }
+            .panel()
+
+        case let .previewing(routes):
+            if let route = routes.first {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(route.destination.name).font(.headline)
+                    Text(Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button("やめる") { navigation.cancelNavigation() }
+                            .buttonStyle(.bordered)
+                        Button("案内開始") { navigation.startNavigation(with: route) }
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .panel()
+            }
+
+        case .navigating:
+            HStack {
+                if let progress = navigation.progress {
+                    VStack(alignment: .leading) {
+                        Text(Formatters.durationText(progress.timeRemaining)).font(.title3.bold())
+                        Text("\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button("案内終了", role: .destructive) { navigation.cancelNavigation() }
+                    .buttonStyle(.bordered)
+            }
+            .panel()
+        }
+    }
+
+    private func notice(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panel()
+    }
+}
+
+// MARK: - 次の指示バナー
+
+private struct ManeuverBanner: View {
+    let route: NavRoute
+    let progress: RouteProgress?
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "arrow.turn.up.right")
+                .font(.system(size: 32, weight: .semibold))
+
+            VStack(alignment: .leading, spacing: 2) {
+                if let progress {
+                    Text(Formatters.distanceText(progress.distanceToNextManeuver))
+                        .font(.title2.bold())
+                    Text(instruction(at: progress.stepIndex))
+                        .font(.subheadline)
+                        .lineLimit(2)
+                } else {
+                    Text("案内を開始しています…").font(.subheadline)
+                }
+            }
+            Spacer()
+        }
+        .foregroundStyle(.white)
+        .padding()
+        .background(.blue, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func instruction(at index: Int) -> String {
+        route.steps.indices.contains(index) ? route.steps[index].instruction : "目的地に向かっています"
+    }
+}
+
+// MARK: - 共通の見た目
+
+private extension View {
+    func panel() -> some View {
+        padding()
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal)
+    }
+}
+
+private extension MKMapRect {
+    /// ルート全体を表示するときの余白。
+    func padded(by factor: Double) -> MKMapRect {
+        let widthDelta = size.width * (factor - 1) / 2
+        let heightDelta = size.height * (factor - 1) / 2
+        return insetBy(dx: -widthDelta, dy: -heightDelta)
+    }
+}
+
+#Preview {
+    ContentView().environmentObject(NavigationController.shared)
+}

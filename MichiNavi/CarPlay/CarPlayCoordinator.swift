@@ -32,6 +32,13 @@ final class CarPlayCoordinator: NSObject {
     private var isTripPaused = false
     /// ドラッグ中に受け取った累積移動量。差分を出すために覚えておく。
     private var lastPanTranslation: CGPoint = .zero
+
+    /// いま案内している経路の全 `CPManeuver`。`upcomingManeuvers` に載せるものも
+    /// `CPRouteInformation` に渡すものも、必ずこの配列から取る。別インスタンスを混ぜると
+    /// `updateEstimates(for:)` の宛先が食い違う。
+    private var routeManeuvers: [CPManeuver] = []
+    /// `routeManeuvers` がどの経路のものか。リルートで作り直す判断に使う。
+    private var maneuverRouteID: UUID?
     private var cancellables = Set<AnyCancellable>()
 
     init(interfaceController: CPInterfaceController, window: CPWindow) {
@@ -73,9 +80,17 @@ final class CarPlayCoordinator: NSObject {
         cancellables.removeAll()
         destinations = nil
         sessionConfiguration = nil
+        clearSession()
+    }
+
+    /// セッションまわりの持ち物を一度に捨てる。終了・中止・シーン切断で通る道が
+    /// 4 本あり、片方だけ足し忘れると次の案内に前回の残骸が混ざる。
+    private func clearSession() {
         navigationSession = nil
         currentTrip = nil
         activeManeuver = nil
+        routeManeuvers = []
+        maneuverRouteID = nil
         isTripPaused = false
     }
 
@@ -156,6 +171,7 @@ final class CarPlayCoordinator: NSObject {
                 CPTravelEstimates(distanceRemaining: .meters(progress.distanceToNextManeuver),
                                   timeRemaining: timeToManeuver),
                 for: activeManeuver)
+            navigationSession?.maneuverState = maneuverState(forDistance: progress.distanceToNextManeuver)
         }
     }
 
@@ -201,26 +217,19 @@ final class CarPlayCoordinator: NSObject {
         let trip = currentTrip ?? makeTrip(for: [route])
         currentTrip = trip
         navigationSession = mapTemplate.startNavigationSession(for: trip)
-
-        if let progress = navigation.progress {
-            updateManeuvers(route: route, stepIndex: progress.stepIndex)
-        }
+        // 進捗が出る前でも先に全区間を渡す。車のメーターや HUD へは
+        // 「できるだけ早く、できるだけ多く」渡すのが決まり（ガイド p.56）。
+        rebuildManeuvers(for: route, stepIndex: navigation.progress?.stepIndex ?? 0)
     }
 
     private func finishSession() {
         navigationSession?.finishTrip()
-        navigationSession = nil
-        currentTrip = nil
-        activeManeuver = nil
-        isTripPaused = false
+        clearSession()
     }
 
     private func cancelSession() {
         navigationSession?.cancelTrip()
-        navigationSession = nil
-        currentTrip = nil
-        activeManeuver = nil
-        isTripPaused = false
+        clearSession()
     }
 
     // MARK: - リルート中の一時停止
@@ -256,24 +265,18 @@ final class CarPlayCoordinator: NSObject {
     /// 分岐しないと呼べず、どのみち古い方の実装は消せない。
     /// なお 26.4 で非推奨になったが、26.0 が下限のうちは警告も出ない。
     private func resume(_ session: CPNavigationSession) {
-        guard let route = navigation.currentRoute, !route.steps.isEmpty else { return }
-        let stepIndex = min(navigation.progress?.stepIndex ?? 0, route.steps.count - 1)
-
-        // 全区間ぶんをここで作り、現在の 2 件はその中から取る。別々に作ると
-        // `updateEstimates(for:)` の宛先とインスタンスが食い違う。
-        let maneuvers = route.steps.enumerated().map { index, step in
-            makeManeuver(for: step,
-                         on: route,
-                         distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
-        }
-        let upcoming = Array(maneuvers[stepIndex...].prefix(2))
+        // 経路の差し替えは maneuverChanged が先に済ませているので、ここでは
+        // 出来上がっている routeManeuvers をそのまま渡す。
+        guard let route = navigation.currentRoute, !routeManeuvers.isEmpty else { return }
+        let stepIndex = min(navigation.progress?.stepIndex ?? 0, routeManeuvers.count - 1)
+        let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
 
         let tripEstimates = CPTravelEstimates(
             distanceRemaining: .meters(navigation.progress?.distanceRemaining ?? route.distance),
             timeRemaining: navigation.progress?.timeRemaining ?? route.expectedTravelTime)
 
         session.resumeTrip(updatedRouteInformation: CPRouteInformation(
-            maneuvers: maneuvers,
+            maneuvers: routeManeuvers,
             laneGuidances: [],
             currentManeuvers: upcoming,
             currentLaneGuidance: CPLaneGuidance(),
@@ -289,31 +292,68 @@ final class CarPlayCoordinator: NSObject {
 
     // MARK: - 案内カード
 
-    /// 次の指示（と、その次）を CarPlay の案内カードに載せる。
-    /// CarPlay は 2 件までしか表示しないので 2 件で切る。
     private func updateManeuvers(route: NavRoute, stepIndex: Int) {
-        guard route.steps.indices.contains(stepIndex) else { return }
+        if maneuverRouteID == route.id {
+            showManeuvers(from: stepIndex)
+        } else {
+            // リルートで経路が入れ替わった。作り直して渡し直す。
+            rebuildManeuvers(for: route, stepIndex: stepIndex)
+        }
+    }
 
-        let maneuvers = route.steps[stepIndex...].prefix(2).enumerated().map { offset, step in
+    /// 経路の全区間を `CPManeuver` にして、セッションへ渡す。
+    ///
+    /// `upcomingManeuvers` に載せるものは、先に `addManeuvers` で渡しておく決まり
+    /// （iOS 17.4 以降）。ここで渡した並びが車のメーター・HUD へ送られる。
+    private func rebuildManeuvers(for route: NavRoute, stepIndex: Int) {
+        routeManeuvers = route.steps.enumerated().map { index, step in
             makeManeuver(for: step,
                          on: route,
-                         distance: offset == 0 ? currentDistanceToManeuver(default: step.distance) : step.distance)
+                         distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
         }
+        maneuverRouteID = route.id
 
-        navigationSession?.upcomingManeuvers = Array(maneuvers)
-        activeManeuver = maneuvers.first
+        navigationSession?.add(routeManeuvers)
+        showManeuvers(from: stepIndex)
+    }
+
+    /// 次の指示（と、その次）を CarPlay の案内カードに載せる。
+    /// CarPlay は 2 件までしか表示しないので 2 件で切る。
+    private func showManeuvers(from stepIndex: Int) {
+        guard routeManeuvers.indices.contains(stepIndex) else { return }
+
+        let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
+        navigationSession?.upcomingManeuvers = upcoming
+        // 指示が切り替わった直後であることを車へ伝える。
+        // 以降は距離に応じて apply(progress:) が prepare / execute へ進める。
+        navigationSession?.maneuverState = .initial
+        activeManeuver = upcoming.first
     }
 
     private func makeManeuver(for step: NavStep,
                               on route: NavRoute,
                               distance: CLLocationDistance) -> CPManeuver {
+        let kind = ManeuverKind.inferred(from: step.instruction)
+
         let maneuver = CPManeuver()
         maneuver.instructionVariants = [step.instruction]
-        maneuver.symbolImage = ManeuverSymbol.image(for: step.instruction)
+        maneuver.symbolImage = kind.image
+        // 画面のアイコンだけでなく、車のメーター・HUD へもこの型で送られる。
+        maneuver.maneuverType = kind.type
         maneuver.initialTravelEstimates = CPTravelEstimates(
             distanceRemaining: .meters(distance),
             timeRemaining: estimatedTime(forDistance: step.distance, on: route))
         return maneuver
+    }
+
+    /// 曲がる地点までの距離から、車に見せる段階を決める。
+    /// しきい値は音声の予告（`VoicePromptScheduler`）と揃えてある。
+    private func maneuverState(forDistance meters: CLLocationDistance) -> CPManeuverState {
+        switch meters {
+        case ..<200: .execute
+        case ..<1_000: .prepare
+        default: .continue
+        }
     }
 
     private func currentDistanceToManeuver(default fallback: CLLocationDistance) -> CLLocationDistance {
@@ -433,6 +473,13 @@ final class CarPlayCoordinator: NSObject {
 // MARK: - CPMapTemplateDelegate
 
 extension CarPlayCoordinator: CPMapTemplateDelegate {
+    /// 案内の内容を車へ渡すことを宣言する。これを true にして初めて、
+    /// `CPManeuver.maneuverType` などがメーターや HUD に送られる（ガイド p.56）。
+    /// デジタルメーターを持たない車でも受け取れるので、常に渡す。
+    func mapTemplateShouldProvideNavigationMetadata(_ mapTemplate: CPMapTemplate) -> Bool {
+        true
+    }
+
     func mapTemplate(_ mapTemplate: CPMapTemplate, startedTrip trip: CPTrip, using routeChoice: CPRouteChoice) {
         mapTemplate.hideTripPreviews()
         guard let route = route(for: routeChoice) else { return }
@@ -440,10 +487,8 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     }
 
     func mapTemplateDidCancelNavigation(_ mapTemplate: CPMapTemplate) {
-        navigationSession = nil
-        currentTrip = nil
-        activeManeuver = nil
-        isTripPaused = false
+        // CarPlay 側が既に畳んでいるので finishTrip / cancelTrip は呼ばない。
+        clearSession()
         navigation.cancelNavigation()
     }
 

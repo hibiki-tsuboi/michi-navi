@@ -117,9 +117,12 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 
 1. **step ごとの所要時間を返さない** → 経路全体の平均速度で距離按分している
    （`GuidanceEngine.update` と `CarPlayCoordinator.estimatedTime` の 2 か所）。
-2. **maneuver type（曲がる向きの列挙）が非公開** → `ManeuverSymbol` が
-   「右折します」等の**指示文の文言マッチ**でアイコンを決めている。日英どちらも見る。
+2. **maneuver type（曲がる向きの列挙）を返さない** → `ManeuverKind` が
+   「右折します」等の**指示文の文言マッチ**で推測する。日英どちらも見る。
    ルールは上から順に評価するため、長い語（「斜め右」）を短い語（「右」）より必ず先に置く。
+   「ロータリー」が「出口」より先なのも同じ理由で、逆にすると「2 番目の出口で出る」が
+   高速の出口になる。**ここで決めた型は画面のアイコンだけでなく、`CPManeuver.maneuverType`
+   として車のメーター・HUD にも送られる**（後述）ので、外すと両方が同時にずれる。
 
 Mapbox / Valhalla などに差し替えるときは `RouteProviding` の実装を足すだけで、
 CarPlay 層は触らずに済む設計。
@@ -136,6 +139,16 @@ CarPlay 層は触らずに済む設計。
   `LocationService.setNavigating` がガード済み。「常に許可」は Apple の推奨順序に従い、
   案内を開始してから初めて求める。
 - **CarPlay の `upcomingManeuvers` は 2 件までしか表示されない**ので 2 件で切っている。
+- **案内の内容は車のメーター・HUD にも送っている**（ガイド p.56）。
+  `mapTemplateShouldProvideNavigationMetadata` が true を返すことで有効になり、
+  `CPManeuver.maneuverType` と `CPNavigationSession.maneuverState` が車へ渡る。
+  デジタルメーターの無い車でも受け取れる。`upcomingManeuvers` に載せるものは先に
+  `add(_:)` でセッションへ渡す決まりなので、`routeManeuvers` に全区間を作ってから
+  そこを切り出している。**別インスタンスを混ぜない**こと（`updateEstimates(for:)` の
+  宛先が食い違う）。
+- **`CPManeuver.trafficSide` は設定していない**。ロータリーの回転方向に効くが、走行国を
+  MapKit は教えてくれず、`Place` も国コードを持たない（履歴から戻した `MKMapItem` は
+  座標だけ）。既定の右側通行のままなので、日本のロータリーでは向きが逆になる。
 - **CarPlay の地図では中心合わせ・全体表示で `view.safeAreaInsets` を必ず差し引く**。
   テンプレート（上部バー・案内カード）が地図の上に重なるため、引かないと自車位置が裏に隠れる。
 - **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or

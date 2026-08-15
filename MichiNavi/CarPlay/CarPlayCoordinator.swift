@@ -575,6 +575,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdatePanGestureWithTranslation translation: CGPoint,
                      velocity: CGPoint) {
+        CarPlayGestureLog.drag(translation: translation, velocity: velocity)
         mapViewController.pan(by: translation, animated: false)
     }
 
@@ -585,6 +586,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// `#selector(CPMapTemplateDelegate.xxx)` が解決するかで確かめること。
 
     func mapTemplateDidBeginZoomGesture(_ mapTemplate: CPMapTemplate) {
+        CarPlayGestureLog.zoomBegan()
         mapViewController.beginZoomGesture()
     }
 
@@ -602,19 +604,24 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
                      didUpdateZoomGestureWithCenter center: CGPoint,
                      scale: CGFloat,
                      velocity: CGFloat) {
-        guard scale != 1 || abs(velocity) != 1 else {
+        let isTap = scale == 1 && abs(velocity) == 1
+        if isTap {
             // タップ。拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
             if velocity > 0 { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
-            return
+        } else {
+            mapViewController.zoom(toScale: scale)
         }
-        mapViewController.zoom(toScale: scale)
+        CarPlayGestureLog.zoom(center: center, scale: scale, velocity: velocity,
+                               isTap: isTap, camera: mapViewController.cameraSummary)
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, didEndZoomGestureWithVelocity velocity: CGFloat) {
+        CarPlayGestureLog.zoomEnded(velocity: velocity)
         mapViewController.endZoomGesture()
     }
 
     func mapTemplateDidBeginRotationGesture(_ mapTemplate: CPMapTemplate) {
+        CarPlayGestureLog.rotationBegan()
         mapViewController.beginRotationGesture()
     }
 
@@ -623,21 +630,27 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
                      rotation: CGFloat,
                      velocity: CGFloat) {
         mapViewController.rotate(byRadians: rotation)
+        CarPlayGestureLog.rotation(center: center, radians: rotation, velocity: velocity,
+                                   camera: mapViewController.cameraSummary)
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, rotationDidEndWithVelocity velocity: CGFloat) {
+        CarPlayGestureLog.rotationEnded(velocity: velocity)
         mapViewController.endRotationGesture()
     }
 
     func mapTemplateDidBeginPitchGesture(_ mapTemplate: CPMapTemplate) {
+        CarPlayGestureLog.pitchBegan()
         mapViewController.beginPitchGesture()
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, pitchWithCenter center: CGPoint) {
         mapViewController.pitch(towards: center)
+        CarPlayGestureLog.pitch(center: center, camera: mapViewController.cameraSummary)
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, pitchEndedWithCenter center: CGPoint) {
+        CarPlayGestureLog.pitchEnded(center: center)
         mapViewController.endPitchGesture()
     }
 
@@ -651,6 +664,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         if direction.contains(.right) { translation.x -= step }
         if direction.contains(.up) { translation.y += step }
         if direction.contains(.down) { translation.y -= step }
+        CarPlayGestureLog.pan(direction: direction)
         mapViewController.pan(by: translation)
     }
 }

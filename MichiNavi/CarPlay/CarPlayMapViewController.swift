@@ -351,6 +351,17 @@ final class CarPlayMapViewController: UIViewController {
         lastPitchCenter = nil
     }
 
+    /// `CarPlayGestureLog` へ渡すカメラの要約。渡した値と出た結果を 1 行に並べるためだけの
+    /// もので、判断には使わない。追従を併記しているのは、回転・ピッチが**追従を切ってから
+    /// でないと効かない**ため。`off` になっていないのに動かないのと、`off` なのに動かないのは
+    /// 原因が別（前者は追従を切る条件、後者は係数と符号）。
+    var cameraSummary: String {
+        let camera = mapView.camera
+        return String(format: "heading=%.1f pitch=%.1f distance=%.0f follow=%@",
+                      camera.heading, camera.pitch, camera.centerCoordinateDistance,
+                      isFollowingUser ? "on" : "off")
+    }
+
     /// 方位を 0 以上 360 未満に収める。`rotationBaseHeading - 累積角` は指を大きく回せば
     /// 平気で ±360 を超える。MKMapView も `setCamera` で自前に丸めるが、
     /// `maximumPitch` と同じで、丸め方を MapKit に当てにせず渡す前に揃えておく。

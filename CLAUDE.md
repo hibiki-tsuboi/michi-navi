@@ -314,6 +314,18 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   `CarPlayMapViewController.rotate(byRadians:)` の符号）、傾きの重さ
   （`pitchDegreesPerPoint`）、ピンチの追従性（`scale` が累積でなかった場合、倍率が
   ほぼ 1 のままになって「効かない」形で失敗する）。
+  切り分けには `CarPlayGestureLog` を見る。**「地図が動かない」は、ジェスチャが届いて
+  いない場合と、届いたうえで効き方がおかしい場合の両方で同じ見え方になる**ので、
+  まず行が出るかどうかを確かめる。行が出ないなら車の側（1 本指のパンはタッチ精度で
+  認識器が付かない車がある）で、こちらに直すところは無い。
+
+  ```bash
+  xcrun simctl spawn booted log stream --style compact --level debug \
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "gesture"'
+  ```
+
+  実機は `--device` を付けるか Console.app。`.debug` なので Xcode を繋いでいない
+  ときは保存されない（走行中に置いたままでよい）。
 - **安全領域を差し引いた中心合わせ**: `follow` は自車を**画面の**中心に置いており、
   安全領域の中心には置いていない（差し引いているのは全体表示の余白だけ）。
   3 画面とも同じで、テンプレートや計器の縁が重なるぶんだけ自車位置が寄る。

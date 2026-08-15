@@ -81,6 +81,67 @@ final class SearchService: NSObject {
             }
     }
 
+    /// 経路の先に沿ってカテゴリで探す。
+    ///
+    /// 走行中は「近い」より「これから通る」ほうが役に立つ。現在地のまわりを探すと、
+    /// もう通り過ぎた店や、経路から大きく外れる店が上位に来てしまう。
+    ///
+    /// MapKit に経路沿い検索は無いので、経路上へ一定間隔で検索点を置き、
+    /// それぞれのまわりを探して束ねる。検索点の数は抑える。増やすほど
+    /// MapKit のレート制限に近づくうえ、運転中に選べる件数を超える。
+    func alongRoute(pointsOfInterest: [MKPointOfInterestCategory],
+                    coordinates: [CLLocationCoordinate2D],
+                    radius: CLLocationDistance = 5_000) async throws -> [Place] {
+        // 円がだいたい隙間なく並ぶよう、間隔は半径の 2 倍にする。
+        let samples = Self.samplePoints(along: coordinates, every: radius * 2)
+        guard !samples.isEmpty else { return [] }
+
+        var found: [(index: Int, places: [Place])] = []
+        try await withThrowingTaskGroup(of: (Int, [Place]).self) { group in
+            for (index, coordinate) in samples.enumerated() {
+                group.addTask { [self] in
+                    (index, try await nearby(pointsOfInterest: pointsOfInterest,
+                                             around: coordinate,
+                                             radius: radius))
+                }
+            }
+            for try await result in group { found.append(result) }
+        }
+
+        // 手前の検索点で見つかったものを先に出す。同じ店が隣り合う検索点の
+        // 両方に入るので、先に見つかった側を残して重複を落とす。
+        var seen = Set<Place>()
+        return found
+            .sorted { $0.index < $1.index }
+            .flatMap(\.places)
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// 経路沿いに置く検索点の上限。
+    private static let maximumSamples = 5
+
+    /// 経路上に `interval` ごとの検索点を置く。先頭（＝いまいる場所）は必ず含める。
+    private static func samplePoints(along coordinates: [CLLocationCoordinate2D],
+                                     every interval: CLLocationDistance) -> [CLLocationCoordinate2D] {
+        guard let first = coordinates.first else { return [] }
+
+        var samples = [first]
+        var travelled: CLLocationDistance = 0
+        var previous = MKMapPoint(first)
+
+        for coordinate in coordinates.dropFirst() {
+            let point = MKMapPoint(coordinate)
+            travelled += point.distance(to: previous)
+            previous = point
+
+            guard travelled >= interval else { continue }
+            samples.append(coordinate)
+            travelled = 0
+            if samples.count >= maximumSamples { break }
+        }
+        return samples
+    }
+
     private func places(for request: MKLocalSearch.Request) async throws -> [Place] {
         let response = try await MKLocalSearch(request: request).start()
         return response.mapItems.map { Place(mapItem: $0) }

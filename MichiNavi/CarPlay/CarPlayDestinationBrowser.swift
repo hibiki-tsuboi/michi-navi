@@ -37,6 +37,7 @@ final class CarPlayDestinationBrowser: NSObject {
     private let search = SearchService.shared
     private let store = DestinationStore.shared
     private let location = LocationService.shared
+    private let navigation = NavigationController.shared
 
     init(interfaceController: CPInterfaceController,
          sessionConfiguration: CPSessionConfiguration,
@@ -122,16 +123,12 @@ final class CarPlayDestinationBrowser: NSObject {
             }
         }
 
-        let template = CPGridTemplate(title: "周辺をさがす", gridButtons: buttons)
+        let template = CPGridTemplate(title: isNavigating ? "ルート沿いをさがす" : "周辺をさがす",
+                                      gridButtons: buttons)
         interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
     private func presentResults(for category: Category) {
-        guard let coordinate = location.location?.coordinate else {
-            onError("現在地が取得できていません")
-            return
-        }
-
         // 先に空のリストを出してから埋める。結果を待ってから画面を出すと、
         // 押したのに何も起きない時間ができて運転中に不安になる。
         let template = CPListTemplate(title: category.title, sections: [])
@@ -140,15 +137,36 @@ final class CarPlayDestinationBrowser: NSObject {
 
         Task {
             do {
-                let places = try await search.nearby(pointsOfInterest: category.pointsOfInterest,
-                                                     around: coordinate)
+                let places = try await places(for: category)
                 let items = places.prefix(CPListTemplate.maximumItemCount).map(makeItem(for:))
                 template.updateSections([CPListSection(items: Array(items))])
-                template.emptyViewSubtitleVariants = ["近くに見つかりませんでした"]
+                template.emptyViewSubtitleVariants = [isNavigating
+                    ? "この先には見つかりませんでした"
+                    : "近くに見つかりませんでした"]
             } catch {
                 template.emptyViewSubtitleVariants = [error.localizedDescription]
             }
         }
+    }
+
+    /// 案内中は経路の先を、そうでなければ現在地のまわりを探す。
+    /// 走行中に「近いが後ろにある店」を出しても、運転者には選びようがない。
+    private func places(for category: Category) async throws -> [Place] {
+        if let route = navigation.currentRoute {
+            let stepIndex = navigation.progress?.stepIndex ?? 0
+            return try await search.alongRoute(
+                pointsOfInterest: category.pointsOfInterest,
+                coordinates: route.remainingCoordinates(from: stepIndex))
+        }
+
+        guard let coordinate = location.location?.coordinate else {
+            throw NavigationError.noCurrentLocation
+        }
+        return try await search.nearby(pointsOfInterest: category.pointsOfInterest, around: coordinate)
+    }
+
+    private var isNavigating: Bool {
+        navigation.currentRoute != nil
     }
 
     /// グリッドアイコンの上限は 40pt（ガイド p.28）。

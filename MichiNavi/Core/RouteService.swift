@@ -29,6 +29,18 @@ struct NavRoute: Identifiable {
     let stepEndIndices: [Int]
 }
 
+extension NavRoute {
+    /// `stepIndex` の区間の始まりから先の座標列。まだ通っていない部分を指す。
+    /// ルート沿いに施設を探すときの範囲になる。
+    func remainingCoordinates(from stepIndex: Int) -> [CLLocationCoordinate2D] {
+        guard stepIndex > 0, stepEndIndices.indices.contains(stepIndex - 1) else { return coordinates }
+
+        let start = stepEndIndices[stepIndex - 1]
+        guard coordinates.indices.contains(start) else { return coordinates }
+        return Array(coordinates[start...])
+    }
+}
+
 enum RouteError: LocalizedError {
     case noRouteFound
 

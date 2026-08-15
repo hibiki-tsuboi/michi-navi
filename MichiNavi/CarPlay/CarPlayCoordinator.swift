@@ -192,9 +192,15 @@ final class CarPlayCoordinator: NSObject {
     private func makeTrip(for routes: [NavRoute]) -> CPTrip {
         let choices = routes.map { route -> CPRouteChoice in
             let summary = Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime)
+            // 有料道路・通行規制などの注意を要約に足す。variants は「入るなら長い方」を
+            // 選ぶ仕組みなので、幅の狭い車では自動的に注意なしの表記へ落ちる。
+            let variants = route.advisoryNotices.isEmpty
+                ? [summary]
+                : ["\(summary)・\(route.advisoryNotices.joined(separator: "、"))", summary]
+
             let choice = CPRouteChoice(summaryVariants: [route.name.isEmpty ? "ルート" : route.name],
-                                       additionalInformationVariants: [summary],
-                                       selectionSummaryVariants: [summary])
+                                       additionalInformationVariants: variants,
+                                       selectionSummaryVariants: variants)
             choice.userInfo = route.id
             return choice
         }
@@ -299,6 +305,26 @@ final class CarPlayCoordinator: NSObject {
             // リルートで経路が入れ替わった。作り直して渡し直す。
             rebuildManeuvers(for: route, stepIndex: stepIndex)
         }
+        presentNotice(of: route, at: stepIndex)
+    }
+
+    /// MapKit が区間に付けてくる注意（料金所・車線規制など）を、その区間に入るときに出す。
+    ///
+    /// 区間が変わったときにしか呼ばれないので、同じ注意が繰り返し出ることはない。
+    /// 自動で消えるようにして、運転中に操作を求めない。
+    private func presentNotice(of route: NavRoute, at stepIndex: Int) {
+        guard route.steps.indices.contains(stepIndex),
+              let notice = route.steps[stepIndex].notice,
+              !notice.isEmpty else { return }
+
+        let alert = CPNavigationAlert(
+            titleVariants: [notice],
+            subtitleVariants: nil,
+            image: UIImage(systemName: "exclamationmark.triangle.fill"),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 8)
+        mapTemplate.present(navigationAlert: alert, animated: true)
     }
 
     /// 経路の全区間を `CPManeuver` にして、セッションへ渡す。

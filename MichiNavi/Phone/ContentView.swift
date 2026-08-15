@@ -106,6 +106,8 @@ struct ContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
+                    advisories(route.advisoryNotices)
+
                     HStack {
                         Button("やめる") { navigation.cancelNavigation() }
                             .buttonStyle(.bordered)
@@ -140,6 +142,21 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .panel()
     }
+
+    /// MapKit がルートに付けてくる注意（有料道路・通行規制など）。
+    /// どのルートを選ぶかの判断材料になるので、候補を見せる場所で出す。
+    @ViewBuilder
+    private func advisories(_ notices: [String]) -> some View {
+        if !notices.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(notices, id: \.self) { notice in
+                    Label(notice, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - 次の指示バナー
@@ -160,6 +177,12 @@ private struct ManeuverBanner: View {
                     Text(instruction(at: progress.stepIndex))
                         .font(.subheadline)
                         .lineLimit(2)
+                    if let notice = notice(at: progress.stepIndex) {
+                        Text(notice)
+                            .font(.caption)
+                            .opacity(0.85)
+                            .lineLimit(1)
+                    }
                 } else {
                     Text("案内を開始しています…").font(.subheadline)
                 }
@@ -173,6 +196,13 @@ private struct ManeuverBanner: View {
 
     private func instruction(at index: Int) -> String {
         route.steps.indices.contains(index) ? route.steps[index].instruction : "目的地に向かっています"
+    }
+
+    /// 区間ごとの注意（料金所・車線規制など）。CarPlay 側は割り込みで出すが、
+    /// iPhone は運転中に見る前提ではないので、指示の下に添えるだけにする。
+    private func notice(at index: Int) -> String? {
+        guard route.steps.indices.contains(index) else { return nil }
+        return route.steps[index].notice
     }
 }
 

@@ -6,6 +6,8 @@
 	<dict>
 		<key>CPSupportsDashboardNavigationScene</key>
 		<true/>
+		<key>CPSupportsInstrumentClusterNavigationScene</key>
+		<true/>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<true/>
 		<key>UISceneConfigurations</key>
@@ -19,6 +21,17 @@
 					<string>MichiNavi-CarPlay-Dashboard</string>
 					<key>UISceneDelegateClassName</key>
 					<string>$(PRODUCT_MODULE_NAME).CarPlayDashboardSceneDelegate</string>
+				</dict>
+			</array>
+			<key>CPTemplateApplicationInstrumentClusterSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneClassName</key>
+					<string>CPTemplateApplicationInstrumentClusterScene</string>
+					<key>UISceneConfigurationName</key>
+					<string>MichiNavi-CarPlay-InstrumentCluster</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlayInstrumentClusterSceneDelegate</string>
 				</dict>
 			</array>
 			<key>CPTemplateApplicationSceneSessionRoleApplication</key>

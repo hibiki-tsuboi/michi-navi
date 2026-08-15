@@ -64,7 +64,7 @@ Combine の使い分けにも意味がある:
 | ディレクトリ | 責務 | 制約 |
 | --- | --- | --- |
 | `Core/` | 位置・検索・経路計算・進捗計算・状態管理・目的地の保存・音声案内 | UI 非依存。CarPlay も SwiftUI も import しない |
-| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイと Dashboard の 2 画面ぶん | 案内ロジックを持たない |
+| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面ぶん | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
 共有シングルトンは 5 つ: `NavigationController.shared` / `LocationService.shared` /
@@ -177,10 +177,13 @@ CarPlay 層は触らずに済む設計。
   `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
   押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に
   たどり着ける経路（お気に入り・履歴・周辺カテゴリ）を必ず残す。**
-- **Dashboard のシーンは来ないことがある**。CarPlay が必要と判断したときだけ作られるので、
-  接続されない前提で書く。ショートカットは 2 つまで、かつ案内中は出せない。
-  案内カードの中身は `CPMapTemplate` + `CPNavigationSession` を使っていれば CarPlay が自前で
-  描くため、Dashboard 側が受け持つのは地図とショートカットだけ。
+- **Dashboard とメーター内のシーンは来ないことがある**。CarPlay が必要と判断したとき、
+  また対応した車のときだけ作られるので、接続されない前提で書く。とくにメーター内は
+  窓が `CPInstrumentClusterController` の delegate 経由で**遅れて**渡ってくるので、
+  シーン接続の時点ではまだ描けない。
+- **Dashboard のショートカットは 2 つまで、かつ案内中は出せない**。案内カードの中身は
+  `CPMapTemplate` + `CPNavigationSession` を使っていれば CarPlay が自前で描くため、
+  Dashboard とメーター内が受け持つのは地図（と Dashboard のショートカット）だけ。
 - **`shortcutButtons` に空配列を代入しない**。CarPlay ホスト
   （`CPSDashboardGuidanceViewController.setShortCutButtons:`）は「ちょうど 1 件」と「それ以外」で
   レイアウトを分けていて、0 件は後者に落ちる。そこで `firstObject` / `lastObject` が nil のまま
@@ -192,10 +195,13 @@ CarPlay 層は触らずに済む設計。
   `CPSTemplateInstance` の実装していない `vehicleSupportsDestinationSharing` を
   `respondsToSelector:` も見ずに呼ぶため。Xcode の再ビルド・再インストールのたびに
   CarPlayTemplateUIHost のクラッシュログが増えるが、**こちらのバグではない**ので追わないこと。
-- **`CarPlayMapViewController` は 2 画面で共用**。`.compact`（Dashboard）はカメラ高度を
-  近づけ、目的地ピンを出さず、経路の線を細くする。狭い画面向けの差はこのクラスに集約する。
+- **`CarPlayMapViewController` は 3 画面で共用**。`.compact`（Dashboard）と `.cluster`
+  （メーター内）はカメラ高度を近づけ、目的地ピンを出さず、経路の線を細くする。
+  狭い画面向けの差はこのクラスに集約する。`.cluster` だけは **進行方向を上に固定**し、
+  全体表示にも切り替えない（ガイド p.55 の要件）。
 - **地図の向き（`MapOrientation`）は CarPlay 専用の設定で、iPhone は追従しない**。
   センターディスプレイと Dashboard は同じ設定を見る（Dashboard は次の位置更新で揃う）。
+  メーター内だけは要件で進行方向が上に固定されているので、設定に従わない。
   案内ロジックではなく見た目の設定なので、あえて `NavigationController` にも `Core/` にも
   置いていない。iPhone 側が常に進行方向を上にしているのは**意図した非対称**で、揃えるなら
   iPhone にも切り替えを出すところまでやること。片方だけ追従させると変えられない設定になる。

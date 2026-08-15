@@ -12,6 +12,12 @@ final class CarPlayMapViewController: UIViewController {
         case full
         /// ダッシュボード。狭いので余計なものを描かない（ガイド p.54）。
         case compact
+        /// メーター内。狭さは `.compact` と同じだが、**進行方向を上に固定する**のが
+        /// ガイド p.55 の要件なので、こちらだけ向きの設定に従わない。
+        case cluster
+
+        /// 目的地ピンや太い線を出してよい広さがあるか。
+        var isWide: Bool { self == .full }
     }
 
     private let style: Style
@@ -30,7 +36,7 @@ final class CarPlayMapViewController: UIViewController {
     init(style: Style = .full) {
         self.style = style
         // ダッシュボードは面積が小さいので、同じ高度だと何も読み取れない。近づける。
-        cameraDistance = style == .full ? 500 : 300
+        cameraDistance = style.isWide ? 500 : 300
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -77,7 +83,7 @@ final class CarPlayMapViewController: UIViewController {
 
         // ダッシュボードでは目的地ピンを出さない。狭い画面では読み取れないうえ、
         // ガイドが求める「clutter の少ない最小限の地図」から外れる。
-        guard style == .full else { return }
+        guard style.isWide else { return }
 
         let pin = MKPointAnnotation()
         pin.coordinate = route.destination.coordinate
@@ -91,7 +97,7 @@ final class CarPlayMapViewController: UIViewController {
     func follow(location: CLLocation) {
         guard isFollowingUser else { return }
 
-        let orientation = MapOrientation.current
+        let orientation = self.orientation
         let camera = MKMapCamera(lookingAtCenter: location.coordinate,
                                  fromDistance: cameraDistance,
                                  pitch: orientation.pitch,
@@ -109,11 +115,20 @@ final class CarPlayMapViewController: UIViewController {
         }
     }
 
+    /// この画面が使う向き。メーター内は進行方向を上にすることがガイド p.55 の要件なので、
+    /// 利用者の設定に関係なく固定する。
+    private var orientation: MapOrientation {
+        style == .cluster ? .heading : MapOrientation.current
+    }
+
     /// 向きの切り替えをその場で反映する。次の位置更新を待たせない。
     ///
     /// 追従中は `follow` に任せ、地図を動かして見ている最中は中心を保ったまま向きだけ変える。
     /// ズーム（`setCameraDistance`）と同じ分岐。
     func apply(orientation: MapOrientation) {
+        // メーター内は固定なので何もしない。
+        guard style != .cluster else { return }
+
         if isFollowingUser, let location = LocationService.shared.location {
             follow(location: location)
         } else {
@@ -122,6 +137,12 @@ final class CarPlayMapViewController: UIViewController {
             camera.pitch = orientation.pitch
             mapView.setCamera(camera, animated: true)
         }
+    }
+
+    /// 方位磁針を出すかどうか。メーター内では車が可否を指示してくる
+    /// （`CPInstrumentClusterController.compassSetting`）ので、それに従う。
+    func setCompassVisible(_ visible: Bool) {
+        mapView.showsCompass = visible
     }
 
     func setFollowingUser(_ following: Bool) {
@@ -194,7 +215,7 @@ extension CarPlayMapViewController: MKMapViewDelegate {
 
         let renderer = MKPolylineRenderer(polyline: polyline)
         renderer.strokeColor = UIColor.systemBlue
-        renderer.lineWidth = style == .full ? 10 : 8
+        renderer.lineWidth = style.isWide ? 10 : 8
         renderer.lineCap = .round
         renderer.lineJoin = .round
         return renderer

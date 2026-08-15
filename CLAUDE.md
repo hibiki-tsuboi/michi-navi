@@ -181,6 +181,11 @@ CarPlay 層は触らずに済む設計。
   CarPlayTemplateUIHost のクラッシュログが増えるが、**こちらのバグではない**ので追わないこと。
 - **`CarPlayMapViewController` は 2 画面で共用**。`.compact`（Dashboard）はカメラ高度を
   近づけ、目的地ピンを出さず、経路の線を細くする。狭い画面向けの差はこのクラスに集約する。
+- **地図の向き（`MapOrientation`）は CarPlay 専用の設定で、iPhone は追従しない**。
+  センターディスプレイと Dashboard は同じ設定を見る（Dashboard は次の位置更新で揃う）。
+  案内ロジックではなく見た目の設定なので、あえて `NavigationController` にも `Core/` にも
+  置いていない。iPhone 側が常に進行方向を上にしているのは**意図した非対称**で、揃えるなら
+  iPhone にも切り替えを出すところまでやること。片方だけ追従させると変えられない設定になる。
 - **昼夜（`contentStyle`）を扱うのはセンターディスプレイ側だけ**。地図は
   `overrideUserInterfaceStyle` に流せば trait collection 経由で切り替わり、テンプレートは
   CarPlay が自前で切り替える。Dashboard のシーンに `contentStyle` は無く、渡される

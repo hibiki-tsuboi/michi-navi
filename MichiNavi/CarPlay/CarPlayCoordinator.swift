@@ -340,10 +340,23 @@ final class CarPlayCoordinator: NSObject {
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
+    /// 向きの切り替えは案内中だけ出す。並びの考え方は `applyIdleButtons` と同じで、
+    /// パン UI で用の無いものを後ろへ置く。
     private func applyNavigatingButtons() {
-        mapTemplate.mapButtons = [recenterButton, zoomInButton, zoomOutButton]
+        mapTemplate.mapButtons = navigatingMapButtons
         mapTemplate.leadingNavigationBarButtons = [overviewButton]
         mapTemplate.trailingNavigationBarButtons = [endNavigationButton]
+    }
+
+    private var navigatingMapButtons: [CPMapButton] {
+        [recenterButton, zoomInButton, zoomOutButton, orientationButton]
+    }
+
+    private func toggleMapOrientation() {
+        MapOrientation.current = MapOrientation.current.toggled
+        mapViewController.apply(orientation: MapOrientation.current)
+        // アイコンを新しい向きに差し替える。ナビゲーションバー側は変わらないので触らない。
+        mapTemplate.mapButtons = navigatingMapButtons
     }
 
     private var destinationsButton: CPBarButton {
@@ -381,6 +394,16 @@ final class CarPlayCoordinator: NSObject {
     private var recenterButton: CPMapButton {
         let button = CPMapButton { [weak self] _ in self?.mapViewController.recenter() }
         button.image = UIImage(systemName: "location.fill")
+        return button
+    }
+
+    /// 地図の向きの切り替え。アイコンは**いまの向き**を表す
+    /// （押した先ではなく現在の状態が読めるようにする）。
+    private var orientationButton: CPMapButton {
+        let button = CPMapButton { [weak self] _ in self?.toggleMapOrientation() }
+        button.image = UIImage(systemName: MapOrientation.current == .north
+            ? "location.north.line.fill"
+            : "car.fill")
         return button
     }
 

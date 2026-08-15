@@ -91,13 +91,37 @@ final class CarPlayMapViewController: UIViewController {
     func follow(location: CLLocation) {
         guard isFollowingUser else { return }
 
-        // 停車中は course が -1 になる。そのときは向きを変えず、地図が回るのを防ぐ。
-        let heading = location.course >= 0 ? location.course : mapView.camera.heading
+        let orientation = MapOrientation.current
         let camera = MKMapCamera(lookingAtCenter: location.coordinate,
                                  fromDistance: cameraDistance,
-                                 pitch: 45,
-                                 heading: heading)
+                                 pitch: orientation.pitch,
+                                 heading: heading(for: location, orientation: orientation))
         mapView.setCamera(camera, animated: true)
+    }
+
+    private func heading(for location: CLLocation, orientation: MapOrientation) -> CLLocationDirection {
+        switch orientation {
+        case .north:
+            return 0
+        case .heading:
+            // 停車中は course が -1 になる。そのときは向きを変えず、地図が回るのを防ぐ。
+            return location.course >= 0 ? location.course : mapView.camera.heading
+        }
+    }
+
+    /// 向きの切り替えをその場で反映する。次の位置更新を待たせない。
+    ///
+    /// 追従中は `follow` に任せ、地図を動かして見ている最中は中心を保ったまま向きだけ変える。
+    /// ズーム（`setCameraDistance`）と同じ分岐。
+    func apply(orientation: MapOrientation) {
+        if isFollowingUser, let location = LocationService.shared.location {
+            follow(location: location)
+        } else {
+            let camera = mapView.camera
+            camera.heading = orientation == .north ? 0 : camera.heading
+            camera.pitch = orientation.pitch
+            mapView.setCamera(camera, animated: true)
+        }
     }
 
     func setFollowingUser(_ following: Bool) {

@@ -169,7 +169,10 @@ CarPlay 層は触らずに済む設計。
 - **パンボタンは外せない**（ガイド p.33）。タッチでドラッグできる車があっても、ノブしか無い
   車のために「パン UI へ入るボタン」を必ず 1 つ置くことが要件。
 - **`mapButtons` は 4 つまで。パン UI に入ると先頭 2 つしか残らない**（超過ぶんは配列の
-  末尾から順に隠される）。並び順が表示に直結するので、パン UI で用の無いものほど後ろへ置く。
+  末尾から CarPlay が勝手に隠す）。**並び順まかせにしないこと**。4 つ置いた状態でパン UI に
+  入ると 2 つ落ちる。`mapTemplateDidShowPanningInterface` で拡大・縮小の 2 つに差し替え、
+  `mapTemplateDidDismissPanningInterface` で元へ戻している。パン中に意味があるのは
+  拡大・縮小だけで、現在地へ戻すのは「完了」が担う。
 - **`CarPlayCoordinator.beginSessionIfNeeded` の二重開始ガードを外さない**。
   iPhone 側で案内を始めた場合も同じ経路を通る。
 - **経由地は `NavRoute` を 1 本に繋いだ時点で見えなくなる**。`GuidanceEngine` も

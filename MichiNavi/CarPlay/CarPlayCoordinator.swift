@@ -401,20 +401,20 @@ final class CarPlayCoordinator: NSObject {
 
     // MARK: - ボタン
 
-    /// 並び順に意味がある。**パン UI に入ると先頭 2 つしか残らない**
-    /// （超過ぶんは配列の末尾から順に隠される）ので、パン UI 側で用の無いものほど後ろに置く。
-    /// パンボタン自身はパン UI の中では押しても意味が無いため最後。
-    ///
     /// 現在地ボタンを案内中と同じ位置（先頭）に置くのは、指でドラッグして地図を
     /// 動かしたあと自車位置に戻る手段が他に無いため。案内中と押す場所も揃う。
+    /// 上限の 4 つちょうどなので、足すなら何かを外すことになる。
+    ///
+    /// パン UI に入るとここの並びは使われない。2 つしか残せないので
+    /// `mapTemplateDidShowPanningInterface` で差し替えている。
     private func applyIdleButtons() {
         mapTemplate.mapButtons = [recenterButton, zoomInButton, zoomOutButton, panButton]
         mapTemplate.leadingNavigationBarButtons = []
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
-    /// 向きの切り替えは案内中だけ出す。並びの考え方は `applyIdleButtons` と同じで、
-    /// パン UI で用の無いものを後ろへ置く。
+    /// 向きの切り替えは案内中だけ出す。押す場所を変えないよう、前 3 つは
+    /// `applyIdleButtons` と同じ並びにしてある。
     private func applyNavigatingButtons() {
         mapTemplate.mapButtons = navigatingMapButtons
         mapTemplate.leadingNavigationBarButtons = [overviewButton]
@@ -540,6 +540,12 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// 置き換えるのはナビゲーションバーのボタンだけでよい。
     func mapTemplateDidShowPanningInterface(_ mapTemplate: CPMapTemplate) {
         mapViewController.setFollowingUser(false)
+
+        // **パン中に残せるマップボタンは 2 つだけ**で、超過ぶんは配列の末尾から
+        // CarPlay が勝手に隠す。並び順まかせにすると縮小が落ちるので、ここで
+        // 明示的に置き換える。パン中に意味があるのは拡大・縮小だけで、
+        // 現在地へ戻すのは「完了」が担い、パンボタン自身はもう用がない。
+        mapTemplate.mapButtons = [zoomInButton, zoomOutButton]
         mapTemplate.leadingNavigationBarButtons = []
         mapTemplate.trailingNavigationBarButtons = [donePanningButton]
     }

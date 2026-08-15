@@ -48,6 +48,8 @@ final class NavigationController: ObservableObject {
     let maneuverChanged = PassthroughSubject<(route: NavRoute, stepIndex: Int), Never>()
     /// 目的地に着いた瞬間に流れる。
     let arrived = PassthroughSubject<NavRoute, Never>()
+    /// 経由地を通過した瞬間に流れる。案内はそのまま続く。
+    let waypointReached = PassthroughSubject<Place, Never>()
 
     private let location = LocationService.shared
     private let routeProvider: RouteProviding = MapKitRouteProvider()
@@ -97,7 +99,44 @@ final class NavigationController: ObservableObject {
         }
     }
 
-    private func route(to destination: Place, then handle: @escaping ([NavRoute]) -> Void) {
+    /// 案内中の経路に立ち寄り先を挟む。いまの位置から引き直して、そのまま案内を続ける。
+    ///
+    /// 追加する先は**いちばん後ろ**（目的地の直前）。位置関係から順番を組み替えるには
+    /// 巡回セールスマン問題を解くことになり、MapKit にその機能は無い。
+    /// 案内していないときは、ただの目的地として扱う。
+    func addWaypoint(_ place: Place) {
+        guard case let .navigating(route) = phase else {
+            requestRoutes(to: place)
+            return
+        }
+
+        let waypoints = remainingWaypoints(of: route) + [place]
+        routingTask?.cancel()
+        routingTask = Task {
+            do {
+                let routes = try await calculateRoutes(to: route.destination, via: waypoints)
+                guard !Task.isCancelled, let best = routes.first else { return }
+                startNavigation(with: best)
+            } catch is CancellationError {
+                return
+            } catch {
+                // 引き直しに失敗しても、いまの案内は続いている。知らせるだけにする。
+                lastError = error.localizedDescription
+            }
+        }
+    }
+
+    /// まだ通っていない経由地。引き直すときに引き継ぐ。
+    private func remainingWaypoints(of route: NavRoute) -> [Place] {
+        let stepIndex = progress?.stepIndex ?? 0
+        return zip(route.waypoints, route.waypointStepIndices)
+            .filter { stepIndex <= $0.1 }
+            .map(\.0)
+    }
+
+    private func route(to destination: Place,
+                       via waypoints: [Place] = [],
+                       then handle: @escaping ([NavRoute]) -> Void) {
         routingTask?.cancel()
         lastError = nil
         // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
@@ -106,7 +145,7 @@ final class NavigationController: ObservableObject {
 
         routingTask = Task {
             do {
-                let routes = try await calculateRoutes(to: destination)
+                let routes = try await calculateRoutes(to: destination, via: waypoints)
                 guard !Task.isCancelled else { return }
                 handle(routes)
             } catch is CancellationError {
@@ -119,11 +158,11 @@ final class NavigationController: ObservableObject {
         }
     }
 
-    private func calculateRoutes(to destination: Place) async throws -> [NavRoute] {
+    private func calculateRoutes(to destination: Place, via waypoints: [Place] = []) async throws -> [NavRoute] {
         guard let origin = location.location?.coordinate else {
             throw NavigationError.noCurrentLocation
         }
-        return try await routeProvider.routes(from: origin, to: destination)
+        return try await routeProvider.routes(from: origin, via: waypoints, to: destination)
     }
 
     // MARK: - 案内の開始と終了
@@ -172,18 +211,32 @@ final class NavigationController: ObservableObject {
         }
 
         if updated.isOffRoute {
-            reroute(to: route.destination)
+            reroute(to: route.destination, via: remainingWaypoints(of: route))
             return
         }
 
         if announcedStepIndex != updated.stepIndex {
+            let previous = announcedStepIndex
             announcedStepIndex = updated.stepIndex
+            notifyWaypointsPassed(on: route, from: previous, to: updated.stepIndex)
             maneuverChanged.send((route: route, stepIndex: updated.stepIndex))
         }
     }
 
+    /// 区間が進んだ間にあった経由地を、通過したものとして知らせる。
+    /// GPS が飛んで一度に複数の区間を跨いでも取りこぼさないよう、範囲で見る。
+    private func notifyWaypointsPassed(on route: NavRoute, from previous: Int?, to current: Int) {
+        guard let previous else { return }
+
+        for (place, index) in zip(route.waypoints, route.waypointStepIndices)
+        where index >= previous && index < current {
+            waypointReached.send(place)
+        }
+    }
+
     /// 経路を外れたときに、いまの位置から同じ目的地へ引き直す。
-    private func reroute(to destination: Place) {
+    /// まだ通っていない経由地は引き継ぐ。落とすと、外れた拍子に立ち寄り先が消える。
+    private func reroute(to destination: Place, via waypoints: [Place]) {
         guard !isCalculatingReroute else { return }
         isCalculatingReroute = true
         isRerouting = true
@@ -192,7 +245,7 @@ final class NavigationController: ObservableObject {
         routingTask = Task {
             defer { isCalculatingReroute = false }
             do {
-                let routes = try await calculateRoutes(to: destination)
+                let routes = try await calculateRoutes(to: destination, via: waypoints)
                 guard !Task.isCancelled, let best = routes.first else { return }
                 // 経路に戻せたときだけ `isRerouting` が下りる（startNavigation の末尾）。
                 startNavigation(with: best)

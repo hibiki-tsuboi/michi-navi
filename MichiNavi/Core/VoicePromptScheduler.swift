@@ -8,6 +8,8 @@ enum VoicePrompt: Equatable {
     case rerouted(instruction: String)
     /// 「300メートル先、右折します」。`distance` が nil なら「まもなく」。
     case maneuver(instruction: String, distance: CLLocationDistance?)
+    /// 経由地に着いたとき。案内は続くので、終了とは言い分ける。
+    case waypoint(name: String)
     case arrival(destination: String)
 
     var spokenText: String {
@@ -19,6 +21,8 @@ enum VoicePrompt: Equatable {
         case let .maneuver(instruction, distance):
             guard let distance else { return "まもなく\(instruction)" }
             return "\(Formatters.spokenDistance(distance))先、\(instruction)"
+        case let .waypoint(name):
+            return "経由地の\(name)に到着しました。案内を続けます"
         case let .arrival(destination):
             return "\(destination)に到着しました。案内を終了します"
         }

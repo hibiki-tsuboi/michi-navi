@@ -49,6 +49,11 @@ final class VoiceGuidance: NSObject {
                 self?.speak(.arrival(destination: route.destination.name))
             }
             .store(in: &cancellables)
+
+        // 経由地は案内が続くので、到着と違って読み上げ中に案内が畳まれる心配がない。
+        navigation.waypointReached
+            .sink { [weak self] in self?.speak(.waypoint(name: $0.name)) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の追従

@@ -57,7 +57,12 @@ final class CarPlayCoordinator: NSObject {
         destinations = CarPlayDestinationBrowser(
             interfaceController: interfaceController,
             sessionConfiguration: configuration,
-            onSelect: { [weak self] in self?.navigation.requestRoutes(to: $0) },
+            onSelect: { [weak self] choice in
+                switch choice {
+                case let .destination(place): self?.navigation.requestRoutes(to: place)
+                case let .waypoint(place): self?.navigation.addWaypoint(place)
+                }
+            },
             onError: { [weak self] in self?.presentAlert(message: $0) })
 
         mapTemplate.mapDelegate = self

@@ -29,9 +29,17 @@ final class CarPlayDestinationBrowser: NSObject {
         Category(title: "病院", symbol: "cross.case.fill", pointsOfInterest: [.hospital]),
     ]
 
+    /// 選んだ地点をどう扱うか。
+    enum Choice {
+        /// 目的地にする。案内中なら行き先を差し替える。
+        case destination(Place)
+        /// 立ち寄り先として、いまの経路に挟む。
+        case waypoint(Place)
+    }
+
     private let interfaceController: CPInterfaceController
     private let sessionConfiguration: CPSessionConfiguration
-    private let onSelect: (Place) -> Void
+    private let onSelect: (Choice) -> Void
     private let onError: (String) -> Void
 
     private let search = SearchService.shared
@@ -41,7 +49,7 @@ final class CarPlayDestinationBrowser: NSObject {
 
     init(interfaceController: CPInterfaceController,
          sessionConfiguration: CPSessionConfiguration,
-         onSelect: @escaping (Place) -> Void,
+         onSelect: @escaping (Choice) -> Void,
          onError: @escaping (String) -> Void) {
         self.interfaceController = interfaceController
         self.sessionConfiguration = sessionConfiguration
@@ -108,9 +116,39 @@ final class CarPlayDestinationBrowser: NSObject {
         return item
     }
 
+    /// 案内していなければそのまま目的地にする。
+    ///
+    /// 案内中は 1 度だけ聞く。「途中で寄りたい」のか「行き先ごと変えたい」のかは
+    /// 取り違えたときの影響が大きく、走行中に気づいて戻すのは難しい。
     private func choose(_ place: Place) {
+        guard isNavigating else {
+            finish(with: .destination(place))
+            return
+        }
+
+        let sheet = CPActionSheetTemplate(title: place.name, message: nil, actions: [
+            CPAlertAction(title: "経由地として追加", style: .default) { [weak self] _ in
+                self?.dismissSheet()
+                self?.finish(with: .waypoint(place))
+            },
+            CPAlertAction(title: "目的地を変更", style: .default) { [weak self] _ in
+                self?.dismissSheet()
+                self?.finish(with: .destination(place))
+            },
+            CPAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in
+                self?.dismissSheet()
+            },
+        ])
+        interfaceController.presentTemplate(sheet, animated: true, completion: nil)
+    }
+
+    private func dismissSheet() {
+        interfaceController.dismissTemplate(animated: true, completion: nil)
+    }
+
+    private func finish(with choice: Choice) {
         interfaceController.popToRootTemplate(animated: true, completion: nil)
-        onSelect(place)
+        onSelect(choice)
     }
 
     // MARK: - カテゴリ

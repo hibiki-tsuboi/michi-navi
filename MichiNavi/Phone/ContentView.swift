@@ -17,6 +17,11 @@ struct ContentView: View {
             if let route = displayedRoute {
                 MapPolyline(route.polyline)
                     .stroke(.blue, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                // 立ち寄り先は目的地と見分けが付くよう別の印にする。
+                ForEach(route.waypoints) { waypoint in
+                    Marker(waypoint.name, systemImage: "mappin.and.ellipse", coordinate: waypoint.coordinate)
+                        .tint(.orange)
+                }
                 Marker(route.destination.name, coordinate: route.destination.coordinate)
             }
         }

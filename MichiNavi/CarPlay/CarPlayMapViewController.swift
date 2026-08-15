@@ -23,7 +23,8 @@ final class CarPlayMapViewController: UIViewController {
     private let style: Style
     private let mapView = MKMapView()
     private var routeOverlay: MKPolyline?
-    private var destinationAnnotation: MKPointAnnotation?
+    /// 経由地と目的地のピン。広い画面でだけ出す。
+    private var routeAnnotations: [MKPointAnnotation] = []
 
     /// 自車を追従する（案内中）か、地図を自由に見せる（パン中・全体表示中）か。
     private(set) var isFollowingUser = true
@@ -71,25 +72,25 @@ final class CarPlayMapViewController: UIViewController {
             mapView.removeOverlay(routeOverlay)
             self.routeOverlay = nil
         }
-        if let destinationAnnotation {
-            mapView.removeAnnotation(destinationAnnotation)
-            self.destinationAnnotation = nil
-        }
+        mapView.removeAnnotations(routeAnnotations)
+        routeAnnotations = []
 
         guard let route else { return }
 
         mapView.addOverlay(route.polyline, level: .aboveRoads)
         routeOverlay = route.polyline
 
-        // ダッシュボードでは目的地ピンを出さない。狭い画面では読み取れないうえ、
+        // ダッシュボードとメーター内ではピンを出さない。狭い画面では読み取れないうえ、
         // ガイドが求める「clutter の少ない最小限の地図」から外れる。
         guard style.isWide else { return }
 
-        let pin = MKPointAnnotation()
-        pin.coordinate = route.destination.coordinate
-        pin.title = route.destination.name
-        mapView.addAnnotation(pin)
-        destinationAnnotation = pin
+        routeAnnotations = (route.waypoints + [route.destination]).map { place in
+            let pin = MKPointAnnotation()
+            pin.coordinate = place.coordinate
+            pin.title = place.name
+            return pin
+        }
+        mapView.addAnnotations(routeAnnotations)
     }
 
     // MARK: - カメラ

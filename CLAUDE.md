@@ -194,6 +194,13 @@ CarPlay 層は触らずに済む設計。
   （`CPRouteSegment` を経由地ごとに積むモデル）は目的地 1 つの現状では得るものが無く、
   デプロイメントターゲットが 26.0 のうちは `#available` 分岐が要って古い実装も消せない。
   26.0 が下限なら非推奨の警告も出ないので、当面は乗り換えない。
+- **`CPMapTemplate.guidanceBackgroundColor` はあえて設定していない**。経路の線が青
+  （`systemBlue`）なのに案内まわりの色が違って見えても、車と CarPlay の既定に任せた結果で
+  正しい。**赤く見えたときは、それが案内カードなのか `pauseTrip(for: .rerouting)` の
+  「再検索中」カードなのかを先に切り分けること。** 後者が警告色で出るのは妥当で、色を
+  直す話ではない（2026-08-15 に一度これを取り違えて `guidanceBackgroundColor` を
+  青に固定しかけ、戻した）。色を渡すと `pauseTrip` のカードも `turnCardColor` の
+  フォールバック先としてそちらに従うので、**両方まとめて青くなる**点にも注意。
 - **走行中はキーボードが塞がれる**。`CPSessionConfiguration.limitedUserInterfaces` に
   `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
   押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に

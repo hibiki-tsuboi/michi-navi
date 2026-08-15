@@ -230,7 +230,7 @@ final class CarPlayCoordinator: NSObject {
         navigationSession = mapTemplate.startNavigationSession(for: trip)
         // 進捗が出る前でも先に全区間を渡す。車のメーターや HUD へは
         // 「できるだけ早く、できるだけ多く」渡すのが決まり（ガイド p.56）。
-        rebuildManeuvers(for: route, stepIndex: navigation.progress?.stepIndex ?? 0)
+        rebuildManeuvers(for: route, stepIndex: navigation.progress?.stepIndex ?? 0, isNewSession: true)
     }
 
     private func finishSession() {
@@ -308,7 +308,7 @@ final class CarPlayCoordinator: NSObject {
             showManeuvers(from: stepIndex)
         } else {
             // リルートで経路が入れ替わった。作り直して渡し直す。
-            rebuildManeuvers(for: route, stepIndex: stepIndex)
+            rebuildManeuvers(for: route, stepIndex: stepIndex, isNewSession: false)
         }
         presentNotice(of: route, at: stepIndex)
     }
@@ -334,9 +334,11 @@ final class CarPlayCoordinator: NSObject {
 
     /// 経路の全区間を `CPManeuver` にして、セッションへ渡す。
     ///
-    /// `upcomingManeuvers` に載せるものは、先に `addManeuvers` で渡しておく決まり
-    /// （iOS 17.4 以降）。ここで渡した並びが車のメーター・HUD へ送られる。
-    private func rebuildManeuvers(for route: NavRoute, stepIndex: Int) {
+    /// `add(_:)` は**セッションを始めたときだけ**呼ぶ。あれは積み上げる API で、
+    /// 引き直すたびに全区間を渡すとセッションの中に古い経路のぶんが溜まり続ける。
+    /// 引き直したあとの並びは `resumeTrip(updatedRouteInformation:)` が運ぶので、
+    /// こちらから足す必要はない。
+    private func rebuildManeuvers(for route: NavRoute, stepIndex: Int, isNewSession: Bool) {
         routeManeuvers = route.steps.enumerated().map { index, step in
             makeManeuver(for: step,
                          on: route,
@@ -344,7 +346,7 @@ final class CarPlayCoordinator: NSObject {
         }
         maneuverRouteID = route.id
 
-        navigationSession?.add(routeManeuvers)
+        if isNewSession { navigationSession?.add(routeManeuvers) }
         showManeuvers(from: stepIndex)
     }
 

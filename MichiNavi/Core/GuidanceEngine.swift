@@ -78,10 +78,15 @@ final class GuidanceEngine {
         let remaining = max(totalDistance - travelled, 0)
 
         // 逸脱判定。1 回外れただけでは切り替えず、連続で外れたときだけ確定させる。
-        if match.lateralDistance > offRouteThreshold {
-            offRouteStreak += 1
-        } else {
+        //
+        // **測位の誤差がしきい値より大きい間は数えない**。誤差 100m の位置で
+        // 「中心線から 50m 以上離れている」とは言い切れないため。ビルの谷間や
+        // トンネル前後でこれを数えると、実際には経路上にいるのにリルートが連発する。
+        // 経路に戻ったときの解除は精度に関係なく効かせる（早く戻すほうが安全側）。
+        if match.lateralDistance <= offRouteThreshold {
             offRouteStreak = 0
+        } else if location.horizontalAccuracy >= 0, location.horizontalAccuracy <= offRouteThreshold {
+            offRouteStreak += 1
         }
 
         let stepIndex = currentStepIndex(travelled: travelled)

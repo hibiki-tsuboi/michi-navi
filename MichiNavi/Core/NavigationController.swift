@@ -62,6 +62,10 @@ final class NavigationController: ObservableObject {
     /// リルート計算がいま走っているか。何度も計算を投げないためだけのフラグで、
     /// 公開している `isRerouting` とは寿命が違う（失敗すれば即座に下りて再試行できる）。
     private var isCalculatingReroute = false
+    /// 直前の引き直しが終わった時刻。次を投げるまでの間隔をここから測る。
+    private var lastRerouteFinished: Date?
+    /// 連続で失敗した回数。空ける間隔を決める。成功したら 0 に戻す。
+    private var rerouteFailures = 0
 
     private init() {
         location.$location
@@ -141,6 +145,8 @@ final class NavigationController: ObservableObject {
         lastError = nil
         // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
         isRerouting = false
+        lastRerouteFinished = nil
+        rerouteFailures = 0
         phase = .calculating(destination)
 
         routingTask = Task {
@@ -192,6 +198,8 @@ final class NavigationController: ObservableObject {
         progress = nil
         isCalculatingReroute = false
         isRerouting = false
+        lastRerouteFinished = nil
+        rerouteFailures = 0
         phase = .idle
         location.setNavigating(false)
     }
@@ -236,25 +244,65 @@ final class NavigationController: ObservableObject {
 
     /// 経路を外れたときに、いまの位置から同じ目的地へ引き直す。
     /// まだ通っていない経由地は引き継ぐ。落とすと、外れた拍子に立ち寄り先が消える。
+    ///
+    /// **必ず間隔を空けること**。`GuidanceEngine` の逸脱判定は一度成立すると経路に戻るまで
+    /// 下りないので、`handle` は位置更新のたび（およそ毎秒）ここへ来る。計算中かどうかだけで
+    /// 抑えると、1 回終わるそばから次を投げることになり、
+    ///
+    ///   - 失敗したとき: MapKit に絞られてまた失敗する、の繰り返しになる
+    ///   - 成功したとき: 数秒ごとにルートが入れ替わり、音声が「再検索しました」を言い続け、
+    ///     CarPlay の「再検索中」カードが点滅する
+    ///
+    /// という形で確実に破綻する。
     private func reroute(to destination: Place, via waypoints: [Place]) {
-        guard !isCalculatingReroute else { return }
+        guard !isCalculatingReroute, canAttemptReroute else { return }
         isCalculatingReroute = true
         isRerouting = true
 
         routingTask?.cancel()
         routingTask = Task {
-            defer { isCalculatingReroute = false }
+            // 次に試してよい時刻は、始めたときではなく**終わったとき**から測る。
+            // 経由地つきは区間の数だけ計算するので、始点から測ると終わった瞬間に次が走る。
+            defer {
+                isCalculatingReroute = false
+                lastRerouteFinished = Date()
+            }
+
             do {
                 let routes = try await calculateRoutes(to: destination, via: waypoints)
-                guard !Task.isCancelled, let best = routes.first else { return }
+                guard !Task.isCancelled else { return }
+
+                guard let best = routes.first else {
+                    rerouteFailures += 1
+                    return
+                }
+                rerouteFailures = 0
                 // 経路に戻せたときだけ `isRerouting` が下りる（startNavigation の末尾）。
                 startNavigation(with: best)
             } catch {
-                // 引き直しに失敗しても案内は止めない。次の位置更新でまた試す。
+                // 引き直しに失敗しても案内は止めない。間隔を空けてまた試す。
+                rerouteFailures += 1
                 NSLog("[MichiNavi] リルートに失敗: \(error.localizedDescription)")
             }
         }
     }
+
+    /// 次の引き直しを試してよいか。
+    private var canAttemptReroute: Bool {
+        guard let lastRerouteFinished else { return true }
+        return Date().timeIntervalSince(lastRerouteFinished) >= rerouteInterval
+    }
+
+    /// 次に試すまでの間隔。連続で失敗するほど空けて、MapKit を叩き続けない。
+    /// 5 / 10 / 20 / 40 秒で頭打ちにする。
+    private var rerouteInterval: TimeInterval {
+        Self.minimumRerouteInterval * pow(2, Double(min(rerouteFailures, 3)))
+    }
+
+    /// 引き直しを試す最短間隔。**外れた直後の 1 回目は待たない**
+    /// （`lastRerouteFinished` が nil なので即座に走る）。ここで効かせるのは 2 回目以降で、
+    /// わざと別の道へ入ったときの反応を鈍らせずに、連打だけを止める。
+    private static let minimumRerouteInterval: TimeInterval = 5
 }
 
 enum NavigationError: LocalizedError {

@@ -30,8 +30,6 @@ final class CarPlayCoordinator: NSObject {
     /// `pauseTrip` を出したかどうか。自分で止めたときだけ再開する。
     /// 止めていないのに `resumeTrip` を投げると CarPlay 側の状態と食い違う。
     private var isTripPaused = false
-    /// ドラッグ中に受け取った累積移動量。差分を出すために覚えておく。
-    private var lastPanTranslation: CGPoint = .zero
 
     /// いま案内している経路の全 `CPManeuver`。`upcomingManeuvers` に載せるものも
     /// `CPRouteInformation` に渡すものも、必ずこの配列から取る。別インスタンスを混ぜると
@@ -566,26 +564,78 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// ただし届くかどうかは車次第（ノブやトラックパッドしか無い車もある）なので、
     /// パンボタンは外せない。ガイド p.33 が「パン UI へ入るボタンを必ず置くこと」を
     /// 求めているのはこのため。
-
-    func mapTemplateDidBeginPanGesture(_ mapTemplate: CPMapTemplate) {
-        lastPanTranslation = .zero
-    }
-
-    /// `translation` は `UIPanGestureRecognizer` と同じく**ジェスチャ開始からの累積値**。
-    /// そのまま渡すと動かすほど加速するので、前回との差分だけを地図へ送る。
+    ///
+    /// `translation` は名前に反して**前回の呼び出しからの差分**。CarPlay 側の実体は
+    /// `clientPanGestureWithDeltaPoint:velocity:` で、押した点と前回の点の引き算を
+    /// 送ってくる（iOS 18.6 でも同じ）。`UIPanGestureRecognizer` と同じ累積値だと
+    /// 思ってここでさらに差分を取ると、デルタを微分することになり、等速でドラッグ
+    /// しても地図がほとんど動かず、指を加減速したときだけガタつく。そのまま渡すこと。
+    ///
     /// 指に貼り付いて見えるよう、ドラッグ中はアニメーションを掛けない。
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdatePanGestureWithTranslation translation: CGPoint,
                      velocity: CGPoint) {
-        mapViewController.pan(by: CGPoint(x: translation.x - lastPanTranslation.x,
-                                          y: translation.y - lastPanTranslation.y),
-                              animated: false)
-        lastPanTranslation = translation
+        mapViewController.pan(by: translation, animated: false)
     }
 
-    func mapTemplate(_ mapTemplate: CPMapTemplate, didEndPanGestureWithVelocity velocity: CGPoint) {
-        lastPanTranslation = .zero
+    // MARK: ピンチ・回転・傾け（iOS 26）
+
+    /// ここから 9 つは `CPMapTemplateDelegate` の**任意**メソッド。名前を 1 文字でも
+    /// 間違えると、コンパイルは通ったまま黙って呼ばれなくなる。増やすときは
+    /// `#selector(CPMapTemplateDelegate.xxx)` が解決するかで確かめること。
+
+    func mapTemplateDidBeginZoomGesture(_ mapTemplate: CPMapTemplate) {
+        mapViewController.beginZoomGesture()
     }
+
+    /// ピンチとタップの両方がここに来る。ピンチは開始 → 更新 → 終了と続き、`scale` は
+    /// ジェスチャ開始からの累積倍率。いっぽう**ダブルタップ（拡大）と 2 本指タップ
+    /// （縮小）は開始も終了も無しに 1 回だけ来て、`scale` は 1.0 のまま**で、向きは
+    /// `velocity` の符号にしか入っていない。開始を受け取っているかどうかで見分け、
+    /// タップのときは拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
+    func mapTemplate(_ mapTemplate: CPMapTemplate,
+                     didUpdateZoomGestureWithCenter center: CGPoint,
+                     scale: CGFloat,
+                     velocity: CGFloat) {
+        guard mapViewController.isZoomingByGesture else {
+            if velocity > 0 { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
+            return
+        }
+        mapViewController.zoom(toScale: scale)
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didEndZoomGestureWithVelocity velocity: CGFloat) {
+        mapViewController.endZoomGesture()
+    }
+
+    func mapTemplateDidBeginRotationGesture(_ mapTemplate: CPMapTemplate) {
+        mapViewController.beginRotationGesture()
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate,
+                     didRotateWithCenter center: CGPoint,
+                     rotation: CGFloat,
+                     velocity: CGFloat) {
+        mapViewController.rotate(byRadians: rotation)
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, rotationDidEndWithVelocity velocity: CGFloat) {
+        mapViewController.endRotationGesture()
+    }
+
+    func mapTemplateDidBeginPitchGesture(_ mapTemplate: CPMapTemplate) {
+        mapViewController.beginPitchGesture()
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, pitchWithCenter center: CGPoint) {
+        mapViewController.pitch(towards: center)
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, pitchEndedWithCenter center: CGPoint) {
+        mapViewController.endPitchGesture()
+    }
+
+    // MARK: ノブ・トラックパッドでのパン
 
     /// ノブやボタンでの方向入力。1 回あたり画面の約 1/4 だけ動かす。
     func mapTemplate(_ mapTemplate: CPMapTemplate, panWith direction: CPMapTemplate.PanDirection) {

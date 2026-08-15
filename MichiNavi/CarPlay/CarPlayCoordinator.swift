@@ -590,14 +590,20 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
 
     /// ピンチとタップの両方がここに来る。ピンチは開始 → 更新 → 終了と続き、`scale` は
     /// ジェスチャ開始からの累積倍率。いっぽう**ダブルタップ（拡大）と 2 本指タップ
-    /// （縮小）は開始も終了も無しに 1 回だけ来て、`scale` は 1.0 のまま**で、向きは
-    /// `velocity` の符号にしか入っていない。開始を受け取っているかどうかで見分け、
-    /// タップのときは拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
+    /// （縮小）は開始も終了も無しに 1 回だけ来て、`scale` は 1.0、`velocity` は ±1.0**
+    /// という定数で埋められている（向きは符号だけが持つ）。
+    ///
+    /// **開始を受け取ったかどうかでは見分けないこと。** CarPlay 側の
+    /// `_handlePinchGesture:` は `UIGestureRecognizerState` を began / changed / ended の
+    /// 3 つでしか分岐しておらず、**cancelled では終了を送ってこない**。着信や Siri で
+    /// タッチが取り消されると終了が落ち、「ピンチ中」の印が残ったままになる。
+    /// 定数の組で見分ければ、その取りこぼしに寄りかからずに済む。
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdateZoomGestureWithCenter center: CGPoint,
                      scale: CGFloat,
                      velocity: CGFloat) {
-        guard mapViewController.isZoomingByGesture else {
+        guard scale != 1 || abs(velocity) != 1 else {
+            // タップ。拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
             if velocity > 0 { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
             return
         }

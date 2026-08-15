@@ -34,20 +34,34 @@ final class CarPlayMapViewController: UIViewController {
     private let minimumCameraDistance: CLLocationDistance = 200
     private let maximumCameraDistance: CLLocationDistance = 20_000
 
-    /// ピンチが始まった時点の高度。`scale` はジェスチャ開始からの累積倍率なので、
+    /// ピンチが始まった時点の距離。`scale` はジェスチャ開始からの累積倍率なので、
     /// 毎回この基準から割り直す。1 回ぶんずつ掛けていくと誤差が溜まり、
     /// 指を開いて閉じても元の縮尺に戻らなくなる。
     private var zoomBaseDistance: CLLocationDistance?
-    /// 回転が始まった時点の方位。基準を取り直す理由はズームと同じ。
+
+    /// 回転のジェスチャ中か、と**追従を切って回し始めた時点**の方位・累積角。
+    /// 基準を開始時ではなくここで取るのは、切るまでは追従が続いていて
+    /// 方位が動き続けるため。開始時に取ると、切り替わった瞬間に飛ぶ。
+    private var isRotatingByGesture = false
     private var rotationBaseHeading: CLLocationDirection?
+    private var rotationBaseAngle: CGFloat = 0
+    /// 追従を切るのに必要な回転量（ラジアン、約 3 度）。
+    /// **CarPlay はピンチと回転を同時に認識する**（`CPSMapTemplateViewController` の
+    /// `gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:` が
+    /// YES を返すのはこの組み合わせだけ。iOS 26.5 で確認）。縮尺を変えるつもりの
+    /// ピンチでも指が傾いた拍子に回転が始まるので、そこで追従を切ると
+    /// ズームで避けたはずの「縮小しただけで自車を見失う」がそのまま起きる。
+    private let minimumRotationToStopFollowing: CGFloat = 0.05
+
     /// ピッチの最中かどうかと、直前に受け取った 2 本指の中心。
     /// CarPlay はピッチだけ**動かした量を渡してこない**（中心座標のみ）ので、
     /// 前回との差から自分で作る。最初の 1 回は基準を取るだけで何もしない。
     private var isPitchingByGesture = false
     private var lastPitchCenter: CGPoint?
 
-    /// 傾きの上限。MKMapCamera は高度に応じてこれ以上を自前で丸めるが、
-    /// 丸められた値と保存した値がずれないようこちらでも止める。
+    /// 傾きの上限。これ以上寝かせると奥が潰れて、次の交差点までの道が読めなくなる。
+    /// `cameraDistance` と違って傾きは保存していない（`pitch(towards:)` が毎回
+    /// `mapView.camera.pitch` から積み直す）ので、同期のための上限ではなく見た目の判断。
     private let maximumPitch: CGFloat = 60
     /// 指を 1pt 滑らせたときに傾ける角度。300pt で上限に届く見当。
     /// **実車で触っていないので、重い・軽いはまずここを動かして調整する。**
@@ -184,19 +198,37 @@ final class CarPlayMapViewController: UIViewController {
                                   animated: true)
     }
 
+    /// 追従へ戻すときは、進行中の回転・傾けの基準も捨てる。残したままだと、指を離すまで
+    /// `rotate` / `pitch` がカメラを書き続ける一方で、追従が戻っているので位置更新のたびに
+    /// `follow` が書き戻し、1 秒ごとにガタついたあげく回した角度も残らない。
+    /// **指が触れている最中にもここへ来る**（リルートの成功・到着・案内開始で
+    /// `apply(phase:)` が呼ぶ）。ズームは追従したまま効かせる操作なので触らない。
     func recenter() {
         isFollowingUser = true
+        isRotatingByGesture = false
+        rotationBaseHeading = nil
+        isPitchingByGesture = false
+        lastPitchCenter = nil
         if let location = LocationService.shared.location {
             follow(location: location)
         }
     }
 
     func zoomIn() {
-        setCameraDistance(cameraDistance / 2)
+        setCameraDistance(baseCameraDistance / 2)
     }
 
     func zoomOut() {
-        setCameraDistance(cameraDistance * 2)
+        setCameraDistance(baseCameraDistance * 2)
+    }
+
+    /// ズームの基準にする距離。追従中は `cameraDistance` がそのまま効いているので
+    /// 保存値を使う（`follow` のアニメーションが飛んでいる最中に実カメラを読むと
+    /// 途中の値を掴む）。いっぽう `showRouteOverview` は `setVisibleMapRect` で
+    /// カメラだけを引いて保存値を更新しないので、追従していないときは実カメラから取る。
+    /// 保存値のまま基準にすると、全体表示に指が触れた瞬間そこへ跳ぶ。
+    private var baseCameraDistance: CLLocationDistance {
+        isFollowingUser ? cameraDistance : mapView.camera.centerCoordinateDistance
     }
 
     /// 丸めるのは**保存する値**。適用時にだけ丸めて `cameraDistance` を無制限に
@@ -230,12 +262,8 @@ final class CarPlayMapViewController: UIViewController {
 
     // MARK: - タッチジェスチャ（iOS 26）
 
-    /// ピンチの最中かどうか。ダブルタップ（拡大）と 2 本指タップ（縮小）は
-    /// 開始も終了も無しに更新だけが 1 回飛んでくるので、呼ぶ側はこれで見分ける。
-    var isZoomingByGesture: Bool { zoomBaseDistance != nil }
-
     func beginZoomGesture() {
-        zoomBaseDistance = cameraDistance
+        zoomBaseDistance = baseCameraDistance
     }
 
     /// `scale` はジェスチャ開始からの累積倍率。指を広げる（1 より大きい）と近づく。
@@ -259,42 +287,59 @@ final class CarPlayMapViewController: UIViewController {
     /// 向きと傾きを `MapOrientation` から作り直すので、追従したまま回しても 1 秒で戻る。
     /// パンと同じ扱いにして、戻るのは現在地ボタンに任せる。
     ///
+    /// ただし**開始を受けた時点では切らない**。ピンチと同時に認識されるため、
+    /// ここで切るとただの拡大縮小でも追従が落ちる（`minimumRotationToStopFollowing`）。
+    ///
     /// メーター内は進行方向を上に固定するのがガイド p.55 の要件なので受け付けない。
     /// いまジェスチャが来るのはセンターディスプレイだけだが、この判断はカメラを持つ
     /// このクラスに置いておく（`apply(orientation:)` と同じ形）。
     func beginRotationGesture() {
         guard style != .cluster else { return }
-        isFollowingUser = false
-        rotationBaseHeading = mapView.camera.heading
+        isRotatingByGesture = true
+        rotationBaseHeading = nil
     }
 
     /// `rotation` はジェスチャ開始からの累積角（ラジアン、時計回りが正）。
     /// 地図の中身を時計回りに回すと画面の上を向く方位は反時計回りに動くので、符号を反転する。
     func rotate(byRadians rotation: CGFloat) {
-        guard let rotationBaseHeading else { return }
+        guard isRotatingByGesture else { return }
+
+        guard let rotationBaseHeading else {
+            // はっきり回したと分かってから追従を切り、その瞬間の向きを基準にする。
+            guard abs(rotation) >= minimumRotationToStopFollowing else { return }
+            isFollowingUser = false
+            self.rotationBaseHeading = mapView.camera.heading
+            rotationBaseAngle = rotation
+            return
+        }
+
         let camera = mapView.camera
-        camera.heading = normalized(rotationBaseHeading - Double(rotation) * 180 / .pi)
+        camera.heading = normalized(rotationBaseHeading - Double(rotation - rotationBaseAngle) * 180 / .pi)
         mapView.setCamera(camera, animated: false)
     }
 
     func endRotationGesture() {
+        isRotatingByGesture = false
         rotationBaseHeading = nil
     }
 
     func beginPitchGesture() {
         guard style != .cluster else { return }
-        isFollowingUser = false
         isPitchingByGesture = true
         lastPitchCenter = nil
     }
 
     /// 2 本指を上へ滑らせると寝かせる（傾きを増やす）。Apple 純正の地図と同じ向き。
     /// CarPlay は中心座標しか渡してこないので、前回との差を動かした量として使う。
+    ///
+    /// 回転と同じく、**実際に傾ける段になってから**追従を切る。開始だけで切ると、
+    /// 指が触れただけで自車を見失う。
     func pitch(towards center: CGPoint) {
         guard isPitchingByGesture else { return }
         defer { lastPitchCenter = center }
-        guard let lastPitchCenter else { return }
+        guard let lastPitchCenter, lastPitchCenter.y != center.y else { return }
 
+        isFollowingUser = false
         let camera = mapView.camera
         camera.pitch = min(max(camera.pitch + (lastPitchCenter.y - center.y) * pitchDegreesPerPoint, 0),
                            maximumPitch)
@@ -306,8 +351,9 @@ final class CarPlayMapViewController: UIViewController {
         lastPitchCenter = nil
     }
 
-    /// 方位を 0 以上 360 未満に収める。負のまま持つと、停車中に
-    /// `heading(for:orientation:)` がそれをそのまま返して値が読みにくくなる。
+    /// 方位を 0 以上 360 未満に収める。`rotationBaseHeading - 累積角` は指を大きく回せば
+    /// 平気で ±360 を超える。MKMapView も `setCamera` で自前に丸めるが、
+    /// `maximumPitch` と同じで、丸め方を MapKit に当てにせず渡す前に揃えておく。
     private func normalized(_ heading: CLLocationDirection) -> CLLocationDirection {
         let value = heading.truncatingRemainder(dividingBy: 360)
         return value < 0 ? value + 360 : value

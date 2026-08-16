@@ -280,6 +280,20 @@ CarPlay 層は触らずに済む設計。
 - **Swift 並行性**: `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`。既定で全部が MainActor。
   そのため `CLLocationManagerDelegate` / `MKLocalSearchCompleterDelegate` は
   `nonisolated` + `MainActor.assumeIsolated {}` で受けている。この形を崩さない。
+  - **初期化子を関数として `map` へ渡さない**。`routes.map(Profile.init(route:))` と書くと
+    `(NavRoute) -> Profile` という**隔離情報の落ちた関数値**になり、nonisolated な
+    `map` へ渡すことになる。`routes.map { Profile(route: $0) }` ならクロージャが
+    MainActor の文脈で作られて隔離を引き継ぐ。中身は同じで、書き方だけの違い。
+    `SWIFT_VERSION = 5.0` のうちは警告だが、Swift 6 モードではエラー。
+  - **AVFoundation の Sendable 警告を `@preconcurrency import` で黙らせない**。
+    ファイル全体で検査が外れ、本当に危ないものまで見えなくなる。効く範囲を
+    その 1 か所に絞れる `nonisolated(unsafe)` な局所定数で受けて、**なぜ安全かを
+    その場に書く**（`SpeechInput.convert` の `source` がその例。SDK が `@Sendable` と
+    宣言している変換ブロックは、実際には `convert` の中から同期に呼ばれて戻る前に
+    用済みになる）。なお `AVAudioConverter` は iOS 26 の SDK で Sendable になったので、
+    そちらに `nonisolated(unsafe)` を付けると「不要」と警告される。
+    **Sendable は「スレッド安全」ではなく「境界を越えて渡してよい」の意味**なので、
+    音声スレッドに閉じ込める約束そのものは変わらず要る。
 - **`AppDelegate` に `configurationForConnecting` を実装しない**。CarPlay シーンは Info.plist の
   シーンマニフェストが作る。実装するとマニフェストより優先され、SwiftUI の `WindowGroup` が
   生成されなくなる。

@@ -15,7 +15,9 @@ enum RouteCharacter {
     static func tags(for routes: [NavRoute]) -> [[String]] {
         guard routes.count > 1 else { return routes.map { _ in [] } }
 
-        let profiles = routes.map(Profile.init(route:))
+        // `map(Profile.init(route:))` と書かないこと。関数として渡すと MainActor の
+        // 隔離が落ちる（既定で全部が MainActor なので、初期化子も MainActor 隔離）。
+        let profiles = routes.map { Profile(route: $0) }
         var tags = [[String]](repeating: [], count: routes.count)
 
         // 同じ値で並んだときに全員へ付けない。いちばん良いものが 1 本のときだけ出す。

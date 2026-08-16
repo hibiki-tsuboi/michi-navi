@@ -204,7 +204,10 @@ final class SpeechInput {
         let hardware = input.outputFormat(forBus: 0)
         // マイクの形式（多くは 48kHz float）と、認識モデルが受け取る形式は違う。
         // `AVAudioConverter` は音声スレッドの中でしか触らないので、そこへ閉じ込める。
-        nonisolated(unsafe) let converter = AVAudioConverter(from: hardware, to: format)
+        // （`nonisolated(unsafe)` は要らない。iOS 26 の SDK で `AVAudioConverter` は
+        // Sendable になった。ただし **Sendable は「スレッド安全」ではなく「境界を越えて
+        // 渡してよい」の意味**なので、閉じ込める約束のほうは変わらず要る。）
+        let converter = AVAudioConverter(from: hardware, to: format)
 
         input.installTap(onBus: 0, bufferSize: 4_096, format: hardware) { buffer, _ in
             guard let converter, let converted = Self.convert(buffer, using: converter, to: format) else { return }
@@ -232,6 +235,14 @@ final class SpeechInput {
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1_024
         guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
 
+        // 変換ブロックは SDK 側で `@Sendable` と宣言されているが、**実際には `convert` の
+        // 中から同期に呼ばれ、戻る前に用済みになる**（足りないぶんの入力を引きに来る
+        // プル型の callback）。`buffer` が別のスレッドへ渡ることは無い。
+        // 「同期にしか呼ばれない」を型では言えないので、ここで引き受ける。
+        // **`@preconcurrency import` で黙らせないこと。** それだと AVFoundation 由来の
+        // 検査がこのファイル全体で外れ、本当に危ないものまで見えなくなる。
+        nonisolated(unsafe) let source = buffer
+
         var isConsumed = false
         var error: NSError?
         let status = converter.convert(to: output, error: &error) { _, outStatus in
@@ -242,7 +253,7 @@ final class SpeechInput {
             }
             isConsumed = true
             outStatus.pointee = .haveData
-            return buffer
+            return source
         }
 
         guard status != .error, output.frameLength > 0 else { return nil }

@@ -187,7 +187,9 @@ private extension NavRoute {
         var waypointStepIndices: [Int] = []
 
         for (index, leg) in legs.enumerated() {
-            steps.append(contentsOf: leg.steps.compactMap(NavStep.init(step:)))
+            // `compactMap(NavStep.init(step:))` と書かないこと。関数として渡すと
+            // MainActor の隔離が落ちる（既定で全部が MainActor）。
+            steps.append(contentsOf: leg.steps.compactMap { NavStep(step: $0) })
             // 最後の区間の終わりは目的地なので、経由地には数えない。
             if index < legs.count - 1 { waypointStepIndices.append(max(steps.count - 1, 0)) }
         }

@@ -91,7 +91,7 @@ final class CarPlayDestinationBrowser: NSObject {
                                           sectionIndexTitle: nil))
         }
 
-        sections.append(CPListSection(items: [categoriesItem],
+        sections.append(CPListSection(items: [categoriesItem, detourItem],
                                       header: "さがす",
                                       sectionIndexTitle: nil))
 
@@ -142,6 +142,65 @@ final class CarPlayDestinationBrowser: NSObject {
             completion()
         }
         return item
+    }
+
+    /// 寄り道をひとつ提案する。
+    ///
+    /// 押した先で一覧を出さず、いきなり 1 件を見せる。候補を並べると結局いつもの
+    /// 選び方に戻ってしまい、乱数に任せた意味が無くなる。
+    private var detourItem: CPListItem {
+        let item = CPListItem(text: "寄り道してみる",
+                              detailText: isNavigating ? "この先から 1 件えらぶ" : "近くから 1 件えらぶ")
+        item.handler = { [weak self] _, completion in
+            self?.suggestDetour()
+            completion()
+        }
+        return item
+    }
+
+    private func suggestDetour() {
+        guard let coordinate = location.location?.coordinate else {
+            onError("現在地が取得できていません")
+            return
+        }
+
+        Task {
+            do {
+                let suggestion = try await DetourSuggester.suggest(
+                    near: coordinate,
+                    along: navigation.currentRoute,
+                    fromStepIndex: navigation.progress?.stepIndex ?? 0)
+
+                guard let suggestion else {
+                    onError("寄り道できそうな場所が見つかりませんでした")
+                    return
+                }
+                presentDetour(suggestion)
+            } catch {
+                onError(error.localizedDescription)
+            }
+        }
+    }
+
+    private func presentDetour(_ suggestion: DetourSuggester.Suggestion) {
+        let sheet = CPActionSheetTemplate(
+            title: suggestion.place.name,
+            message: "\(suggestion.category)・\(suggestion.place.subtitle)",
+            actions: [
+                CPAlertAction(title: isNavigating ? "経由地として追加" : "ここへ行く", style: .default) { [weak self] _ in
+                    self?.dismissSheet()
+                    self?.finish(with: self?.isNavigating == true ? .waypoint(suggestion.place)
+                                                                 : .destination(suggestion.place))
+                },
+                CPAlertAction(title: "ほかをさがす", style: .default) { [weak self] _ in
+                    self?.dismissSheet()
+                    self?.suggestDetour()
+                },
+                CPAlertAction(title: "やめる", style: .cancel) { [weak self] _ in
+                    self?.dismissSheet()
+                },
+            ])
+        interfaceController.presentTemplate(sheet, animated: true, completion: nil)
     }
 
     private var categoriesItem: CPListItem {

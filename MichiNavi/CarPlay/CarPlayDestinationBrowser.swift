@@ -91,14 +91,28 @@ final class CarPlayDestinationBrowser: NSObject {
                                           sectionIndexTitle: nil))
         }
 
+        // **ピンのすぐ下に置く。** ピンの 2 枠に入らないが決まった時間に行く場所
+        // （送り迎え・買い物）を、走行中でも届く高さへ引き上げる。
+        // 順番を入れ替えるのではなく別の節にするのは、なぜ並びが変わったのかを
+        // 見て分かるようにするため。
+        let frequent = store.frequentDestinations()
+        if !frequent.isEmpty {
+            sections.append(CPListSection(items: frequent.map(makeItem(for:)),
+                                          header: String(localized: "この時間の行き先"),
+                                          sectionIndexTitle: nil))
+        }
+
         if !store.favorites.isEmpty {
             sections.append(CPListSection(items: store.favorites.map(makeItem(for:)),
                                           header: String(localized: "お気に入り"),
                                           sectionIndexTitle: nil))
         }
 
-        if !store.recents.isEmpty {
-            sections.append(CPListSection(items: store.recents.map(makeItem(for:)),
+        // 引き上げたぶんは履歴から抜く。同じ行が 2 か所に出ると、どちらを押しても
+        // 同じだと分かるまで一瞬迷う。
+        let remaining = store.recents.filter { !frequent.contains($0) }
+        if !remaining.isEmpty {
+            sections.append(CPListSection(items: remaining.map(makeItem(for:)),
                                           header: String(localized: "最近の目的地"),
                                           sectionIndexTitle: nil))
         }

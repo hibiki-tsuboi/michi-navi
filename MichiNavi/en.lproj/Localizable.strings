@@ -42,6 +42,7 @@
 "この先は気温が低く、路面が凍結する恐れがあります" = "It's cold ahead — roads may be icy";
 "この先は雨の予報です" = "Rain is forecast ahead";
 "この先は雪の予報です" = "Snow is forecast ahead";
+"この時間の行き先" = "Around this time";
 "この経路で開始" = "Start this route";
 "この経路について" = "About this route";
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";

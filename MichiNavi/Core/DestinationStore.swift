@@ -28,12 +28,15 @@ final class DestinationStore: ObservableObject {
     private let recentsKey = "destinations.recents"
     private let favoritesKey = "destinations.favorites"
     private let parkingKey = "destinations.parking"
+    private let visitsKey = "destinations.visits"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         recents = load(key: recentsKey)
         favorites = load(key: favoritesKey)
         parking = loadParking()
+        visits = (defaults.data(forKey: visitsKey)
+            .flatMap { try? JSONDecoder().decode([String: [Date]].self, from: $0) }) ?? [:]
         home = loadPlace(key: Pinned.home.key)
         work = loadPlace(key: Pinned.work.key)
     }
@@ -105,6 +108,75 @@ final class DestinationStore: ObservableObject {
             recents.removeLast(recents.count - recentsLimit)
         }
         save(recents, key: recentsKey)
+        rememberVisit(of: place)
+    }
+
+    // MARK: - いつ行く場所か
+
+    /// 案内を始めた時刻の記録。キーは `Place.id`、値は新しい順の時刻。
+    ///
+    /// **場所そのものは持たない。** 履歴（`recents`）に載っているものだけを対象にして、
+    /// 落ちた場所の記録は捨てる。ここが独立して増えると、消したはずの行き先が
+    /// 並べ替えにだけ効き続けることになる。
+    private var visits: [String: [Date]] = [:]
+
+    /// 1 か所につき覚える件数。**増やさないこと。** 効くのは直近の習慣で、
+    /// 半年前の 1 回で並びが変わるほうが害になる。
+    private let visitLimit = 10
+    /// この時間差までを「同じ時間帯」とみなす（分）。
+    ///
+    /// **時の成分だけで比べないこと。** 23:30 と 21:00 が「23 と 21 で 2 時間差」に
+    /// なってしまい、窓が実質 3 時間近くまで広がる。分まで見れば端がぶれない。
+    private static let windowMinutes = 120
+    /// 引き上げるのに要る回数。**1 回では引き上げない。** たまたま寄っただけの場所が
+    /// 毎日その時刻に先頭へ出てくると、履歴が信用できなくなる。
+    private static let minimumVisits = 2
+
+    private func rememberVisit(of place: Place) {
+        var history = visits[place.id] ?? []
+        history.insert(Date(), at: 0)
+        if history.count > visitLimit { history.removeLast(history.count - visitLimit) }
+        visits[place.id] = history
+
+        let living = Set(recents.map(\.id))
+        visits = visits.filter { living.contains($0.key) }
+        defaults.set(try? JSONEncoder().encode(visits), forKey: visitsKey)
+    }
+
+    /// いまの時間帯によく行く場所。**履歴の中から拾う。**
+    ///
+    /// 走行中はキーボードが塞がれるので、行き先に届く速さは「一覧の上のほうにあるか」で
+    /// ほぼ決まる。朝は職場・夕方は自宅という一番太い線は `Pinned` が受け持つが、
+    /// 週に何度か決まった時間に行く場所（送り迎え・買い物）はピンの 2 枠に入らない。
+    ///
+    /// **お気に入りは並べ替えない。** あちらは利用者が自分で並べたもので、位置が動くと
+    /// 「どこにあるか」を覚え直すことになる。履歴はもともと最近順で動き続けるので、
+    /// 順序が変わっても無理がない。
+    ///
+    /// 曜日は平日と休日だけで見る。曜日ごとに分けると 1 曜日あたりの回数が減って、
+    /// `minimumVisits` に届くまでに何週間もかかる。
+    func frequentDestinations(at date: Date = Date(), limit: Int = 3) -> [Place] {
+        let calendar = Calendar.current
+        let isWeekend = calendar.isDateInWeekend(date)
+
+        let matched = recents.filter { place in
+            let hits = (visits[place.id] ?? []).filter { visit in
+                calendar.isDateInWeekend(visit) == isWeekend
+                    && Self.minuteDistance(visit, date, calendar: calendar) <= Self.windowMinutes
+            }
+            return hits.count >= Self.minimumVisits
+        }
+        return Array(matched.prefix(limit))
+    }
+
+    /// 1 日の中での時刻の差（分）。**時計は 24 時間で一周する**ので、23:30 と 0:30 は
+    /// 1 時間差として数える。日付は見ない（「毎日この時刻」を拾いたいので）。
+    private static func minuteDistance(_ lhs: Date, _ rhs: Date, calendar: Calendar) -> Int {
+        func minutes(_ date: Date) -> Int {
+            calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+        }
+        let difference = abs(minutes(lhs) - minutes(rhs))
+        return min(difference, 24 * 60 - difference)
     }
 
     func isFavorite(_ place: Place) -> Bool {
@@ -123,6 +195,10 @@ final class DestinationStore: ObservableObject {
     func clearRecents() {
         recents = []
         save(recents, key: recentsKey)
+        // 履歴を消したら「いつ行く場所か」も消える。残すと、一覧に無い場所の記録だけが
+        // 生き続けることになる。
+        visits = [:]
+        defaults.removeObject(forKey: visitsKey)
     }
 
     // MARK: - 駐車位置

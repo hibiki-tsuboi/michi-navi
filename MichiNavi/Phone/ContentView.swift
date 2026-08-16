@@ -25,6 +25,8 @@ struct ContentView: View {
                 Marker(route.destination.name, coordinate: route.destination.coordinate)
             }
         }
+        // 渋滞を出す。どのルートを選ぶかの判断材料になるので、候補を見せる画面にこそ要る。
+        .mapStyle(.standard(showsTraffic: true))
         .mapControls {
             MapUserLocationButton()
             MapCompass()

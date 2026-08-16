@@ -93,6 +93,9 @@ final class CarPlayMapViewController: UIViewController {
         mapView.showsUserLocation = true
         mapView.showsCompass = false
         mapView.showsScale = false
+        // 渋滞は**センターディスプレイでだけ**出す。Dashboard とメーター内は
+        // 狭くて経路の線と見分けが付かず、赤い線が増えるだけになる。
+        mapView.showsTraffic = style.isWide
         mapView.isRotateEnabled = false
         mapView.isPitchEnabled = false
         view = mapView

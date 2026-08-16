@@ -22,6 +22,9 @@ final class CarPlayDestinationBrowser: NSObject {
         Category(title: "ガソリン", symbol: "fuelpump.fill", pointsOfInterest: [.gasStation]),
         Category(title: "EV充電", symbol: "bolt.car.fill", pointsOfInterest: [.evCharger]),
         Category(title: "駐車場", symbol: "parkingsign", pointsOfInterest: [.parking]),
+        // MapKit に SA/PA のカテゴリは無いので、休憩に使えるものを束ねて代用する。
+        Category(title: "休憩", symbol: "cup.and.heat.waves.fill",
+                 pointsOfInterest: [.restroom, .cafe, .gasStation]),
         Category(title: "食事", symbol: "fork.knife", pointsOfInterest: [.restaurant]),
         Category(title: "カフェ", symbol: "cup.and.saucer.fill", pointsOfInterest: [.cafe]),
         Category(title: "買い物", symbol: "cart.fill", pointsOfInterest: [.store]),
@@ -62,6 +65,13 @@ final class CarPlayDestinationBrowser: NSObject {
     /// 目的地リストを開く。開くたびに作り直すので履歴は常に最新になる。
     func present() {
         interfaceController.pushTemplate(makeRootTemplate(), animated: true, completion: nil)
+    }
+
+    /// 休憩できる場所を直接開く。休憩の催促から呼ばれる。
+    /// 目的地リストを経由させないのは、押した先が 3 階層先だと運転中に辿れないため。
+    func presentRestStops() {
+        guard let category = Self.categories.first(where: { $0.title == "休憩" }) else { return }
+        presentResults(for: category)
     }
 
     // MARK: - 目的地リスト

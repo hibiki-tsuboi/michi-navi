@@ -58,6 +58,10 @@ final class VoiceGuidance: NSObject {
         navigation.waypointReached
             .sink { [weak self] in self?.speak(.waypoint(name: $0.name)) }
             .store(in: &cancellables)
+
+        RestReminder.shared.suggestion
+            .sink { [weak self] in self?.speak(.rest(hours: 2)) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 読み直し

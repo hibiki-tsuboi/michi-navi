@@ -162,6 +162,10 @@ final class CarPlayCoordinator: NSObject {
             .compactMap { $0 }
             .sink { [weak self] in self?.presentAlert(message: $0) }
             .store(in: &cancellables)
+
+        RestReminder.shared.suggestion
+            .sink { [weak self] in self?.presentRestSuggestion() }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -619,6 +623,25 @@ final class CarPlayCoordinator: NSObject {
     }
 
     // MARK: - 通知
+
+    /// 連続運転が長くなったときの催促。
+    ///
+    /// **`CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を
+    /// 覆って操作を求めるので、催促のために運転者の手を止めさせることになる。
+    /// こちらは案内カードの脇に出て、放っておけば消える。
+    /// 読み上げは `VoiceGuidance` が同じ合図で受け持つので、ここでは出さない。
+    private func presentRestSuggestion() {
+        let alert = CPNavigationAlert(
+            titleVariants: ["2時間走りました。休憩しませんか"],
+            subtitleVariants: nil,
+            image: UIImage(systemName: "cup.and.heat.waves.fill"),
+            primaryAction: CPAlertAction(title: "さがす", style: .default) { [weak self] _ in
+                self?.destinations?.presentRestStops()
+            },
+            secondaryAction: CPAlertAction(title: "あとで", style: .cancel) { _ in },
+            duration: 12)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
 
     private func presentAlert(message: String) {
         let alert = CPAlertTemplate(titleVariants: [message],

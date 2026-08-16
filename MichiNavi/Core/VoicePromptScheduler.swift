@@ -11,6 +11,8 @@ enum VoicePrompt: Equatable {
     /// 経由地に着いたとき。案内は続くので、終了とは言い分ける。
     case waypoint(name: String)
     case arrival(destination: String)
+    /// 連続運転が長くなったとき。案内とは無関係に流れる。
+    case rest(hours: Int)
 
     var spokenText: String {
         switch self {
@@ -25,6 +27,8 @@ enum VoicePrompt: Equatable {
             return "経由地の\(name)に到着しました。案内を続けます"
         case let .arrival(destination):
             return "\(destination)に到着しました。案内を終了します"
+        case let .rest(hours):
+            return "運転を始めて\(hours)時間になります。そろそろ休憩しませんか"
         }
     }
 }

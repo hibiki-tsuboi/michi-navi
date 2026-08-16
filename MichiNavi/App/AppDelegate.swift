@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // iPhone 画面と CarPlay 画面のどちらから案内を始めても読み上げるよう、
         // シーンではなくアプリの起動時に購読を始める。
         VoiceGuidance.shared.start()
+        // 連続運転の数え上げも同じ理由でここから。案内をまたいで積み上げるので、
+        // シーンの寿命ではなくアプリの寿命に合わせる必要がある。
+        RestReminder.shared.start()
         return true
     }
 }

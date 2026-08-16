@@ -138,6 +138,13 @@ final class CarPlayCoordinator: NSObject {
 
         mapTemplate.mapDelegate = self
         mapTemplate.automaticallyHidesNavigationBar = false
+        // **既定に任せると案内カードが赤く出る**（2026-08-16 に実車の CarPlay で実測）。
+        // 色を渡す口は 3 つあり、`CPManeuver.cardBackgroundColor` → これ → CarPlay の既定、
+        // の順に優先される。前 2 つを渡していないのに赤いので、赤は既定そのもの。
+        // 曲がる指示は警告ではないので、経路の線と同じ青に揃える。
+        // 渡した色は `pauseTrip` のカードにも波及するため、あちらは色を明示して切り離す
+        // （[replaceRoute] と [apply(isRerouting:)]）。
+        mapTemplate.guidanceBackgroundColor = .systemBlue
         applyIdleButtons()
         interfaceController.setRootTemplate(mapTemplate, animated: true, completion: nil)
 
@@ -405,7 +412,9 @@ final class CarPlayCoordinator: NSObject {
             isTripPaused = true
             // description に nil を渡すと CarPlay 側の既定文言（英語環境なら英語）になる。
             // 他の画面の文言に合わせて日本語で出す。
-            navigationSession.pauseTrip(for: .rerouting, description: String(localized: "ルートを再検索中"))
+            navigationSession.pauseTrip(for: .rerouting,
+                                        description: String(localized: "ルートを再検索中"),
+                                        turnCardColor: Self.pausedCardColor)
         } else {
             guard isTripPaused else { return }
             isTripPaused = false
@@ -423,9 +432,18 @@ final class CarPlayCoordinator: NSObject {
     /// 前の経路を掴んだままになる。
     private func replaceRoute(reason: RouteChangeReason) {
         guard let navigationSession else { return }
-        navigationSession.pauseTrip(for: .rerouting, description: String(localized: "ルートを引き直し中"))
+        navigationSession.pauseTrip(for: .rerouting,
+                                    description: String(localized: "ルートを引き直し中"),
+                                    turnCardColor: Self.pausedCardColor)
         resume(navigationSession, reason: reason)
     }
+
+    /// 止まっているあいだのカードの色。
+    ///
+    /// **`guidanceBackgroundColor` と分けてある**。渡さないと `pauseTrip` のカードは
+    /// 案内カードと同じ青になり、「いま案内が止まっている」ことが文言でしか分からなくなる。
+    /// 赤にはしない。引き直しは危険でも失敗でもなく、待てば戻るものなので。
+    private static let pausedCardColor = UIColor.systemOrange
 
     /// 引き直した経路で案内を再開する。
     ///

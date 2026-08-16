@@ -563,24 +563,21 @@ CarPlay 層は触らずに済む設計。
 - **車から目的地が来ても即発進させない**。`didReceiveRequestForDestination` は
   `requestRoutes(to:)` に流して提示で止める（ガイド p.61 が trip preview を求めている）。
   `startNavigation(to:)` にすると車の操作だけで走り出すことになる。
-- **`CPMapTemplate.guidanceBackgroundColor` はあえて設定していない**。経路の線が青
-  （`systemBlue`）なのに案内まわりの色が違って見えても、車と CarPlay の既定に任せた結果で
-  正しい。**赤く見えたときは、それが案内カードなのか `pauseTrip(for: .rerouting)` の
-  「再検索中」カードなのかを先に切り分けること。** 後者が警告色で出るのは妥当で、色を
-  直す話ではない（2026-08-15 に一度これを取り違えて `guidanceBackgroundColor` を
-  青に固定しかけ、戻した）。色を渡すと `pauseTrip` のカードも `turnCardColor` の
-  フォールバック先としてそちらに従うので、**両方まとめて青くなる**点にも注意。
-  - **渡さなかったときの既定は赤にならない**（26.2 のランタイムを逆アセンブルして確認）。
-    案内カードとポーズカードの背景はどちらも
-    `-[CPSNavigationCardViewController _updateCardBackgroundColors]` が決めていて、
-    「アプリの `guidanceBackgroundColor` → 無ければ
-    `+[UIColor(CarPlayUIServices) crsui_consoleTurnCardETATrayBackgroundColor]`」という
-    同じ経路を通る。その既定は dynamic provider で、**ダークなら黒の alpha 0.65、
-    ライトなら白の alpha 0.75**。半透明の黒か白しか出てこない。
-  - **色を理由ごとに持っているのはポーズ側だけ**（`-[CPSNavigator
-    pauseTripForReason:description:turnCardColor:]`）。つまり赤いパネルはほぼ
-    「再検索中」のカードで、これがターン案内カードと同じ位置に同じ形で出るために
-    案内カードが赤くなったように見える。**文言で切り分けること。**
+- **`CPMapTemplate.guidanceBackgroundColor` は必ず設定する**。**渡さないと案内カードが
+  真っ赤に出る**（2026-08-16 に CarPlay で実測。曲がる指示は警告ではないので、
+  そのままにはできない）。経路の線と揃えて `systemBlue` を渡している。
+  - **色を渡す口は 3 つあり、`CPManeuver.cardBackgroundColor` → `guidanceBackgroundColor`
+    → CarPlay の既定、の順に優先される**（前 2 つはヘッダに明記。3 つ目は
+    `-[CPSNavigationCardViewController _updateCardBackgroundColors]` の分岐）。
+    赤が出ていたときは前 2 つとも未設定だったので、**赤は CarPlay の既定そのもの**。
+  - **逆アセンブルの読みは当てにしない。** 26.2 のランタイムでは既定の落とし先が
+    `+[UIColor(CarPlayUIServices) crsui_consoleTurnCardETATrayBackgroundColor]`
+    （ダーク＝黒 alpha 0.65 / ライト＝白 alpha 0.75、`setGlassTintColor:` へ渡る）に
+    見えるが、**実機はそこを通っていない**。半透明の黒か白しか出ないはずが真っ赤だった。
+    追っていない分岐が残っている。**色の話はバイナリではなくスクリーンショットで決めること。**
+  - **`pauseTrip` のカードは `turnCardColor` で明示的に分ける**。渡さないと
+    `guidanceBackgroundColor` に落ちて案内カードと同じ青になり、「いま案内が
+    止まっている」ことが文言でしか分からなくなる（`CarPlayCoordinator.pausedCardColor`）。
   - **文言はどちらの側のものか必ず確かめる。** CarPlay 自身が出す日本語は
     `CarPlaySupport.framework/ja.lproj/Localizable.strings` にあり、
     `REROUTING = 経路の変更中…` / `LOADING = 読み込み中…` / `PROCEED_TO_ROUTE = 経路へ進む`。

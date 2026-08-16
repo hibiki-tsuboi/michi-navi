@@ -478,6 +478,8 @@ final class CarPlayCoordinator: NSObject {
         maneuver.symbolImage = kind.image
         // 画面のアイコンだけでなく、車のメーター・HUD へもこの型で送られる。
         maneuver.maneuverType = kind.type
+        // ロータリーの回り方に効く。既定は右側通行なので、渡さないと日本では逆に描かれる。
+        maneuver.trafficSide = DrivingSideLocator.shared.current.carPlaySide
         maneuver.initialTravelEstimates = CPTravelEstimates(
             distanceRemaining: .meters(distance),
             timeRemaining: estimatedTime(forDistance: step.distance, on: route))
@@ -882,6 +884,17 @@ extension CarPlayCoordinator: CPSessionConfigurationDelegate {
                               limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface) {
         guard case .idle = navigation.phase else { return }
         applyIdleButtons()
+    }
+}
+
+private extension DrivingSide {
+    /// 通行区分そのものは走る国の話なので `Core/` に置き、CarPlay の型への
+    /// 読み替えだけをこちら側に持つ。
+    var carPlaySide: CPTrafficSide {
+        switch self {
+        case .left: .left
+        case .right: .right
+        }
     }
 }
 

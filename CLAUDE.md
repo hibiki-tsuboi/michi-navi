@@ -67,9 +67,9 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 6 つ: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 7 つ: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
-`SpeechInput.shared`。
+`SpeechInput.shared` / `DrivingSideLocator.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 ### `GuidanceEngine`（経路上の進捗計算）
@@ -198,9 +198,20 @@ CarPlay 層は触らずに済む設計。
   `add(_:)` でセッションへ渡す決まりなので、`routeManeuvers` に全区間を作ってから
   そこを切り出している。**別インスタンスを混ぜない**こと（`updateEstimates(for:)` の
   宛先が食い違う）。
-- **`CPManeuver.trafficSide` は設定していない**。ロータリーの回転方向に効くが、走行国を
-  MapKit は教えてくれず、`Place` も国コードを持たない（履歴から戻した `MKMapItem` は
-  座標だけ）。既定の右側通行のままなので、日本のロータリーでは向きが逆になる。
+- **`CPManeuver.trafficSide` は現在地の国から決めている**（`DrivingSideLocator`）。
+  効くのはロータリーの回り方で、**既定は右側通行**。渡さないと日本のロータリーが逆に描かれる。
+  MapKit は経路にも地点にも走行国を付けてこない（履歴から戻した `MKMapItem` は座標だけ）ので、
+  iOS 26 の `MKReverseGeocodingRequest` で現在地から引き、
+  `MKAddressRepresentations.region` を見る。**走行側を教えてくれる API は無い**ので、
+  左側通行の国は表で持つしかない。判定は「表に載っていれば左、それ以外は右」に倒してある。
+  - `regionCode` の Swift 名は **`region`**（`Locale.Region?`）。`NS_REFINED_FOR_SWIFT` なので
+    ヘッダの名前では引けない。`__regionCode` なら文字列で取れる。
+  - **逆ジオコーディングは連打しない**。国境をまたがない限り変わらないので、
+    前回引いた地点から 100km 動いたときだけ引き直す。測位が来るまでは端末の地域で代用する
+    （自分の国で運転するのが大半なので、既定の右側通行よりは当たる）。
+  - **すでに作った `CPManeuver` には後から反映されない**。案内の途中で国が判明・変化しても、
+    その経路のぶんは作り直さない。国境をまたぐ運転は稀で、引き直せば `resumeTrip` から
+    作り直しになるため。
 - **CarPlay の地図では中心合わせ・全体表示で `view.safeAreaInsets` を必ず差し引く**。
   テンプレート（上部バー・案内カード）が地図の上に重なるため、引かないと自車位置が裏に隠れる。
 - **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or

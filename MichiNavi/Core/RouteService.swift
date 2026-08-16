@@ -59,6 +59,16 @@ extension NavRoute {
         return hasher.finalize()
     }
 
+    /// `stepIndex` から先の指示の並び。**同じ道をたどるかどうかを見分ける**ために使う。
+    ///
+    /// `signature` ではこれができない。あちらは距離まで見るので、**途中から引き直した
+    /// 経路とは必ず食い違う**（走行中の区間だけが短くなるため）。指示だけなら、同じ道を
+    /// 同じ順に曲がるかぎり一致する。
+    func instructions(from stepIndex: Int) -> [String] {
+        guard stepIndex < steps.count, stepIndex >= 0 else { return [] }
+        return steps[stepIndex...].map(\.instruction)
+    }
+
     /// `stepIndex` の区間の始まりから先の座標列。まだ通っていない部分を指す。
     /// ルート沿いに施設を探すときの範囲になる。
     func remainingCoordinates(from stepIndex: Int) -> [CLLocationCoordinate2D] {
@@ -115,13 +125,17 @@ protocol RouteProviding: AnyObject {
                     to destination: Place,
                     arrivingBy date: Date) async throws -> TimeInterval
 
-    /// **いま出発した場合の**所要時間。案内中に到着予定を測り直すために使う。
+    /// **いま出発した場合の**最良経路。案内中に到着予定を測り直すために使う。
     ///
-    /// `routes` と違って経路の形は返さない。走行中に経路そのものを差し替えると音声も
-    /// 案内カードも追随できないので、**動かしてよいのは数字だけ**。
-    func travelTime(from origin: CLLocationCoordinate2D,
-                    via waypoints: [Place],
-                    to destination: Place) async throws -> TimeInterval
+    /// 返るのは経路そのものだが、**呼び出し側が勝手に差し替えてはいけない**。走行中に
+    /// 経路が入れ替わると音声も案内カードも追随できないので、動かしてよいのは数字だけで、
+    /// 形のほうは「いま引き直すとこうなる」という比較用（`TrafficAdvisor`）。
+    ///
+    /// **用途ごとに 2 回投げないこと。** 経由地があると区間の数だけ `MKDirections` を
+    /// 投げるので、測り直しと迂回の判断で別々に呼ぶと問い合わせが倍になる。
+    func currentBestRoute(from origin: CLLocationCoordinate2D,
+                          via waypoints: [Place],
+                          to destination: Place) async throws -> NavRoute
 }
 
 final class MapKitRouteProvider: RouteProviding {
@@ -171,25 +185,27 @@ final class MapKitRouteProvider: RouteProviding {
         return route.drivingTravelTime
     }
 
-    func travelTime(from origin: CLLocationCoordinate2D,
-                    via waypoints: [Place],
-                    to destination: Place) async throws -> TimeInterval {
+    func currentBestRoute(from origin: CLLocationCoordinate2D,
+                          via waypoints: [Place],
+                          to destination: Place) async throws -> NavRoute {
         // `arrivalDate` を渡さないので、いまの交通量で計算される。測り直しの狙いはそこ。
         var source = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude),
                                address: nil)
-        var total: TimeInterval = 0
+        var stitched: [MKRoute] = []
 
         // 経由地があると区間の数だけ問い合わせが要る。呼ぶ間隔はそれを前提に決めること
-        // （`NavigationController.travelTimeRefreshInterval`）。
+        // （`NavigationController.travelTimeRefreshInterval`）。候補は求めない。
+        // 走行中に選ばせないので要らないうえ、そのぶん問い合わせが重くなる。
         for place in waypoints + [destination] {
             guard let leg = try await legs(from: source, to: place.mapItem, alternates: false).first else {
                 throw RouteError.noRouteFound
             }
-            // 徒歩ぶんを除く。含めると、測り直すたびに到着予定が歩く時間ぶん遅くなる。
-            total += leg.drivingTravelTime
+            stitched.append(leg)
             source = place.mapItem
         }
-        return total
+        // 徒歩ぶんはここで落ちる（`NavRoute.init(legs:waypoints:destination:)`）ので、
+        // 測り直しに歩く時間が混ざることはない。
+        return NavRoute(legs: stitched, waypoints: waypoints, destination: destination)
     }
 
     private func legs(from source: MKMapItem,

@@ -8,12 +8,14 @@
 "%@ に寄りますか" = "Stop at %@?";
 "%@ の駐車位置" = "Parking near %@";
 "%@ までのルートを計算中…" = "Finding a route to %@…";
+"%@ 着になります" = "You'd arrive at %@";
 "%@に到着しました。案内を終了します" = "You've arrived at %@. Ending guidance.";
 "%@を設定" = "Set %@";
 "%@・%@ 着" = "%@ · arriving %@";
 "%@・%@・%@ 着" = "%@ · %@ · arriving %@";
 "%@・目的地まで徒歩 %@" = "%@ · %@ walk to destination";
 "%@先、%@" = "In %@, %@";
+"%@早く着く道があります" = "A route that saves %@";
 "%lldキロ" = "%lld km";
 "%lldメートル" = "%lld m";
 "2時間走りました。休憩しませんか" = "You've been driving for 2 hours. Time for a break?";
@@ -42,6 +44,7 @@
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";
 "さがす" = "Find one";
 "しない" = "No";
+"そのまま" = "Stay";
 "どこへ向かいますか" = "Where are you heading?";
 "ほかをさがす" = "Try another";
 "まもなく" = "now";
@@ -74,6 +77,7 @@
 "充電スタンド" = "Charging stations";
 "全体表示" = "Overview";
 "公園" = "Parks";
+"切り替える" = "Switch";
 "到着時刻から逆算" = "Work back from arrival time";
 "右折が少ない" = "Fewer right turns";
 "周辺のカテゴリから" = "Browse nearby categories";

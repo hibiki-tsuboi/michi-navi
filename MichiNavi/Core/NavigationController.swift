@@ -53,6 +53,25 @@ final class NavigationController: ObservableObject {
     /// 経由地を通過した瞬間に流れる。案内はそのまま続く。
     let waypointReached = PassthroughSubject<Place, Never>()
 
+    /// 到着予定を測り直した瞬間に流れる。**測るために引いた経路も一緒に渡す。**
+    ///
+    /// 測り直しは「いま引き直すとどうなるか」を計算しているので、渋滞の迂回を判断する
+    /// 材料がそのまま手に入る。捨てずに流して `TrafficAdvisor` に判断させることで、
+    /// **問い合わせを 2 回投げずに済む**（経由地があると区間の数だけ `MKDirections` を
+    /// 投げるので、用途ごとに呼ぶと引き直しと同じ重さの問い合わせが倍になる）。
+    let travelTimeMeasured = PassthroughSubject<TravelTimeMeasurement, Never>()
+
+    struct TravelTimeMeasurement {
+        /// いま案内している経路。
+        let route: NavRoute
+        /// いま引き直すとこうなる、という経路。
+        let candidate: NavRoute
+        /// **差し替える前に**見込んでいた残り時間。渋滞かどうかはこの差でしか分からない。
+        let projectedTimeRemaining: TimeInterval
+        /// 測ったときに走っていた区間。`route` の残りを切り出すのに使う。
+        let stepIndex: Int
+    }
+
     private let location = LocationService.shared
     private let routeProvider: RouteProviding = MapKitRouteProvider()
 
@@ -327,12 +346,24 @@ final class NavigationController: ObservableObject {
                 lastTravelTimeRefresh = Date()
             }
 
-            guard let time = try? await routeProvider.travelTime(from: origin,
-                                                                 via: remainingWaypoints(of: route),
-                                                                 to: route.destination) else { return }
+            guard let candidate = try? await routeProvider.currentBestRoute(
+                from: origin,
+                via: remainingWaypoints(of: route),
+                to: route.destination) else { return }
             // 待っているあいだに引き直しが挟まっていたら、測った値は前の経路のもの。捨てる。
             guard case let .navigating(current) = phase, current.id == route.id else { return }
-            guidance?.applyMeasuredTimeRemaining(time)
+
+            // **差し替える前に控える。** `applyMeasuredTimeRemaining` を通したあとの
+            // 見込みは測った値そのものになるので、渋滞かどうかを見る差が消える。
+            let projected = progress?.timeRemaining
+            let stepIndex = progress?.stepIndex
+            guidance?.applyMeasuredTimeRemaining(candidate.expectedTravelTime)
+
+            guard let projected, let stepIndex else { return }
+            travelTimeMeasured.send(TravelTimeMeasurement(route: current,
+                                                          candidate: candidate,
+                                                          projectedTimeRemaining: projected,
+                                                          stepIndex: stepIndex))
         }
     }
 

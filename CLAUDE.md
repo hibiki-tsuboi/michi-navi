@@ -67,15 +67,15 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 12 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 13 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
 `RestReminder.shared` / `RangeAdvisor.shared` / `RouteWeather.shared` /
-`ParkingAdvisor.shared`。
+`ParkingAdvisor.shared` / `TrafficAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
-後ろ 4 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor`）は
-**助言を出すだけの層**で、
+後ろ 5 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` /
+`TrafficAdvisor`）は**助言を出すだけの層**で、
 `NavigationController` を購読して `PassthroughSubject` で知らせるところまでしか持たない。
 出すかどうか・どう見せるかは各 UI が決める。案内そのものには一切触らないので、
 足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ（`VoiceGuidance` と同じ理由で、
@@ -188,7 +188,7 @@ Combine の使い分けにも意味がある:
   （「終わり」だけで案内を切ると同乗者との会話でも切れる）。**Apple Intelligence が
   無い環境ではこれが唯一走る経路**なので、判定を変えるときは誤爆の側を先に確かめること。
 
-### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor`）
+### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor`）
 
 どれも「案内は変えず、知らせるだけ」。`NavigationController` を購読して
 `PassthroughSubject` を流し、出すかどうかは各 UI が決める。
@@ -225,6 +225,23 @@ Combine の使い分けにも意味がある:
     だった（東京・みなとみらい・大阪・名古屋・京都・那覇）。**落としすぎる側に倒す**こと。
     本物を 1 件落としても次に近いものへ移るだけで、実測では最大 30m 遠くなっただけ。
     逆に駐輪場を出すと、そこまで案内を引き直したうえで停められない。
+- **迂回の提案に問い合わせを足さない**。`refreshTravelTimeIfNeeded` が 3 分おきに
+  「いま引き直すとどうなるか」を計算しているので、材料はもう揃っている。捨てていた経路を
+  `travelTimeMeasured` で流して `TrafficAdvisor` に判断させる。**用途ごとに投げ直さないこと**
+  （経由地があると区間の数だけ `MKDirections` を投げるので、問い合わせが倍になる）。
+  - **同じ道かどうかは `signature` では見分けられない。** あちらは距離まで見るので、
+    途中から引き直した経路とは必ず食い違う（走行中の区間だけが短くなる）。指示の並びで
+    比べる（`NavRoute.instructions(from:)`）。**走っている区間の次から**比べること。
+  - **しきい値を下げないこと**（5 分）。比べているのは「いま測った時間」と「距離按分で
+    見込んでいた時間」で、後者には誤差がある。誤差と渋滞を取り違えない幅が要る。
+  - 続けて出さない間隔（10 分）と、**断られた道を繰り返さない**記録の両方が要る。
+    渋滞は数分では消えないので、3 分ごとの測り直しに合わせて毎回出すと催促になる。
+  - **押すまでに走った距離は織り込めない。** 渡す経路は測った時点の位置から引いてある。
+    同じ道の上にいるかぎり `GuidanceEngine` が吸着するので実害は無く、外れていれば
+    逸脱判定が引き直す。
+  - 切り替えたときの読み上げは「ルートを再検索しました」のまま。`VoiceGuidance` は
+    経路が変わったことしか見ていないので、利用者が選んだ切り替えと逸脱による引き直しを
+    区別していない。**直すなら意図を渡す口が要る**ので、そこは手を付けていない。
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
 
@@ -295,7 +312,7 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
    **按分の基準は出発時の見積もりのままにしない。** そのままだと渋滞に入っても
    到着予定が動かず、運転者がいちばん見る数字がいちばん当たらなくなる。
    `NavigationController.refreshTravelTimeIfNeeded` が 3 分おきに
-   `travelTime(from:via:to:)`（`arrivalDate` を渡さない＝いまの交通量）で測り直し、
+   `currentBestRoute(from:via:to:)`（`arrivalDate` を渡さない＝いまの交通量）で測り直し、
    `GuidanceEngine.applyMeasuredTimeRemaining` が基準点を置き直す。以降はそこからの
    距離比で減る。**動かすのは数字だけで、経路は差し替えない**（走行中に経路が
    入れ替わると音声も案内カードも追随できない。`RoutePreferences` を変えても

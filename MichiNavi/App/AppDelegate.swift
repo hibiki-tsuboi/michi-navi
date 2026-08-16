@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         RangeAdvisor.shared.start()
         RouteWeather.shared.start()
         ParkingAdvisor.shared.start()
+        TrafficAdvisor.shared.start()
         return true
     }
 }

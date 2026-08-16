@@ -231,6 +231,10 @@ final class CarPlayCoordinator: NSObject {
         ParkingAdvisor.shared.advice
             .sink { [weak self] in self?.presentParkingAdvice($0) }
             .store(in: &cancellables)
+
+        TrafficAdvisor.shared.advice
+            .sink { [weak self] in self?.presentTrafficAdvice($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -811,6 +815,31 @@ final class CarPlayCoordinator: NSObject {
                 self?.navigation.addWaypoint(advice.place)
             },
             secondaryAction: CPAlertAction(title: String(localized: "いいえ"), style: .cancel) { _ in },
+            duration: 20)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
+    /// 走っている道より早い道が出てきたときの提案。
+    ///
+    /// **押されたときだけ切り替える。** 走行中に勝手に経路が入れ替わると音声も案内カードも
+    /// 追随できない（`RoutePreferences` を変えても引き直さないのと同じ判断）。切り替えは
+    /// `startNavigation(with:)` に任せる。すでに計算済みの経路なので引き直しは要らず、
+    /// `CPNavigationSession` を張り替えずに繋ぐところは `updateManeuvers` が受け持つ。
+    ///
+    /// **押すまでに走った距離ぶんは織り込めない。** 渡す経路は測った時点の位置から
+    /// 引いてあるので、間を置いて押されるとその先から始まる経路になる。同じ道の上に
+    /// いるかぎり `GuidanceEngine` が吸着するので実害は出ず、外れていれば逸脱判定が
+    /// 引き直す。
+    private func presentTrafficAdvice(_ advice: TrafficAdvisor.Advice) {
+        let arrival = Formatters.arrivalText(Date(timeIntervalSinceNow: advice.route.expectedTravelTime))
+        let alert = CPNavigationAlert(
+            titleVariants: [String(localized: "\(Formatters.durationText(advice.saving))早く着く道があります")],
+            subtitleVariants: [String(localized: "\(arrival) 着になります")],
+            image: UIImage(systemName: "arrow.triangle.branch"),
+            primaryAction: CPAlertAction(title: String(localized: "切り替える"), style: .default) { [weak self] _ in
+                self?.navigation.startNavigation(with: advice.route)
+            },
+            secondaryAction: CPAlertAction(title: String(localized: "そのまま"), style: .cancel) { _ in },
             duration: 20)
         mapTemplate.present(navigationAlert: alert, animated: true)
     }

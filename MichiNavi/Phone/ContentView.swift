@@ -121,6 +121,7 @@ struct ContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
+                    characterTags(RouteCharacter.tags(for: routes).first ?? [])
                     advisories(route.advisoryNotices)
                     DepartureTimeRow(destination: route.destination)
 
@@ -157,6 +158,22 @@ struct ContentView: View {
             .font(.footnote)
             .frame(maxWidth: .infinity, alignment: .leading)
             .panel()
+    }
+
+    /// 候補どうしを比べて分かる特徴。候補が 1 本しか無ければ何も出ない。
+    @ViewBuilder
+    private func characterTags(_ tags: [String]) -> some View {
+        if !tags.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(tags, id: \.self) { tag in
+                    Text(tag)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.tint.opacity(0.15), in: Capsule())
+                }
+            }
+        }
     }
 
     /// MapKit がルートに付けてくる注意（有料道路・通行規制など）。

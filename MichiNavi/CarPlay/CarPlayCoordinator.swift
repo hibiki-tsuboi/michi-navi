@@ -230,13 +230,17 @@ final class CarPlayCoordinator: NSObject {
     /// 候補ルートすべてを 1 つの `CPTrip` にまとめる。
     /// CarPlay ではこうすると「他のルート」で切り替えられる。
     private func makeTrip(for routes: [NavRoute]) -> CPTrip {
-        let choices = routes.map { route -> CPRouteChoice in
+        // 数字だけでは候補の違いが読み取れないので、比較して分かる特徴を添える。
+        let characters = RouteCharacter.tags(for: routes)
+
+        let choices = routes.enumerated().map { index, route -> CPRouteChoice in
             let summary = Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime)
-            // 有料道路・通行規制などの注意を要約に足す。variants は「入るなら長い方」を
-            // 選ぶ仕組みなので、幅の狭い車では自動的に注意なしの表記へ落ちる。
-            let variants = route.advisoryNotices.isEmpty
+            // 特徴と、有料道路・通行規制などの注意を要約に足す。variants は
+            // 「入るなら長い方」を選ぶ仕組みなので、幅の狭い車では自動的に短い表記へ落ちる。
+            let extras = characters[index] + route.advisoryNotices
+            let variants = extras.isEmpty
                 ? [summary]
-                : ["\(summary)・\(route.advisoryNotices.joined(separator: "、"))", summary]
+                : ["\(summary)・\(extras.joined(separator: "、"))", summary]
 
             let choice = CPRouteChoice(summaryVariants: [route.name.isEmpty ? "ルート" : route.name],
                                        additionalInformationVariants: variants,

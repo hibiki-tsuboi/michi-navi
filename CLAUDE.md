@@ -493,6 +493,11 @@ CarPlay 層は触らずに済む設計。
   一般のカーナビが停車中に引き直さないのはこのため。判定は 2 段で、`speed` が取れるなら
   それで見て（取れないときは負が返る）、取れない端末と停車中に速度だけ跳ねた測位のために
   前回引いた地点からの移動距離（`minimumRerouteDistance`）でも受ける。**1 回目は通す**。
+  **停車で見送ったときは `isRerouting` を下ろす**。`isRerouting` は失敗しても下ろさない
+  （カードが点滅するため）作りなので、再試行そのものを止めるここで下ろさないと、
+  検索していないのに「再検索中」の赤いカードだけが残る。動き出せばまた立つ。
+  計算が走っている最中は触らない（終わらせ方はそちらに任せる。失敗しても、次の
+  位置更新でここへ来て下りる）。
 - **引き直しの見分けは `NavRoute.id` ではなく `NavRoute.signature`**。`id` は生成のたびに
   変わる UUID なので、**同じ道を同じ順に曲がる経路でも別物になる**。`VoiceGuidance` は
   これでリルートを判定して「ルートを再検索しました」を読むため、`id` で見ていると
@@ -555,6 +560,17 @@ CarPlay 層は触らずに済む設計。
   直す話ではない（2026-08-15 に一度これを取り違えて `guidanceBackgroundColor` を
   青に固定しかけ、戻した）。色を渡すと `pauseTrip` のカードも `turnCardColor` の
   フォールバック先としてそちらに従うので、**両方まとめて青くなる**点にも注意。
+  - **渡さなかったときの既定は赤にならない**（26.2 のランタイムを逆アセンブルして確認）。
+    案内カードとポーズカードの背景はどちらも
+    `-[CPSNavigationCardViewController _updateCardBackgroundColors]` が決めていて、
+    「アプリの `guidanceBackgroundColor` → 無ければ
+    `+[UIColor(CarPlayUIServices) crsui_consoleTurnCardETATrayBackgroundColor]`」という
+    同じ経路を通る。その既定は dynamic provider で、**ダークなら黒の alpha 0.65、
+    ライトなら白の alpha 0.75**。半透明の黒か白しか出てこない。
+  - **色を理由ごとに持っているのはポーズ側だけ**（`-[CPSNavigator
+    pauseTripForReason:description:turnCardColor:]`）。つまり赤いパネルはほぼ
+    「再検索中」のカードで、これがターン案内カードと同じ位置に同じ形で出るために
+    案内カードが赤くなったように見える。**文言で切り分けること。**
 - **走行中はキーボードが塞がれる**。`CPSessionConfiguration.limitedUserInterfaces` に
   `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
   押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に

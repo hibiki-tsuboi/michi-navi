@@ -41,6 +41,8 @@ final class NavigationController: ObservableObject {
     /// 「再検索中」に差し替える（`pauseTrip` / `resumeTrip`）。
     /// **引き直しに失敗しても下ろさない**。次の位置更新で再試行するあいだ何度も
     /// 上げ下げすると、カードが点滅して逆に何が起きているか分からなくなる。
+    /// 例外は停車したとき（[canReroute(from:)]）。再試行そのものを止めるので、
+    /// 立てたままにすると検索していないのにカードだけが残る。
     @Published private(set) var isRerouting = false
 
     /// 案内中に次の指示が変わった瞬間だけ流れる。音声読み上げと
@@ -341,7 +343,15 @@ final class NavigationController: ObservableObject {
     /// という形で確実に破綻する。**間隔だけでは足りない**ので、停まっているあいだは
     /// そもそも投げない（[canReroute(from:)]）。
     private func reroute(to destination: Place, via waypoints: [Place], from current: CLLocation) {
-        guard !isCalculatingReroute, canAttemptReroute, canReroute(from: current) else { return }
+        guard canReroute(from: current) else {
+            // 停まっているあいだは**何も検索していない**ので「再検索中」を出したままにしない。
+            // 失敗しても下ろさない作りなので、ここで下ろさないと、動き出して引き直しが
+            // 成功するまで赤いカードが出っぱなしになる（停めたまま案内を切れば永久に）。
+            // 計算が走っている最中だけは触らない。終わらせ方はそちらに任せる。
+            if !isCalculatingReroute { isRerouting = false }
+            return
+        }
+        guard !isCalculatingReroute, canAttemptReroute else { return }
         isCalculatingReroute = true
         isRerouting = true
         lastRerouteOrigin = current

@@ -9,6 +9,7 @@
 "%@ の駐車位置" = "Parking near %@";
 "%@ までのルートを計算中…" = "Finding a route to %@…";
 "%@に到着しました。案内を終了します" = "You've arrived at %@. Ending guidance.";
+"%@を設定" = "Set %@";
 "%@・%@ 着" = "%@ · arriving %@";
 "%@・%@・%@ 着" = "%@ · %@ · arriving %@";
 "%@先、%@" = "In %@, %@";
@@ -45,6 +46,7 @@
 "まもなく%@" = "Now, %@";
 "もう一度読む" = "Repeat";
 "やめる" = "Cancel";
+"よく行く場所" = "Home & Work";
 "カフェ" = "Cafes";
 "カーブが多い" = "More curves";
 "ガソリン" = "Fuel";
@@ -114,12 +116,16 @@
 "経由地の%@に到着しました。案内を続けます" = "You've reached your stop at %@. Continuing.";
 "美術館・博物館" = "Museums";
 "聞き取れませんでした" = "Didn't catch that";
+"職場" = "Work";
+"自宅" = "Home";
 "航続距離" = "Range";
 "行き先をどうぞ" = "Where to?";
 "補給" = "Refueling";
 "補給先" = "Refuel at";
+"解除" = "Remove";
 "計算できませんでした" = "Couldn't work that out";
 "記録を消す" = "Clear this";
+"設定し直す" = "Change";
 "設定アプリで位置情報の利用を許可してください" = "Allow location access in Settings";
 "買い物" = "Shopping";
 "走っている案内をやめます。" = "Stops the guidance in progress.";

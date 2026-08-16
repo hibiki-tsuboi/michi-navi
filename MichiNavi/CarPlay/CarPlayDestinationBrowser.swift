@@ -79,6 +79,18 @@ final class CarPlayDestinationBrowser: NSObject {
     private func makeRootTemplate() -> CPListTemplate {
         var sections: [CPListSection] = []
 
+        // **いちばん上に置く。** 走行中に辿れる段数は限られるので、押される回数が
+        // 多い順に並べる。設定していないものは出さない（CarPlay からは設定できず、
+        // 押しても何も起きない行になるため。理由は `DestinationStore.set(_:as:)`）。
+        let pinned = DestinationStore.Pinned.allCases.compactMap { kind in
+            store.place(kind).map { makeItem(for: $0, titled: kind.title) }
+        }
+        if !pinned.isEmpty {
+            sections.append(CPListSection(items: pinned,
+                                          header: String(localized: "よく行く場所"),
+                                          sectionIndexTitle: nil))
+        }
+
         if !store.favorites.isEmpty {
             sections.append(CPListSection(items: store.favorites.map(makeItem(for:)),
                                           header: String(localized: "お気に入り"),
@@ -109,6 +121,18 @@ final class CarPlayDestinationBrowser: NSObject {
             template.trailingNavigationBarButtons = [searchButton]
         }
         return template
+    }
+
+    /// `titled` を渡すと、地点の名前ではなくその名札を主役にする（「自宅」＋ 地点名）。
+    /// 走行中に読むのは名札のほうで、どこを指しているかは確認のために添えるだけ。
+    private func makeItem(for place: Place, titled title: String? = nil) -> CPListItem {
+        guard let title else { return makeItem(for: place) }
+        let item = CPListItem(text: title, detailText: place.name)
+        item.handler = { [weak self] _, completion in
+            self?.choose(place)
+            completion()
+        }
+        return item
     }
 
     private func makeItem(for place: Place) -> CPListItem {

@@ -20,6 +20,10 @@ final class DestinationStore: ObservableObject {
     /// 最後に着いた地点。**そこに車を置いた**とみなす。
     @Published private(set) var parking: ParkedCar?
 
+    /// ピン留めした行き先。お気に入りとは別に持つ。
+    @Published private(set) var home: Place?
+    @Published private(set) var work: Place?
+
     private let defaults: UserDefaults
     private let recentsKey = "destinations.recents"
     private let favoritesKey = "destinations.favorites"
@@ -30,6 +34,57 @@ final class DestinationStore: ObservableObject {
         recents = load(key: recentsKey)
         favorites = load(key: favoritesKey)
         parking = loadParking()
+        home = loadPlace(key: Pinned.home.key)
+        work = loadPlace(key: Pinned.work.key)
+    }
+
+    // MARK: - 自宅・職場
+
+    /// 常に 1 タップで届かせる行き先。
+    ///
+    /// **お気に入りで代用しない。** あちらは件数が増えるほど 1 件あたりが遠くなるのに対し、
+    /// この 2 つは実際のカーナビでいちばん押される行き先で、しかも数が増えない。
+    /// 走行中はキーボードが塞がれる（`CPSessionConfiguration.limitedUserInterfaces`）ので、
+    /// 「検索を使わずに目的地へ届く経路を残す」という要件の中でもいちばん短い経路になる。
+    enum Pinned: String, CaseIterable {
+        case home
+        case work
+
+        var title: String {
+            switch self {
+            case .home: String(localized: "自宅")
+            case .work: String(localized: "職場")
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .home: "house.fill"
+            case .work: "briefcase.fill"
+            }
+        }
+
+        var key: String { "destinations.pinned.\(rawValue)" }
+    }
+
+    func place(_ kind: Pinned) -> Place? {
+        switch kind {
+        case .home: home
+        case .work: work
+        }
+    }
+
+    /// 設定・解除。`nil` を渡すと解除。
+    ///
+    /// **設定できるのは iPhone 側だけ**（`ContentView`）。どこを自宅にするかを決めるには
+    /// 検索が要り、走行中はその検索が使えない。CarPlay 側に「押しても何も起きない導線」を
+    /// 作らないため、あちらは設定済みのものを出すだけにしてある。
+    func set(_ place: Place?, as kind: Pinned) {
+        switch kind {
+        case .home: home = place
+        case .work: work = place
+        }
+        savePlace(place, key: kind.key)
     }
 
     /// 車をとめた場所。
@@ -114,6 +169,19 @@ final class DestinationStore: ObservableObject {
             NSLog("[MichiNavi] \(key) の読み込みに失敗: \(error.localizedDescription)")
             return []
         }
+    }
+
+    private func loadPlace(key: String) -> Place? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(Place.self, from: data)
+    }
+
+    private func savePlace(_ place: Place?, key: String) {
+        guard let place else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        defaults.set(try? JSONEncoder().encode(place), forKey: key)
     }
 
     private func save(_ places: [Place], key: String) {

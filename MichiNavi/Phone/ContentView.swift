@@ -6,9 +6,12 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject private var navigation: NavigationController
     @ObservedObject private var location = LocationService.shared
+    @ObservedObject private var store = DestinationStore.shared
 
     @State private var cameraPosition: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var isSearchPresented = false
+    /// 検索シートを「行き先を選ぶ」ではなく「ピン留めを設定する」ために開いているか。
+    @State private var assigningPin: DestinationStore.Pinned?
 
     var body: some View {
         Map(position: $cameraPosition) {
@@ -34,10 +37,20 @@ struct ContentView: View {
         .safeAreaInset(edge: .top) { topBar }
         .safeAreaInset(edge: .bottom) { bottomPanel }
         .sheet(isPresented: $isSearchPresented) {
-            SearchSheet { place in
+            SearchSheet(title: assigningPin?.title ?? String(localized: "目的地")) { place in
                 isSearchPresented = false
-                navigation.requestRoutes(to: place)
+                // ピン留めを設定しに来たときは、案内を始めない。設定と発進は別の操作。
+                if let assigningPin {
+                    store.set(place, as: assigningPin)
+                    self.assigningPin = nil
+                } else {
+                    navigation.requestRoutes(to: place)
+                }
             }
+        }
+        .onChange(of: isSearchPresented) { _, presented in
+            // シートを閉じただけのときに、次に開いた検索が設定モードのまま始まらないように。
+            if !presented { assigningPin = nil }
         }
         .onChange(of: navigation.phase) { _, phase in
             // ルートが出たら全体が見えるよう引き、案内が始まったら自車に寄る。
@@ -78,19 +91,67 @@ struct ContentView: View {
             .accessibilityLabel(String(localized: "案内をもう一度読む"))
             .padding(.horizontal)
         } else {
-            Button {
-                isSearchPresented = true
-            } label: {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                    Text(String(localized: "目的地を検索"))
-                    Spacer()
+            VStack(spacing: 8) {
+                Button {
+                    isSearchPresented = true
+                } label: {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                        Text(String(localized: "目的地を検索"))
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(12)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(.secondary)
+
+                pinnedDestinations
             }
-            .foregroundStyle(.secondary)
             .padding(.horizontal)
+        }
+    }
+
+    /// 自宅・職場。**設定していなくても枠を出す**。
+    ///
+    /// 空の枠がそのまま設定の入口になるので、「どこで設定するのか」を探さずに済む。
+    /// ここでしか設定できない（CarPlay 側は検索が使えず設定できない）ぶん、
+    /// 入口は見えているほうがよい。
+    private var pinnedDestinations: some View {
+        HStack(spacing: 8) {
+            ForEach(DestinationStore.Pinned.allCases, id: \.self) { kind in
+                let place = store.place(kind)
+                Button {
+                    if let place {
+                        navigation.requestRoutes(to: place)
+                    } else {
+                        assigningPin = kind
+                        isSearchPresented = true
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: kind.symbol)
+                        Text(place == nil ? String(localized: "\(kind.title)を設定") : kind.title)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .foregroundStyle(place == nil ? .secondary : .primary)
+                .contextMenu {
+                    // 設定し直しと解除は運転中に触るものではないので、長押しの奥に置く。
+                    Button(String(localized: "設定し直す")) {
+                        assigningPin = kind
+                        isSearchPresented = true
+                    }
+                    if place != nil {
+                        Button(String(localized: "解除"), role: .destructive) {
+                            store.set(nil, as: kind)
+                        }
+                    }
+                }
+            }
         }
     }
 

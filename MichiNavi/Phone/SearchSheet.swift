@@ -7,6 +7,8 @@ import SwiftUI
 /// 入力が空のときはお気に入りと履歴を出す。CarPlay では走行中にキーボードが
 /// 塞がれるため、ここでお気に入りを育てておくことが実質の前提になる。
 struct SearchSheet: View {
+    /// 何のために選ぶのか。ピン留めを設定するために開いたときに、行き先選びと見分ける。
+    var title = String(localized: "目的地")
     let onSelect: (Place) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -34,7 +36,7 @@ struct SearchSheet: View {
                 }
             }
             .searchable(text: $query, prompt: String(localized: "住所・施設名で検索"))
-            .navigationTitle(String(localized: "目的地"))
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

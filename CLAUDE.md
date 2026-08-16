@@ -237,11 +237,51 @@ CarPlay 層は触らずに済む設計。
   **1 回目は待たない**（`lastRerouteFinished` が nil）ので、わざと別の道へ入ったときの
   反応は鈍らない。効くのは 2 回目以降だけ。
 - **リルート中も `CPNavigationSession` は張り替えず、`pauseTrip` / `resumeTrip` で繋ぐ**。
-  作り直すと `CPTrip` から組み直しになり、到着予定の表示が一度途切れる。再開に使う
-  `resumeTrip(updatedRouteInformation:)` は iOS 26.4 で非推奨になったが、後継
-  （`CPRouteSegment` を経由地ごとに積むモデル）は目的地 1 つの現状では得るものが無く、
-  デプロイメントターゲットが 26.0 のうちは `#available` 分岐が要って古い実装も消せない。
-  26.0 が下限なら非推奨の警告も出ないので、当面は乗り換えない。
+  作り直すと `CPTrip` から組み直しになり、到着予定の表示が一度途切れる。再開の渡し方は
+  デプロイメントターゲットが 26.0 なので 2 系統ある（`CarPlayCoordinator.resume`）。
+  iOS 26.4 以降は `resumeTrip(updatedRouteSegments:currentSegment:rerouteReason:)`、
+  それ以前は 17.4 からの `resumeTrip(updatedRouteInformation:)`。**新しい方に寄せている
+  のは経由地の表現力のためではなく、ルート共有がそちらでしか成立しないから**（後述）。
+  古い方は 26.4 で非推奨になったが、26.0 が下限のうちは警告も出ないので残してある。
+- **経路が入れ替わったときは、必ず `pauseTrip` してから `resumeTrip` で渡し直す**
+  （ガイド p.61）。止めずに渡すと車側が前の経路を掴んだままになる。逸脱による引き直しは
+  `apply(isRerouting:)` が止めるところと再開するところの両方を持っているが、
+  **立ち寄り先が増えたときは誰も止めていない**ので `replaceRoute` が自分で止めて再開する。
+  `updateManeuvers` が「経路が変わった・なのに止まっていない」で見分けている。
+- **車へは目的地とルートの 2 段階で渡している**（ガイド p.60-61、iOS 26.4）。
+  目的地共有（`CPTrip.hasShareableDestination`、プロパティ自体は 26.1）は、車の純正ナビへ
+  行き先だけを渡す。ルート共有（`mapTemplateShouldProvideRouteSharing`）は経路の形・指示・
+  座標列まで預けるもので、先進運転支援を積んだ車が車線案内を出したり走り方を寄せたりする。
+  **後者は `CPRouteSegment` を `addRouteSegments` で積んでおかないと成立しない**ので、
+  `resumeTrip` の新旧はここに直結している。組み立ては `CarPlayRouteSharing` に隔離した。
+- **`CPRouteSegment` は経由地の切れ目で区切った 1 区間**。`NavRoute` は経由地ごとの区間を
+  1 本に繋いでしまっているので、`waypointStepIndices` を頼りに区切り直す。
+  **最後の step に載っている経由地では区間を切らない**（目的地と区別できず空の区間ができる）。
+  区間に入れる `CPManeuver` は `routeManeuvers` と**同じインスタンス**であること。
+- **`currentSegment` は区間をまたいだときだけ代入する**。代入のたびに車側は区間の
+  切り替わりとして受け取るので、毎回渡すと到着予定が区間の先頭へ巻き戻って見える。
+  加えて**どの経路の区間かを照合してから代入する**。引き直しでは `CPManeuver` の作り直しが
+  先に走るため、step の添字は新しいのに区間はまだ古い、という一瞬が必ずある。
+- **新しい CarPlay の API は Swift 名が `__` 始まりになる**。`CPRouteSegment` と
+  `CPNavigationWaypoint` の初期化子・座標プロパティは `NS_REFINED_FOR_SWIFT` なのに
+  **CarPlay には Swift オーバーレイが無い**（SDK に `.swiftinterface` が無く、
+  prebuilt-modules だけ）。`CPRouteSegment(__origin:...)`、`CPNavigationWaypoint(__mapItem:...)`
+  のように呼ぶのが正解で、`__` の付かない版を探しても存在しない。
+- **座標の配列に空配列のポインタを渡さない**。引数は nonnull なのに、Swift の空 `Array` から
+  取れる `baseAddress` は nil になる。渡す座標が無いときは 1 要素だけ確保して個数に 0 を渡す
+  （`CarPlayRouteSharing.withCoordinates`）。なお **API 側は座標を複製する**ので、
+  `withUnsafeMutableBufferPointer` のスコープを抜けてから読み返しても壊れない
+  （2026-08-16 にシミュレータ上で 5000 件を渡して確認）。
+- **`CPRouteSource` の case 名は `.sourceVehicle` のように `source` が残る**。
+  enum 名との共通接頭辞の削られ方が他と違い、`.vehicle` では通らない。
+- **車から来た経由地は、完了ハンドラを呼ばないと確認カードが出ない**。
+  `didRequestToInsert(_:into:completion:)` で所要時間を返して初めて CarPlay 既定の
+  確認カードが出る仕組みで、**呼ばなければ何も出ない**（自前 UI を出す側の作法）。
+  試算に失敗したときに黙って落としているのはこれを利用したもので、数字の入っていない
+  カードを運転中に見せないため。受諾は `waypoint(accepted:forSegment:)` に別途来る。
+- **車から目的地が来ても即発進させない**。`didReceiveRequestForDestination` は
+  `requestRoutes(to:)` に流して提示で止める（ガイド p.61 が trip preview を求めている）。
+  `startNavigation(to:)` にすると車の操作だけで走り出すことになる。
 - **`CPMapTemplate.guidanceBackgroundColor` はあえて設定していない**。経路の線が青
   （`systemBlue`）なのに案内まわりの色が違って見えても、車と CarPlay の既定に任せた結果で
   正しい。**赤く見えたときは、それが案内カードなのか `pauseTrip(for: .rerouting)` の
@@ -341,8 +381,30 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 
   実機は `--device` を付けるか Console.app。`.debug` なので Xcode を繋いでいない
   ときは保存されない（走行中に置いたままでよい）。
+- **車との目的地共有・ルート共有の動作確認**（2026-08-16 追加ぶん）。ビルドと、
+  区間の切り出し・座標の受け渡しはシミュレータ上で確認済みだが、**車が受け取ったあとは
+  一度も見ていない**。他と違って**これは CarPlay Simulator で確かめられる**（ガイド p.63）。
+  `Additional Tools for Xcode` の DMG に入っている `Hardware/CarPlay Simulator.app` を使う。
+
+  - 目的地共有: 車両設定の「Manage…」で **Share Route Destination Information** を入れると
+    共有ボタンが出る。送った中身は「Destination Information」で読める。
+  - ルート共有: プリセットの **Standard Navigation** / **Widescreen Navigation** を選ぶ。
+    「Route Sharing」で車が受け取った経路が読め、**車から経由地を送り込むこともできる**
+    （＝`didRequestToInsert` と `didReceiveRequestForDestination` を実際に起こせる）。
+
+  こちら側は `CarPlayVehicleLog` を見る。ジェスチャと同じで、**対応していない車では
+  何も起きないのが正常**なので、呼ばれているかどうかをログでしか切り分けられない。
+
+  ```bash
+  xcrun simctl spawn booted log stream --style compact --level debug \
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "vehicle"'
+  ```
+
+  なお **26.4 未満のシミュレータでは新しい経路がまるごと動かない**。既定で起動している
+  端末が 26.2 などだと「実装したのに何も起きない」に見えるので、先に OS を確かめること。
 - **安全領域を差し引いた中心合わせ**: `follow` は自車を**画面の**中心に置いており、
   安全領域の中心には置いていない（差し引いているのは全体表示の余白だけ）。
   3 画面とも同じで、テンプレートや計器の縁が重なるぶんだけ自車位置が寄る。
-- **`CPLaneGuidance` は空のまま**。`resumeTrip` が必須で要求するので形だけ渡している。
-  MapKit がレーン情報を返さないので、外部依存を足さない限り埋められない。
+- **`CPLaneGuidance` は空のまま**。`resumeTrip` も `CPRouteSegment` も必須で要求するので
+  形だけ渡している。MapKit がレーン情報を返さないので、外部依存を足さない限り埋められない。
+  **ルート共有をしていても埋まらない**（車が期待する情報のうち、ここだけ渡せていない）。

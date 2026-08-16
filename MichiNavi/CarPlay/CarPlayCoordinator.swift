@@ -37,7 +37,32 @@ final class CarPlayCoordinator: NSObject {
     private var routeManeuvers: [CPManeuver] = []
     /// `routeManeuvers` がどの経路のものか。リルートで作り直す判断に使う。
     private var maneuverRouteID: UUID?
+    /// 車へ経路を渡す係（iOS 26.4 以降）。
+    ///
+    /// 型が 26.4 でしか存在せず、**格納プロパティには `@available` を付けられない**ので、
+    /// `AnyObject` で持って `routeSharing` から取り出す。
+    private var routeSharingBox: AnyObject?
     private var cancellables = Set<AnyCancellable>()
+
+    @available(iOS 26.4, *)
+    private var routeSharing: CarPlayRouteSharing? { routeSharingBox as? CarPlayRouteSharing }
+
+    /// 案内中に経路が入れ替わった理由。`CPRerouteReason`（iOS 26.4）へ変換して車へ渡す。
+    /// `CPRerouteReason` をそのまま持ち回ると、26.0 でも通る場所に 26.4 の型が漏れる。
+    private enum RouteChangeReason {
+        /// 経路を外れたので引き直した。
+        case offRoute
+        /// 立ち寄り先が増減した。
+        case waypointChanged
+
+        @available(iOS 26.4, *)
+        var carPlayReason: CPRerouteReason {
+            switch self {
+            case .offRoute: .missedTurn
+            case .waypointChanged: .waypointModified
+            }
+        }
+    }
 
     init(interfaceController: CPInterfaceController, window: CPWindow) {
         self.interfaceController = interfaceController
@@ -94,6 +119,7 @@ final class CarPlayCoordinator: NSObject {
         activeManeuver = nil
         routeManeuvers = []
         maneuverRouteID = nil
+        routeSharingBox = nil
         isTripPaused = false
     }
 
@@ -208,8 +234,28 @@ final class CarPlayCoordinator: NSObject {
             return choice
         }
 
-        let destination = routes[0].destination.mapItem
-        return CPTrip(origin: MKMapItem.forCurrentLocation(), destination: destination, routeChoices: choices)
+        let route = routes[0]
+        let trip: CPTrip
+        if #available(iOS 26.4, *) {
+            // 26.4 で `MKMapItem` 版の初期化は非推奨になり、地点は `CPNavigationWaypoint` で
+            // 渡す形になった。**ルート共有はこちらでないと成立しない**（区間の始点・終点も
+            // 同じ型）。出発地に `MKMapItem.forCurrentLocation()` を使わないのは、あれが
+            // 座標を持たない特別な項目で、車へ渡す地点にはならないため。
+            trip = CPTrip(originWaypoint: CarPlayRouteSharing.waypoint(
+                              at: route.coordinates.first ?? route.destination.coordinate,
+                              name: "現在地"),
+                          destinationWaypoint: CarPlayRouteSharing.waypoint(for: route.destination),
+                          routeChoices: choices)
+        } else {
+            trip = CPTrip(origin: MKMapItem.forCurrentLocation(),
+                          destination: route.destination.mapItem,
+                          routeChoices: choices)
+        }
+
+        // 目的地を車の純正ナビへ渡せることを申告する（ガイド p.60）。対応した車でだけ
+        // ルート選択画面に共有ボタンが出るので、いつでも立てておいてよい。
+        if #available(iOS 26.1, *) { trip.hasShareableDestination = true }
+        return trip
     }
 
     private func route(for choice: CPRouteChoice) -> NavRoute? {
@@ -225,10 +271,25 @@ final class CarPlayCoordinator: NSObject {
 
         let trip = currentTrip ?? makeTrip(for: [route])
         currentTrip = trip
-        navigationSession = mapTemplate.startNavigationSession(for: trip)
+        let session = mapTemplate.startNavigationSession(for: trip)
+        navigationSession = session
+
         // 進捗が出る前でも先に全区間を渡す。車のメーターや HUD へは
         // 「できるだけ早く、できるだけ多く」渡すのが決まり（ガイド p.56）。
-        rebuildManeuvers(for: route, stepIndex: navigation.progress?.stepIndex ?? 0, isNewSession: true)
+        let stepIndex = navigation.progress?.stepIndex ?? 0
+        rebuildManeuvers(for: route, stepIndex: stepIndex, isNewSession: true)
+
+        // 経路の区間を積むのは maneuver を組み終えたあと。区間の中に入れる `CPManeuver` は
+        // `routeManeuvers` と同じインスタンスでなければならない。
+        if #available(iOS 26.4, *) {
+            let sharing = CarPlayRouteSharing()
+            routeSharingBox = sharing
+            sharing.begin(session: session,
+                          route: route,
+                          maneuvers: routeManeuvers,
+                          stepIndex: stepIndex,
+                          tripEstimates: tripEstimates(for: route))
+        }
     }
 
     private func finishSession() {
@@ -260,43 +321,68 @@ final class CarPlayCoordinator: NSObject {
         } else {
             guard isTripPaused else { return }
             isTripPaused = false
-            resume(navigationSession)
+            resume(navigationSession, reason: .offRoute)
         }
+    }
+
+    /// 案内中に経路そのものが入れ替わったことを CarPlay と車へ伝える。
+    ///
+    /// 立ち寄り先が増えたときに通る。逸脱による引き直しは `apply(isRerouting:)` が
+    /// 止めるところと再開するところの両方を担うので、ここには来ない。
+    ///
+    /// **素通しで `resumeTrip` を投げないこと。** 経路を変えるときは一度 `pauseTrip` で
+    /// 止めてから渡し直す、というのがガイド p.61 の手順で、止めずに渡すと車側が
+    /// 前の経路を掴んだままになる。
+    private func replaceRoute(reason: RouteChangeReason) {
+        guard let navigationSession else { return }
+        navigationSession.pauseTrip(for: .rerouting, description: "ルートを引き直し中")
+        resume(navigationSession, reason: reason)
     }
 
     /// 引き直した経路で案内を再開する。
     ///
-    /// `resumeTrip(updatedRouteSegments:currentSegment:rerouteReason:)`（iOS 26.4）は
-    /// 経由地ごとに経路を区切る新しいモデルで、区間をセッション開始時から
-    /// `addRouteSegments` で積んでおく前提。目的地 1 つしか扱わない現状では
-    /// 得るものが無いので、17.4 からある `CPRouteInformation` の側を使う。
-    /// デプロイメントターゲットが 26.0 である以上、新しい方は `#available` で
-    /// 分岐しないと呼べず、どのみち古い方の実装は消せない。
-    /// なお 26.4 で非推奨になったが、26.0 が下限のうちは警告も出ない。
-    private func resume(_ session: CPNavigationSession) {
+    /// iOS 26.4 からは**経由地ごとに区切った `CPRouteSegment` の配列**で渡す形になり、
+    /// 17.4 からの `CPRouteInformation` は非推奨になった（26.0 が下限のうちは警告は出ない）。
+    /// 新しい方に寄せているのは経由地の表現力のためではなく、**ルート共有が
+    /// そちらでしか成立しない**ため。車へ経路を預けるには区間を積んでおく必要がある。
+    /// 26.0〜26.3 では区間を作れないので、古い方をそのまま残してある。
+    private func resume(_ session: CPNavigationSession, reason: RouteChangeReason) {
         // 経路の差し替えは maneuverChanged が先に済ませているので、ここでは
         // 出来上がっている routeManeuvers をそのまま渡す。
         guard let route = navigation.currentRoute, !routeManeuvers.isEmpty else { return }
         let stepIndex = min(navigation.progress?.stepIndex ?? 0, routeManeuvers.count - 1)
         let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
+        let estimates = tripEstimates(for: route)
 
-        let tripEstimates = CPTravelEstimates(
-            distanceRemaining: .meters(navigation.progress?.distanceRemaining ?? route.distance),
-            timeRemaining: navigation.progress?.timeRemaining ?? route.expectedTravelTime)
+        if #available(iOS 26.4, *), let routeSharing {
+            routeSharing.resume(session: session,
+                                route: route,
+                                maneuvers: routeManeuvers,
+                                stepIndex: stepIndex,
+                                tripEstimates: estimates,
+                                reason: reason.carPlayReason)
+        } else {
+            session.resumeTrip(updatedRouteInformation: CPRouteInformation(
+                maneuvers: routeManeuvers,
+                laneGuidances: [],
+                currentManeuvers: upcoming,
+                currentLaneGuidance: CPLaneGuidance(),
+                trip: estimates,
+                maneuverTravelEstimates: upcoming.first?.initialTravelEstimates ?? estimates))
+        }
 
-        session.resumeTrip(updatedRouteInformation: CPRouteInformation(
-            maneuvers: routeManeuvers,
-            laneGuidances: [],
-            currentManeuvers: upcoming,
-            currentLaneGuidance: CPLaneGuidance(),
-            trip: tripEstimates,
-            maneuverTravelEstimates: upcoming.first?.initialTravelEstimates ?? tripEstimates))
-
-        // `CPRouteInformation` は車線案内を必須で要求するので空のものを渡しているが、
+        // どちらの渡し方でも車線案内は必須で要求されるので空のものを入れているが、
         // セッション側は「無いなら nil」がヘッダの指定。空の車線表示が残らないよう戻す。
         session.currentLaneGuidance = nil
         session.upcomingManeuvers = upcoming
         activeManeuver = upcoming.first
+    }
+
+    /// 目的地までの残りの見積もり。進捗が出ていなければ経路全体の値を使う。
+    private func tripEstimates(for route: NavRoute) -> CPTravelEstimates {
+        CPTravelEstimates(
+            distanceRemaining: .meters(navigation.progress?.distanceRemaining ?? route.distance),
+            timeRemaining: navigation.progress?.timeRemaining ?? route.expectedTravelTime)
     }
 
     // MARK: - 案内カード
@@ -305,8 +391,14 @@ final class CarPlayCoordinator: NSObject {
         if maneuverRouteID == route.id {
             showManeuvers(from: stepIndex)
         } else {
-            // リルートで経路が入れ替わった。作り直して渡し直す。
+            // 経路が入れ替わった。作り直して渡し直す。
+            let hadRoute = maneuverRouteID != nil
             rebuildManeuvers(for: route, stepIndex: stepIndex, isNewSession: false)
+
+            // 逸脱による引き直しなら、止めたのも再開するのも `apply(isRerouting:)` の
+            // 仕事なので触らない。止まっていないのに経路が変わったということは、
+            // 立ち寄り先が増えた（＝こちらで渡し直す必要がある）ということ。
+            if hadRoute, !isTripPaused { replaceRoute(reason: .waypointChanged) }
         }
         presentNotice(of: route, at: stepIndex)
     }
@@ -359,6 +451,14 @@ final class CarPlayCoordinator: NSObject {
         // 以降は距離に応じて apply(progress:) が prepare / execute へ進める。
         navigationSession?.maneuverState = .initial
         activeManeuver = upcoming.first
+
+        // 区間をまたいだかを見る。経由地を通過した瞬間がこれにあたる。
+        // 経路が入れ替わった直後はまだ区間が古いので、どの経路のものかを渡して弾かせる。
+        if #available(iOS 26.4, *), let navigationSession, let maneuverRouteID {
+            routeSharing?.updateCurrentSegment(session: navigationSession,
+                                               routeID: maneuverRouteID,
+                                               stepIndex: stepIndex)
+        }
     }
 
     private func makeManeuver(for step: NavStep,
@@ -510,6 +610,91 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     func mapTemplateShouldProvideNavigationMetadata(_ mapTemplate: CPMapTemplate) -> Bool {
         true
     }
+
+    // MARK: 車との経路の受け渡し（iOS 26.4）
+
+    /// 経路そのものを車へ預けることを宣言する（ガイド p.61）。
+    ///
+    /// 目的地だけを渡す共有と違い、こちらは形・指示・座標列まで渡す。先進運転支援を
+    /// 積んだ車はそれを見て車線案内を出したり、走り方をこちらの経路へ寄せたりする。
+    /// 中身を `CPRouteSegment` に組むのは `CarPlayRouteSharing`。
+    /// 対応していない車では何も起きないだけなので、常に渡す。
+    @available(iOS 26.4, *)
+    func mapTemplateShouldProvideRouteSharing(_ mapTemplate: CPMapTemplate) -> Bool {
+        true
+    }
+
+    /// 車が経路をどう扱っているかが変わった。こちらから直すところは無いので記録だけ。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didReceiveUpdatedRouteSource routeSource: CPRouteSource) {
+        CarPlayVehicleLog.routeSource(routeSource)
+    }
+
+    /// 車から「ここへ寄れ」と提案が来る。EV が航続距離を見て充電を挟ませるのが代表例。
+    ///
+    /// 確認の見た目は CarPlay 既定のものに任せる。そのぶん**こちらの仕事は「寄った場合の
+    /// 所要」を返すことだけ**で、完了ハンドラを呼ぶまでカードは出ない。逆に呼ばなければ
+    /// 既定のカードは出ない（自前の UI を出したいときの作法）ので、
+    /// **試算に失敗したときは黙って落とす**。数字の入っていないカードを運転中に見せない。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate,
+                     didRequestToInsert waypoint: CPNavigationWaypoint,
+                     into segment: CPRouteSegment,
+                     completion: @escaping (CPTravelEstimates) -> Void) {
+        guard let place = Place(vehicleWaypoint: waypoint) else { return }
+        CarPlayVehicleLog.waypointProposed(name: place.name)
+
+        Task {
+            guard let estimate = await navigation.estimate(inserting: place) else {
+                CarPlayVehicleLog.waypointEstimated(succeeded: false)
+                return
+            }
+            CarPlayVehicleLog.waypointEstimated(succeeded: true)
+            completion(CPTravelEstimates(distanceRemaining: .meters(estimate.distance),
+                                         timeRemaining: estimate.travelTime))
+        }
+    }
+
+    /// 提案を受けるかどうかが決まった。受けたなら経路に挟んで引き直す。
+    ///
+    /// 引き直した結果は `updateManeuvers` から `replaceRoute(reason: .waypointChanged)` に
+    /// 入り、そこで新しい区間が車へ渡る。ここで `resumeTrip` を呼ばないのは、
+    /// **新しい経路がまだ出来ていない**ため（`addWaypoint` は非同期に計算する）。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate,
+                     waypoint: CPNavigationWaypoint,
+                     accepted: Bool,
+                     forSegment segment: CPRouteSegment?) {
+        CarPlayVehicleLog.waypointDecided(accepted: accepted)
+        guard accepted, let place = Place(vehicleWaypoint: waypoint) else { return }
+        navigation.addWaypoint(place)
+    }
+
+    /// 案内していないときに、車から目的地そのものが送られてくる。
+    ///
+    /// ガイド p.61 の指示どおりルートの提示までにとどめ、開始は利用者に選ばせる。
+    /// `startNavigation(to:)` で即発進させると、車の操作だけで走り出すことになる。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didReceiveRequestForDestination waypoint: CPNavigationWaypoint) {
+        guard let place = Place(vehicleWaypoint: waypoint) else { return }
+        CarPlayVehicleLog.destinationRequested(name: place.name)
+        navigation.requestRoutes(to: place)
+    }
+
+    /// 目的地を車の純正ナビへ渡せた。確認のカードは CarPlay が既に出しているので何もしない。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didShareDestinationFor trip: CPTrip) {
+        CarPlayVehicleLog.destinationShared(succeeded: true)
+    }
+
+    /// 車が受け取れなかった。押した本人は結果を待っているので、ここだけは画面に出す。
+    @available(iOS 26.4, *)
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didFailToShareDestinationFor trip: CPTrip, error: any Error) {
+        CarPlayVehicleLog.destinationShared(succeeded: false)
+        presentAlert(message: "目的地を車に送れませんでした")
+    }
+
+    // MARK: 案内の開始と終了
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, startedTrip trip: CPTrip, using routeChoice: CPRouteChoice) {
         mapTemplate.hideTripPreviews()

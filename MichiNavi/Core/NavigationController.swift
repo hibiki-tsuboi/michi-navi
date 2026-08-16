@@ -130,6 +130,21 @@ final class NavigationController: ObservableObject {
         }
     }
 
+    /// 立ち寄り先を挟んだ場合の距離と所要を、**いまの案内を変えずに**試算する。
+    ///
+    /// 車から「充電に寄れ」と提案が来たとき、受けるかどうかを決める材料として
+    /// CarPlay に渡す数字。まだ受けると決まっていないので、`routingTask` は取り消さない
+    /// （取り消すと、走っている引き直しを試算が横から潰す）。
+    func estimate(inserting place: Place) async -> (distance: CLLocationDistance, travelTime: TimeInterval)? {
+        guard case let .navigating(route) = phase else { return nil }
+
+        let waypoints = remainingWaypoints(of: route) + [place]
+        guard let best = try? await calculateRoutes(to: route.destination, via: waypoints).first else {
+            return nil
+        }
+        return (best.distance, best.expectedTravelTime)
+    }
+
     /// まだ通っていない経由地。引き直すときに引き継ぐ。
     private func remainingWaypoints(of route: NavRoute) -> [Place] {
         let stepIndex = progress?.stepIndex ?? 0

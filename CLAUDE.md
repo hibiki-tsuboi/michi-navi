@@ -271,11 +271,26 @@ CarPlay 層は触らずに済む設計。
   制約に使われ、`NSArray` の生成で例外 → CarPlayTemplateUIHost が落ちる（iOS 26.5 で確認。
   履歴が空のまま Dashboard を繋ぐと必ず再現する）。**案内中に隠すのは CarPlay の仕事**で、
   `showManeuvers:` でショートカット欄を畳み `didEndTrip:` で戻すため、こちらから消さなくてよい。
-- **アプリのプロセスが落ちると CarPlay ホストも道連れになる**（シミュレータ限定・Apple 側のバグ）。
-  `CPSMapTemplateViewController._updateShareButtonVisibility` が
-  `CPSTemplateInstance` の実装していない `vehicleSupportsDestinationSharing` を
-  `respondsToSelector:` も見ずに呼ぶため。Xcode の再ビルド・再インストールのたびに
-  CarPlayTemplateUIHost のクラッシュログが増えるが、**こちらのバグではない**ので追わないこと。
+- **iOS 26.4 以降のシミュレータでは、CarPlay に地図を出した瞬間に CarPlay ホストが落ちる**
+  （Apple 側のバグ）。**シミュレータで CarPlay を試すときは 26.2 以前を使う。**
+  実機は 2026-08-15 に通しで動いているので、少なくともあの端末では起きていない。
+  ただし確かめたのはシミュレータ用の CarPlaySupport だけで、実機側の実装は見ていない。
+  26.0 が下限なので 26.0 / 26.1 / 26.2 が選べる。ジェスチャ関連の API は 26.0 から揃って
+  いるので、これで確認できないものは無い。
+  - `CPSMapTemplateViewController._updateShareButtonVisibility` が
+    `destinationSharingDelegate`（実体は `CPSTemplateInstance`）へ
+    `vehicleSupportsDestinationSharing` を `respondsToSelector:` も見ずに送る。
+    このセレクタは CarPlaySupport のどこにも実装が無く、送っている箇所も
+    ここ 1 つだけ（26.5 の逆アセンブルで確認）。受け手が nil でなく実装だけ無いので、
+    `doesNotRecognizeSelector:` で必ず落ちる。
+  - 経路は `_viewDidLoad` → `_configureNavigationBarShareButton` →
+    `_updateShareButtonVisibility` で、**分岐が無い**。つまりアプリ側で避けようがなく、
+    `CPMapTemplate` を push した全アプリが落ちる。共有ボタン自体に公開 API も無い。
+  - `_updateShareButtonVisibility` は **26.4 で追加された**。26.2 以前のランタイムには
+    メソッドごと存在しない（`nm` で全ランタイムを確認）。
+  - **「アプリを再ビルドしたから道連れになった」ではない。** 2026-08-16 まではそう書いて
+    いたが、実際は CarPlay に地図を出すたびに落ちていた。クラッシュログが溜まるのを
+    再インストールのせいだと取り違えていた。
 - **`CarPlayMapViewController` は 3 画面で共用**。`.compact`（Dashboard）と `.cluster`
   （メーター内）はカメラ高度を近づけ、目的地ピンを出さず、経路の線を細くする。
   狭い画面向けの差はこのクラスに集約する。`.cluster` だけは **進行方向を上に固定**し、

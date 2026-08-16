@@ -78,6 +78,12 @@ final class CarPlayMapViewController: UIViewController {
     /// `setVisibleMapRect` でカメラを引いて `cameraDistance` を更新しないので、そのあいだだけ立てる。
     private var cameraDistanceIsStale = false
 
+    /// いま全体表示で見せている経路。テンプレート（ルート提示の一覧・案内カード）が
+    /// 出入りすると使える幅が変わり、当て込みはその幅から決まるので、変わったときに
+    /// 合わせ直すために覚えておく（[viewSafeAreaInsetsDidChange]）。
+    /// **利用者が地図を動かしたら捨てる**（[abandonOverview]）。
+    private var overviewRoute: NavRoute?
+
     /// 前回ログへ渡した方位。差だけを載せるために覚えておく（[CameraState.headingDelta]）。
     private var lastReportedHeading: CLLocationDirection?
 
@@ -217,6 +223,7 @@ final class CarPlayMapViewController: UIViewController {
         // メーター内は固定なので何もしない。
         guard style != .cluster else { return }
 
+        abandonOverview()
         if isFollowingUser, let location = LocationService.shared.location {
             follow(location: location)
         } else {
@@ -240,6 +247,7 @@ final class CarPlayMapViewController: UIViewController {
     /// ルート全体が入るように引く。
     func showRouteOverview(_ route: NavRoute) {
         isFollowingUser = false
+        overviewRoute = route
         // 引いた先の高度は MapKit が決めるので、保存値はここで当てにならなくなる。
         cameraDistanceIsStale = true
         let camera = MKMapCamera(lookingAtCenter: mapView.camera.centerCoordinate,
@@ -247,9 +255,31 @@ final class CarPlayMapViewController: UIViewController {
                                  pitch: 0,
                                  heading: 0)
         mapView.setCamera(camera, animated: false)
+        fitOverview(route, animated: true)
+    }
+
+    private func fitOverview(_ route: NavRoute, animated: Bool) {
         mapView.setVisibleMapRect(route.polyline.boundingMapRect,
                                   edgePadding: overviewPadding,
-                                  animated: true)
+                                  animated: animated)
+    }
+
+    /// **ルート提示の一覧は当て込みのあとに出てくる**（`CarPlayCoordinator.apply(phase:)` の
+    /// 順序）。出た時点で使える幅が変わるが、`setVisibleMapRect` は中心と縮尺を決めるだけで
+    /// あとから追随しないので、そのままだと経路が一覧の裏に入る。**テンプレートの出入りを
+    /// 知る手段はここしかない**（`CPMapTemplateDelegate` に提示の合図は無い）。
+    ///
+    /// 出入りのアニメーションに重ねないよう、合わせ直しはアニメーション無しで行う。
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard let overviewRoute else { return }
+        fitOverview(overviewRoute, animated: false)
+    }
+
+    /// 全体表示の追随を打ち切る。**利用者が自分でカメラを動かしたら**、テンプレートの
+    /// 出入りで当て込み直さない。残すと、動かした先からひとりでに引き戻される。
+    private func abandonOverview() {
+        overviewRoute = nil
     }
 
     /// 追従へ戻すときは、進行中の回転・傾けの基準も捨てる。残したままだと、指を離すまで
@@ -259,6 +289,7 @@ final class CarPlayMapViewController: UIViewController {
     /// `apply(phase:)` が呼ぶ）。ズームは追従したまま効かせる操作なので触らない。
     func recenter() {
         isFollowingUser = true
+        abandonOverview()
         isRotatingByGesture = false
         rotationBaseHeading = nil
         isPitchingByGesture = false
@@ -302,6 +333,7 @@ final class CarPlayMapViewController: UIViewController {
     private func setCameraDistance(_ distance: CLLocationDistance, animated: Bool = true) {
         cameraDistance = min(max(distance, minimumCameraDistance), maximumCameraDistance)
         cameraDistanceIsStale = false
+        abandonOverview()
         if let location = LocationService.shared.location, isFollowingUser {
             follow(location: location, animated: animated)
         } else {
@@ -322,6 +354,7 @@ final class CarPlayMapViewController: UIViewController {
     @discardableResult
     func pan(by translation: CGPoint, animated: Bool = true) -> CLLocationDistance {
         isFollowingUser = false
+        abandonOverview()
         let before = mapView.centerCoordinate
         let anchor = centerPoint
         let point = CGPoint(x: anchor.x - translation.x, y: anchor.y - translation.y)
@@ -394,6 +427,7 @@ final class CarPlayMapViewController: UIViewController {
             // はっきり回したと分かってから追従を切り、その瞬間の向きを基準にする。
             guard abs(rotation) >= minimumRotationToStopFollowing else { return .pending }
             isFollowingUser = false
+            abandonOverview()
             self.rotationBaseHeading = mapView.camera.heading
             rotationBaseAngle = rotation
             return .pending
@@ -428,6 +462,7 @@ final class CarPlayMapViewController: UIViewController {
         guard let lastPitchCenter, lastPitchCenter.y != center.y else { return .pending }
 
         isFollowingUser = false
+        abandonOverview()
         let camera = mapView.camera
         camera.pitch = min(max(camera.pitch + (lastPitchCenter.y - center.y) * pitchDegreesPerPoint, 0),
                            maximumPitch)

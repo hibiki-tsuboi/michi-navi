@@ -326,6 +326,14 @@ CarPlay 層は触らずに済む設計。
     足さなければ 316…694 に収まる。**余白を増やすほど経路が大きくなる**という逆の
     効き方をするので、「全体表示なのに右で見切れる」から原因を辿りにくい。
     2026-08-16 まで足していた。
+  - **当て込みは一度きりで、あとから追随しない。** `setVisibleMapRect` は中心と縮尺を
+    決めるだけなので、**ルート提示の一覧が出て使える幅が変わっても経路はそのまま**
+    （実測: 余白なしで当て込むと経路が x 16…784、そこへ左 300pt の一覧が出ても 16…784 の
+    まま＝一覧の裏に入る）。`apply(phase:)` は当て込みのあとに `showTripPreviews` を
+    呼ぶので必ずこの順序になる。テンプレートの出入りを知る手段は
+    `viewSafeAreaInsetsDidChange` しかない（`CPMapTemplateDelegate` に提示の合図は無い）
+    ので、そこで合わせ直している。**利用者が地図を動かしたら追随をやめる**こと
+    （`abandonOverview`）。残すと、動かした先からテンプレートの出入りだけで引き戻される。
 - **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or
   drag events in the base view」）。`MKMapView` に自前のジェスチャを付ける手は使えず、入力は
   すべて `CPMapTemplateDelegate` 経由。指のドラッグは `didUpdatePanGestureWithTranslation`

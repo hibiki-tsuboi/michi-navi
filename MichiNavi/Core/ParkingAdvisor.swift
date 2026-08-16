@@ -95,28 +95,45 @@ final class ParkingAdvisor {
 
         // 探すより先に立てる。検索は数秒かかり、そのあいだにも位置更新は来る。
         trip?.hasAdvised = true
+        ParkingLog.triggered(remaining: progress.distanceRemaining)
         Task { await suggest(near: route.destination) }
     }
 
     private func suggest(near destination: Place) async {
         // **自宅と職場では出さない。** いつも停めている場所があるので、提案は邪魔にしかならない。
         // この 2 つが「数が増えず、いちばん押される行き先」だという `Pinned` の前提がそのまま効く。
-        guard destination != destinations.home, destination != destinations.work else { return }
+        guard destination != destinations.home, destination != destinations.work else {
+            ParkingLog.skipped("pinned")
+            return
+        }
         // 目的地が駐車場そのものなら、停める場所はもう決まっている。
         // 履歴から戻した `Place` はカテゴリを持たない（座標から組み直しているため）ので、
         // ここをすり抜けることがある。下の重複除外がその受け皿。
-        guard destination.mapItem.pointOfInterestCategory != .parking else { return }
+        guard destination.mapItem.pointOfInterestCategory != .parking else {
+            ParkingLog.skipped("destination-is-parking")
+            return
+        }
 
         guard let places = try? await SearchService.shared.nearby(pointsOfInterest: [.parking],
                                                                   around: destination.coordinate,
-                                                                  radius: Self.searchRadius) else { return }
+                                                                  radius: Self.searchRadius) else {
+            // 圏外・レート制限・**そもそも 1 件も無い**のどれでもここへ来る
+            // （`MKLocalSearch` は結果が無いと空配列ではなくエラーを返す）。
+            ParkingLog.searchFailed()
+            return
+        }
 
         // `nearby` は渡した座標に近い順に返すので、先頭が目的地にいちばん近い。
         // **補給先（`RangeAdvisor`）が「届く範囲でいちばん先」を選ぶのと逆になる。**
         // あちらは走り続けるための寄り道、こちらは降りて歩いて戻る場所だから。
-        guard let place = places.first(where: {
-            $0 != destination && ParkingName.isForCars($0.name)
-        }) else { return }
+        let candidates = places.filter { $0 != destination }
+        let usable = candidates.filter { ParkingName.isForCars($0.name) }
+        ParkingLog.searched(found: candidates.count, dropped: candidates.count - usable.count)
+
+        guard let place = usable.first else {
+            ParkingLog.dropped("none-usable")
+            return
+        }
 
         let walking = CLLocation(latitude: destination.coordinate.latitude,
                                  longitude: destination.coordinate.longitude)
@@ -124,8 +141,12 @@ final class ParkingAdvisor {
                                        longitude: place.coordinate.longitude))
         // 範囲は `nearby` にも渡してあるが、`MKLocalPointsOfInterestRequest` の半径は
         // 目安でしかなく、外の結果が混ざることがある。歩けない距離なら黙る。
-        guard walking <= Self.searchRadius else { return }
+        guard walking <= Self.searchRadius else {
+            ParkingLog.dropped("too-far")
+            return
+        }
 
+        ParkingLog.advised(name: place.name, walking: walking)
         advice.send(Advice(place: place, walkingDistance: walking))
     }
 }

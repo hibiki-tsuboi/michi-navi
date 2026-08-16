@@ -235,6 +235,10 @@ final class CarPlayCoordinator: NSObject {
         TrafficAdvisor.shared.advice
             .sink { [weak self] in self?.presentTrafficAdvice($0) }
             .store(in: &cancellables)
+
+        navigation.rerouteBlockedOffline
+            .sink { [weak self] in self?.presentOfflineNotice() }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -816,6 +820,23 @@ final class CarPlayCoordinator: NSObject {
             },
             secondaryAction: CPAlertAction(title: String(localized: "いいえ"), style: .cancel) { _ in },
             duration: 20)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
+    /// 圏外で経路を引き直せないことを知らせる。
+    ///
+    /// **黙って諦めない。** 引き直しを見送ると「再検索中」の赤いカードは下りるので、
+    /// 何も出さないと**経路を外れたまま無反応**に見える（「再検索中が出っぱなし」を
+    /// 直したつもりが「何も起きない」に変わるだけになる）。
+    /// 押させることは何も無いので `CPNavigationAlert` で、放っておけば消える形にする。
+    private func presentOfflineNotice() {
+        let alert = CPNavigationAlert(
+            titleVariants: [String(localized: "圏外のため経路を引き直せません")],
+            subtitleVariants: [String(localized: "電波が戻ったら自動で引き直します")],
+            image: UIImage(systemName: "wifi.slash"),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 10)
         mapTemplate.present(navigationAlert: alert, animated: true)
     }
 

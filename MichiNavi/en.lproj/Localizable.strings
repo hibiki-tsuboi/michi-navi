@@ -82,6 +82,8 @@
 "右折が少ない" = "Fewer right turns";
 "周辺のカテゴリから" = "Browse nearby categories";
 "周辺をさがす" = "Search nearby";
+"圏外です。電波の届く場所で試してください" = "No signal. Try again where you have coverage";
+"圏外のため経路を引き直せません" = "No signal — can't recalculate the route";
 "場所が特定できませんでした" = "Couldn't pin down that place";
 "完了" = "Done";
 "寄り道してみる" = "Take a detour";
@@ -143,6 +145,7 @@
 "避けない" = "No";
 "避ける" = "Yes";
 "閉じる" = "Close";
+"電波が戻ったら自動で引き直します" = "It will retry once you're back in range";
 "音声入力がすでに動いています" = "Voice input is already running";
 "音声認識の準備ができませんでした" = "Couldn't get speech recognition ready";
 "食事" = "Food";

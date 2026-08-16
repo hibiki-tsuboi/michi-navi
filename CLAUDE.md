@@ -67,11 +67,11 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 13 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 14 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
-`RestReminder.shared` / `RangeAdvisor.shared` / `RouteWeather.shared` /
-`ParkingAdvisor.shared` / `TrafficAdvisor.shared`。
+`NetworkMonitor.shared` / `RestReminder.shared` / `RangeAdvisor.shared` /
+`RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 後ろ 5 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` /
@@ -574,6 +574,20 @@ CarPlay 層は触らずに済む設計。
   検索していないのに「再検索中」の赤いカードだけが残る。動き出せばまた立つ。
   計算が走っている最中は触らない（終わらせ方はそちらに任せる。失敗しても、次の
   位置更新でここへ来て下りる）。
+- **圏外のあいだは引き直さない**（`NetworkMonitor`）。MapKit の経路計算はすべてネットワーク
+  越しなので、切れているあいだは必ず失敗する。投げれば失敗が数えられて間隔が伸び、
+  **電波が戻ってからも最大 40 秒待たされる**。山間部やトンネルはいちばん引き直してほしい
+  場面なので、そこで待たせない（戻った瞬間に `rerouteFailures` と `lastRerouteFinished` を捨てる）。
+  - **停車のときと同じく `isRerouting` を下ろす**。検索していないのに赤いカードだけが
+    残るのを避けるため。
+  - **下ろしたら必ず知らせる**（`rerouteBlockedOffline` → `CPNavigationAlert`）。下ろすだけだと
+    「再検索中が出っぱなし」が「経路を外れたまま何も起きない」に変わるだけになる。
+    **圏外が続くあいだは 1 回だけ**。
+  - **`NWPathMonitor` は「通信できる」の保証ではない。** 見ているのは経路が張れているか
+    どうかで、電波 1 本でタイムアウトする状態でも `.satisfied` を返す。はっきり切れている
+    ときを拾うだけで、それ以外の失敗は従来どおり再試行の間隔に任せる。
+  - **判定が付くまでは通信できる扱い**にする。起動直後に圏外から始めると、まだ何も
+    分かっていない時点で案内の開始そのものを止めてしまう。
 - **引き直しの切り分けは `NavigationLog`（category `route`）を見る**。ジェスチャと同じで、
   **画面を見ても何が起きたか分からない**（「逸脱と判断した」「判断したが見送った」
   「投げたが失敗した」が全部同じ見え方になる）。`off-route` の行に中心線からの距離・

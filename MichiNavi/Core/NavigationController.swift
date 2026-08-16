@@ -72,7 +72,14 @@ final class NavigationController: ObservableObject {
         let stepIndex: Int
     }
 
+    /// 圏外で経路を引き直せなかったときに流れる。**圏外が続くあいだは 1 回だけ。**
+    ///
+    /// 引き直しを見送ると「再検索中」のカードは下りるので、何も出さないと**経路を
+    /// 外れたまま無反応**に見える。下ろすことと知らせることは対で要る。
+    let rerouteBlockedOffline = PassthroughSubject<Void, Never>()
+
     private let location = LocationService.shared
+    private let network = NetworkMonitor.shared
     private let routeProvider: RouteProviding = MapKitRouteProvider()
 
     private var guidance: GuidanceEngine?
@@ -94,6 +101,8 @@ final class NavigationController: ObservableObject {
     private var rerouteFailures = 0
     /// 直前に引き直した地点。次を投げるまでに動くべき距離をここから測る。
     private var lastRerouteOrigin: CLLocation?
+    /// いまの圏外について、もう知らせたか。電波が戻ったら倒す。
+    private var hasReportedOffline = false
 
     /// 到着予定を最後に測り直した時刻。
     private var lastTravelTimeRefresh: Date?
@@ -104,6 +113,24 @@ final class NavigationController: ObservableObject {
             .compactMap { $0 }
             .sink { [weak self] in self?.handle(location: $0) }
             .store(in: &cancellables)
+
+        network.$isOnline
+            .removeDuplicates()
+            .sink { [weak self] in self?.apply(isOnline: $0) }
+            .store(in: &cancellables)
+    }
+
+    /// 電波が戻ったら、圏外のあいだに溜めた我慢を捨てる。
+    ///
+    /// 失敗を数えているのは**道が見つからないとき**に MapKit を叩き続けないためで、
+    /// 圏外で失敗したぶんは性質が違う。そのまま数えたままにすると、電波が戻っても
+    /// 最大 40 秒（`rerouteInterval` の頭打ち）待たされる。トンネルを出た直後は
+    /// いちばん引き直してほしい場面なので、そこで待たせない。
+    private func apply(isOnline: Bool) {
+        guard isOnline else { return }
+        rerouteFailures = 0
+        lastRerouteFinished = nil
+        hasReportedOffline = false
     }
 
     var currentRoute: NavRoute? {
@@ -201,6 +228,12 @@ final class NavigationController: ObservableObject {
     private func route(to destination: Place,
                        via waypoints: [Place] = [],
                        then handle: @escaping ([NavRoute]) -> Void) {
+        // **圏外なら段階を動かさない。** 計算中にしてから MapKit の一般的なエラーで
+        // 落とすより、押した時点で理由を返すほうが早いし、何が悪いのかも分かる。
+        guard network.isOnline else {
+            lastError = NavigationError.offline.errorDescription
+            return
+        }
         routingTask?.cancel()
         lastError = nil
         // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
@@ -287,6 +320,7 @@ final class NavigationController: ObservableObject {
         lastRerouteOrigin = nil
         isRefreshingTravelTime = false
         lastTravelTimeRefresh = nil
+        hasReportedOffline = false
         phase = .idle
         location.setNavigating(false)
     }
@@ -334,7 +368,8 @@ final class NavigationController: ObservableObject {
     /// 動かすのは数字だけ。
     private func refreshTravelTimeIfNeeded(on route: NavRoute) {
         // 引き直している最中は測らない。どのみち経路が入れ替われば基準ごと作り直しになる。
-        guard !isRefreshingTravelTime, !isRerouting else { return }
+        // 圏外なら投げない。引き直しと同じで、失敗するだけの問い合わせになる。
+        guard network.isOnline, !isRefreshingTravelTime, !isRerouting else { return }
         if let lastTravelTimeRefresh,
            Date().timeIntervalSince(lastTravelTimeRefresh) < Self.travelTimeRefreshInterval { return }
         guard let origin = location.location?.coordinate else { return }
@@ -429,6 +464,19 @@ final class NavigationController: ObservableObject {
     /// という形で確実に破綻する。**間隔だけでは足りない**ので、停まっているあいだは
     /// そもそも投げない（[canReroute(from:)]）。
     private func reroute(to destination: Place, via waypoints: [Place], from current: CLLocation) {
+        // **圏外なら投げない。** MapKit の経路計算はネットワーク越しなので必ず失敗する。
+        // 投げれば失敗が数えられて間隔が伸び、電波が戻ってからも待たされる。
+        // 停車のときと同じく、**何も検索していないのだから「再検索中」は下ろす**。
+        guard network.isOnline else {
+            if !isCalculatingReroute { isRerouting = false }
+            NavigationLog.rerouteSkipped("offline")
+            // 下ろしただけだと、経路を外れたまま何も出ない画面になる。1 回だけ知らせる。
+            if !hasReportedOffline {
+                hasReportedOffline = true
+                rerouteBlockedOffline.send()
+            }
+            return
+        }
         guard canReroute(from: current) else {
             // 停まっているあいだは**何も検索していない**ので「再検索中」を出したままにしない。
             // 失敗しても下ろさない作りなので、ここで下ろさないと、動き出して引き直しが
@@ -536,10 +584,12 @@ final class NavigationController: ObservableObject {
 
 enum NavigationError: LocalizedError {
     case noCurrentLocation
+    case offline
 
     var errorDescription: String? {
         switch self {
         case .noCurrentLocation: String(localized: "現在地が取得できていません")
+        case .offline: String(localized: "圏外です。電波の届く場所で試してください")
         }
     }
 }

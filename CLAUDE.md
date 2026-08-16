@@ -63,12 +63,13 @@ Combine の使い分けにも意味がある:
 
 | ディレクトリ | 責務 | 制約 |
 | --- | --- | --- |
-| `Core/` | 位置・検索・経路計算・進捗計算・状態管理・目的地の保存・音声案内 | UI 非依存。CarPlay も SwiftUI も import しない |
-| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面ぶん | 案内ロジックを持たない |
+| `Core/` | 位置・検索・経路計算・進捗計算・状態管理・目的地の保存・音声案内・音声入力 | UI 非依存。CarPlay も SwiftUI も import しない |
+| `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 5 つ: `NavigationController.shared` / `LocationService.shared` /
-`SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared`。
+共有シングルトンは 6 つ: `NavigationController.shared` / `LocationService.shared` /
+`SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
+`SpeechInput.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 ### `GuidanceEngine`（経路上の進捗計算）
@@ -108,6 +109,48 @@ Combine の使い分けにも意味がある:
   何もせず返るので、「鳴らす音が無いのにセッションを有効化しない」というガイドラインの
   要求も同時に満たす。`short` のときは音声ファイルを同梱せずに済ませるため、16bit PCM の
   WAV をその場で組み立ててトーンを鳴らす。
+
+### 音声入力（`SpeechInput` / `DestinationIntent`）
+
+**走行中はキーボードが塞がれる**ので、これが「新しい行き先をその場で決める」唯一の道。
+お気に入り・履歴・周辺カテゴリは、あらかじめ知っている場所にしか届かない。
+2 段に分けてある: 音を文字にする（`SpeechInput`）と、文を検索語にする（`DestinationIntent`）。
+
+- **認可はマイクだけ**。旧 `SFSpeechRecognizer` は `NSSpeechRecognitionUsageDescription` と
+  `requestAuthorization` を要求するが、**iOS 26 の `SpeechAnalyzer` には認可 API が無い**
+  （Speech のバイナリを見ても認可のシンボルは `SFSpeechRecognizer` にしか無い）。
+  要らない許可を運転中に求めない。
+- **認識モデルは端末に入っていないことがある**。初回は `AssetInventory` 経由で取得が要る
+  （日本語は対応済み。`SpeechTranscriber.supportedLocales` に `ja_JP` がある）。
+  **`reserve(locale:)` を先に呼ぶこと。** 予約は寿命確保ではなく購読そのもので、
+  予約せずに取得を頼むと
+  `Cannot check the download status, ... is not subscribed to transcription.ja`
+  で弾かれる。予約した瞬間に状態が `supported` から `installed` へ変わることもある
+  （実体はあって、こちらが繋がっていなかっただけ）。予約は 5 ロケールまで。
+- **読み上げを止めるのはマイクを取る直前**。モデルの取得はその手前で終わらせる。
+  取得ごと `suspend()` の内側に入れると、初回だけ案内音声が長々と途切れる。
+- **マイクの形式と認識モデルの形式は違う**ので `AVAudioConverter` を挟む。変換器は
+  音声スレッドの中でしか触らない。
+- **`VoiceGuidance` を止めてから聞く**。自分の声が回り込むうえ、オーディオセッションの
+  カテゴリが `.playback` から `.playAndRecord` へ差し替わる。`suspend()` が
+  `isSessionConfigured` を倒すので、次の読み上げでカテゴリが入れ直される。
+  **止める位置に意味がある**: 予告は `handle(progress:)` で、スケジューラに渡す**前**に
+  止める。`prompt(for:on:)` は返した時点でそのしきい値を読み上げ済みとして記録するので、
+  受け取ってから捨てるとその予告は二度と出てこない。いっぽう到着・経由地通過は
+  `PassthroughSubject` の 1 回きりの出来事なので、捨てずに抱えて `resume()` で読む。
+- **話し終わりは自分で決める**。1.4 秒黙ったら終わり、上限 15 秒。CarPlay の音声画面には
+  閉じるボタンを置けない（`CPBarButtonProviding` 準拠も `actionButtons` も iOS 26.4 以降）ので、
+  自動で切り上げる以外に終わる道が無い。
+- **お気に入りと履歴の地名を認識のヒントに渡す**（`AnalysisContext.contextualStrings`）。
+  固有名詞は一般の言語モデルが落としやすく、地名は落とされるといちばん困る。
+- **言語モデルが使えなくても止めない**。`DestinationIntent.parse` は Foundation Models で
+  「東京駅に行きたい」から検索語と扱い（目的地／立ち寄り先）を取り出すが、Apple Intelligence は
+  対応機種かつ利用者が有効にしている場合しか動かない。使えないときは**話した文をそのまま
+  検索語にする**（`fallback`）。効きは落ちるが、口で言えること自体は保たれる。
+- **候補を並べない**。読み上げた語にいちばん近い 1 件を取って、そのままルートの提示へ渡す。
+  提示画面が確認を兼ねる。運転中にリストから選ばせない。
+- **iPhone 側には音声入力を出していない**。あちらはキーボードが使えるので、この機能が
+  埋めている穴が無い。`SpeechInput` は `Core/` にあるので、必要になれば足せる。
 
 ### 目的地の保存（`DestinationStore`）
 
@@ -218,6 +261,16 @@ CarPlay 層は触らずに済む設計。
   入ると 2 つ落ちる。`mapTemplateDidShowPanningInterface` で拡大・縮小の 2 つに差し替え、
   `mapTemplateDidDismissPanningInterface` で元へ戻している。パン中に意味があるのは
   拡大・縮小だけで、現在地へ戻すのは「完了」が担う。
+- **ナビゲーションバーのボタンは左右 2 つずつが上限**。マイクをここへ置いているのは、
+  `mapButtons` が 4 つで埋まっているうえ、パン UI に入ると 2 つ落ちるため。
+  マイクは走行中に消えてはいけない導線なので、落ちる可能性のある側へ置かない。
+- **`CPVoiceControlTemplate` は、いまナビアプリだけが使える**。ガイド p.14 の対応表で、
+  他のカテゴリには「iOS 27 以降」（driving task は 26.4）の注が付いている。
+  使ううえでの約束が 3 つ: **提示してからでないと状態を切り替えられない**
+  （先に `activateVoiceControlState` を呼んでも黙って無視される）、状態は 5 つまで、
+  短い間に何度も切り替えると間引かれる。そして**音声サービスが動いているあいだは
+  この画面を出しておく**こと（p.27）なので、聞き取りだけでなく検索が終わるまで畳まない。
+- **音声画面とアラートを重ねない**。エラーを出すときは先に `dismissTemplate` してから。
 - **`CarPlayCoordinator.beginSessionIfNeeded` の二重開始ガードを外さない**。
   iPhone 側で案内を始めた場合も同じ経路を通る。
 - **経由地は `NavRoute` を 1 本に繋いだ時点で見えなくなる**。`GuidanceEngine` も
@@ -402,6 +455,20 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 
   なお **26.4 未満のシミュレータでは新しい経路がまるごと動かない**。既定で起動している
   端末が 26.2 などだと「実装したのに何も起きない」に見えるので、先に OS を確かめること。
+- **音声入力の実地確認**（2026-08-16 追加ぶん）。読み上げ合成した音声を
+  `SpeechAnalyzer` に流す形で認識の経路は通してあるが、**本物のマイクでは一度も試していない**。
+  実車で見るのは次の 3 つ。
+
+  - **走行ノイズでの認識率**。`AVAudioSession` のモードに `.measurement` を選んでいる
+    （認識向けとして文書化されている設定）が、これは系の音声処理を切るので、
+    ロードノイズの中では逆効果かもしれない。`.voiceChat` ならエコー除去が効くが、
+    通話用の経路に切り替わって車ではなく iPhone のマイクを掴む恐れがある。**未検証**。
+  - **話し終わりの 1.4 秒**。長い住所を言い切る前に切れないか。
+  - **音楽との同居**。`.duckOthers` で下げているだけなので、音楽が乗ったままマイクに入る。
+- **Foundation Models は開発機で一度も動いていない**。`SystemLanguageModel.default.availability`
+  が `appleIntelligenceNotEnabled` を返す（2026-08-16 時点）。**つまり
+  `DestinationIntent.parse` は今のところ常に fallback 側しか通っていない。**
+  試すには対応機種で Apple Intelligence を有効にすること。
 - **安全領域を差し引いた中心合わせ**: `follow` は自車を**画面の**中心に置いており、
   安全領域の中心には置いていない（差し引いているのは全体表示の余白だけ）。
   3 画面とも同じで、テンプレートや計器の縁が重なるぶんだけ自車位置が寄る。

@@ -23,6 +23,7 @@ final class CarPlayCoordinator: NSObject {
     /// 車が今どこまで UI を制限しているか（走行中のキーボード封じなど）を教えてくれる。
     private var sessionConfiguration: CPSessionConfiguration?
     private var destinations: CarPlayDestinationBrowser?
+    private var voiceControl: CarPlayVoiceControl?
 
     private var navigationSession: CPNavigationSession?
     private var currentTrip: CPTrip?
@@ -77,15 +78,20 @@ final class CarPlayCoordinator: NSObject {
 
         let configuration = CPSessionConfiguration(delegate: self)
         sessionConfiguration = configuration
+        let select: (CarPlayDestinationBrowser.Choice) -> Void = { [weak self] choice in
+            switch choice {
+            case let .destination(place): self?.navigation.requestRoutes(to: place)
+            case let .waypoint(place): self?.navigation.addWaypoint(place)
+            }
+        }
         destinations = CarPlayDestinationBrowser(
             interfaceController: interfaceController,
             sessionConfiguration: configuration,
-            onSelect: { [weak self] choice in
-                switch choice {
-                case let .destination(place): self?.navigation.requestRoutes(to: place)
-                case let .waypoint(place): self?.navigation.addWaypoint(place)
-                }
-            },
+            onSelect: select,
+            onError: { [weak self] in self?.presentAlert(message: $0) })
+        voiceControl = CarPlayVoiceControl(
+            interfaceController: interfaceController,
+            onSelect: select,
             onError: { [weak self] in self?.presentAlert(message: $0) })
 
         mapTemplate.mapDelegate = self
@@ -107,6 +113,7 @@ final class CarPlayCoordinator: NSObject {
     func stop() {
         cancellables.removeAll()
         destinations = nil
+        voiceControl = nil
         sessionConfiguration = nil
         clearSession()
     }
@@ -507,7 +514,7 @@ final class CarPlayCoordinator: NSObject {
     /// `mapTemplateDidShowPanningInterface` で差し替えている。
     private func applyIdleButtons() {
         mapTemplate.mapButtons = [recenterButton, zoomInButton, zoomOutButton, panButton]
-        mapTemplate.leadingNavigationBarButtons = []
+        mapTemplate.leadingNavigationBarButtons = [voiceButton]
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
@@ -515,7 +522,9 @@ final class CarPlayCoordinator: NSObject {
     /// `applyIdleButtons` と同じ並びにしてある。
     private func applyNavigatingButtons() {
         mapTemplate.mapButtons = navigatingMapButtons
-        mapTemplate.leadingNavigationBarButtons = [overviewButton]
+        // ナビゲーションバーは左右 2 つずつが上限。マップボタンは 4 つで埋まっている
+        // （しかもパン UI に入ると 2 つ落ちる）ので、音声はこちらへ置く。
+        mapTemplate.leadingNavigationBarButtons = [voiceButton, overviewButton]
         mapTemplate.trailingNavigationBarButtons = [endNavigationButton]
     }
 
@@ -532,6 +541,15 @@ final class CarPlayCoordinator: NSObject {
 
     private var destinationsButton: CPBarButton {
         CPBarButton(title: "目的地") { [weak self] _ in self?.destinations?.present() }
+    }
+
+    /// 押して話す。**走行中でも押せる唯一の「新しい行き先を決める」導線**なので、
+    /// キーボードの封じられ具合に関係なく常に出す（`CarPlayDestinationBrowser` の
+    /// 検索ボタンとは扱いが違う）。
+    private var voiceButton: CPBarButton {
+        CPBarButton(image: UIImage(systemName: "mic.fill") ?? UIImage()) { [weak self] _ in
+            self?.voiceControl?.start()
+        }
     }
 
     private var endNavigationButton: CPBarButton {

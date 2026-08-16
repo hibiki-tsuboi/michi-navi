@@ -20,6 +20,10 @@ final class VoiceGuidance: NSObject {
     private var currentRouteID: UUID?
 
     private var isSessionConfigured = false
+    /// 音声入力のあいだ読み上げを止めているか。
+    private var isSuspended = false
+    /// 止めているあいだに届いた 1 回きりの知らせ（到着・経由地通過）。
+    private var pendingPrompt: VoicePrompt?
     /// 再生中の音の数。連続で読み上げるときにセッションを切らないための数え上げ。
     private var playingCount = 0
     /// 到着アナウンス中。案内終了で読み上げを打ち切らないために見る。
@@ -56,6 +60,28 @@ final class VoiceGuidance: NSObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - 音声入力への譲り
+
+    /// 聞き取りのあいだ読み上げを止める。
+    ///
+    /// 止める理由は 2 つ。自分の声がマイクへ回り込むこと、そして
+    /// **オーディオセッションのカテゴリが `.playAndRecord` に差し替わること**。
+    /// `isSessionConfigured` を倒しておくのがここの肝で、こうしないと次の読み上げが
+    /// 録音用のカテゴリのまま鳴り、`.measurement` のせいで妙に小さくなる。
+    func suspend() {
+        isSuspended = true
+        stopSpeaking()
+        isSessionConfigured = false
+    }
+
+    /// 抱えていた出来事があればここで読む。
+    func resume() {
+        isSuspended = false
+        guard let prompt = pendingPrompt else { return }
+        pendingPrompt = nil
+        speak(prompt)
+    }
+
     // MARK: - 状態の追従
 
     private func apply(phase: NavigationController.Phase) {
@@ -77,6 +103,11 @@ final class VoiceGuidance: NSObject {
     }
 
     private func handle(progress: RouteProgress) {
+        // **聞き取り中はスケジューラに触らせない。** `prompt(for:on:)` は返した時点で
+        // そのしきい値を読み上げ済みとして記録するので、受け取ってから捨てると
+        // その予告は二度と出てこない。ここで止めれば、次の位置更新でまた出る。
+        guard !isSuspended else { return }
+
         guard let scheduler,
               let route = navigation.currentRoute,
               let prompt = scheduler.prompt(for: progress, on: route) else { return }
@@ -86,6 +117,14 @@ final class VoiceGuidance: NSObject {
     // MARK: - 読み上げ
 
     private func speak(_ prompt: VoicePrompt) {
+        // 聞き取り中に届くのは到着・経由地通過だけ（予告は `handle(progress:)` で
+        // 止めてある）。どちらも**その瞬間しか流れない出来事**なので、落とすと
+        // 二度と来ない。抱えておいて、聞き取りが終わってから読む。
+        guard !isSuspended else {
+            pendingPrompt = prompt
+            return
+        }
+
         // 通話中や Siri 使用中は system が鳴らすなと言ってくる。
         // ここで弾けば「鳴らす音が無いのにセッションを有効化しない」という
         // ガイドラインの要求も同時に満たせる。

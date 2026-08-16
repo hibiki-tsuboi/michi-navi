@@ -227,6 +227,10 @@ final class CarPlayCoordinator: NSObject {
         RouteWeather.shared.hazard
             .sink { [weak self] in self?.presentWeatherHazard($0) }
             .store(in: &cancellables)
+
+        ParkingAdvisor.shared.advice
+            .sink { [weak self] in self?.presentParkingAdvice($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -805,6 +809,28 @@ final class CarPlayCoordinator: NSObject {
             image: UIImage(systemName: advice.kind == .evCharger ? "bolt.car.fill" : "fuelpump.fill"),
             primaryAction: CPAlertAction(title: String(localized: "寄る"), style: .default) { [weak self] _ in
                 self?.navigation.addWaypoint(advice.place)
+            },
+            secondaryAction: CPAlertAction(title: String(localized: "いいえ"), style: .cancel) { _ in },
+            duration: 20)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
+    /// 目的地の手前で出す駐車場の提案。
+    ///
+    /// **`addWaypoint` ではなく行き先そのものを差し替える。** 駐車場は寄ってから
+    /// 目的地へ向かう場所ではなく、そこで降りる場所なので、経由地として挟むと
+    /// 停めたあとも案内が目的地へ向かって続いてしまう。
+    ///
+    /// 提示を挟まない `startNavigation(to:)` を使うのは、Dashboard のショートカットと
+    /// 同じ理由。押した時点で選び終わっているものを、走行中にもう一度選び直させない。
+    private func presentParkingAdvice(_ advice: ParkingAdvisor.Advice) {
+        let walking = Formatters.distanceText(advice.walkingDistance)
+        let alert = CPNavigationAlert(
+            titleVariants: [String(localized: "近くの駐車場")],
+            subtitleVariants: [String(localized: "\(advice.place.name)・目的地まで徒歩 \(walking)")],
+            image: UIImage(systemName: "parkingsign"),
+            primaryAction: CPAlertAction(title: String(localized: "ここに停める"), style: .default) { [weak self] _ in
+                self?.navigation.startNavigation(to: advice.place)
             },
             secondaryAction: CPAlertAction(title: String(localized: "いいえ"), style: .cancel) { _ in },
             duration: 20)

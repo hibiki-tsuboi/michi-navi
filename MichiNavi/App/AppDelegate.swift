@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         RestReminder.shared.start()
         RangeAdvisor.shared.start()
         RouteWeather.shared.start()
+        ParkingAdvisor.shared.start()
         return true
     }
 }

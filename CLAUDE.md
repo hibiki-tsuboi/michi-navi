@@ -67,13 +67,15 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 11 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 12 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
-`RestReminder.shared` / `RangeAdvisor.shared` / `RouteWeather.shared`。
+`RestReminder.shared` / `RangeAdvisor.shared` / `RouteWeather.shared` /
+`ParkingAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
-後ろ 3 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather`）は**助言を出すだけの層**で、
+後ろ 4 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor`）は
+**助言を出すだけの層**で、
 `NavigationController` を購読して `PassthroughSubject` で知らせるところまでしか持たない。
 出すかどうか・どう見せるかは各 UI が決める。案内そのものには一切触らないので、
 足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ（`VoiceGuidance` と同じ理由で、
@@ -186,7 +188,7 @@ Combine の使い分けにも意味がある:
   （「終わり」だけで案内を切ると同乗者との会話でも切れる）。**Apple Intelligence が
   無い環境ではこれが唯一走る経路**なので、判定を変えるときは誤爆の側を先に確かめること。
 
-### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather`）
+### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor`）
 
 どれも「案内は変えず、知らせるだけ」。`NavigationController` を購読して
 `PassthroughSubject` を流し、出すかどうかは各 UI が決める。
@@ -203,6 +205,18 @@ Combine の使い分けにも意味がある:
   支度や速度が変わるもの」に絞る。凍結は 0℃ ちょうどではなく 3℃ から言う（気温は路面温度より
   高く出るし、橋の上は先に凍る）。**問い合わせ点を増やさないこと**。WeatherKit には
   呼び出し数の上限があり、経路 1 本ごとにこの数だけ叩く。
+- **駐車場は目的地の手前 1km で 1 件だけ出す**。着いてから探すと、探しはじめる時点でもう
+  目的地の前にいるので、周りを回りながら探すことになる。選ぶのは**目的地にいちばん近い 1 件**で、
+  補給先とちょうど逆（あちらは走り続けるための寄り道、こちらは降りて歩いて戻る場所）。
+  範囲を 500m に切っているのも同じ理由で、広げると「空いているが 1km 歩く」が上位に来る。
+  **自宅と職場では出さない**（いつも停める場所があるので邪魔にしかならない）。
+  受けたときは経由地として挟まず**行き先そのものを差し替える**。挟むと、停めたあとも
+  案内が元の目的地へ向かって続く。
+  - **「近所への案内では出さない」を経路の全長で判定しないこと**（`Trip.hasBeenFar`）。
+    引き直しで返る経路は残りぶんだけの長さなので、目的地の近くで外れると短い案内と
+    見分けが付かず、いちばん出したい場面で黙る。しきい値より遠い状態を一度でも見たか、で見る。
+  - 数えるのは `NavRoute.id` ではなく**目的地**。`id` は引き直すたびに変わるので、
+    そちらで数えると外れるたびに提案が出る。
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
 
@@ -703,6 +717,13 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   見た目や挙動を確かめたものは 1 つも無い。とくに次の 3 つは**実機かつ対応した車でないと
   確認しようがない**: メーター・HUD への案内メタデータ、メーター内の地図、
   リルート中の「再検索中」カード。経由地とルート沿い検索はシミュレータでも確かめられる。
+- **駐車場の提案の実走確認**（2026-08-16 追加ぶん）。ビルドは通っているが、**実際に
+  目的地へ近づいて出したことは一度も無い**。シミュレータの位置シミュレーションでも
+  起こせる（`.parking` の検索は普通の MapKit 検索）。見るところは 3 つ:
+  出るタイミングが手前 1km で早すぎ・遅すぎでないか、`MKPointOfInterestCategory.parking`
+  が日本の駐車場（コインパーキング）をどれだけ拾うか、そして**「ここに停める」を押した
+  あとに案内が駐車場まで引き直されるか**。とくに 2 つ目は MapKit のデータ次第で、
+  拾えなければ機能そのものが黙って何もしない状態になる。
 - **タッチジェスチャの手触り**（2026-08-16 追加ぶん）。**1 本指のドラッグだけは
   CarPlay Simulator で確かめられる**（マウスのドラッグがそのまま 1 本指のパンとして届く。
   2026-08-16 に地図の暴走を直したときはこれで見た）。残るピンチ・回転・2 本指のピッチは

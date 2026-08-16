@@ -12,6 +12,7 @@
 "%@を設定" = "Set %@";
 "%@・%@ 着" = "%@ · arriving %@";
 "%@・%@・%@ 着" = "%@ · %@ · arriving %@";
+"%@・目的地まで徒歩 %@" = "%@ · %@ walk to destination";
 "%@先、%@" = "In %@, %@";
 "%lldキロ" = "%lld km";
 "%lldメートル" = "%lld m";
@@ -29,6 +30,7 @@
 "お気に入りから外す" = "Remove from favorites";
 "お気に入りに追加" = "Add to favorites";
 "お気に入りや履歴の目的地へ案内を始めます。" = "Starts guidance to a favorite or recent destination.";
+"ここに停める" = "Park here";
 "ここへ行く" = "Go here";
 "ここまで歩いて戻る" = "Walk back to your car";
 "このままでは届きません" = "You won't make it this far";
@@ -133,6 +135,7 @@
 "車をとめた場所" = "Where you parked";
 "近くから 1 件えらぶ" = "Pick one nearby";
 "近くに見つかりませんでした" = "Nothing found nearby";
+"近くの駐車場" = "Parking nearby";
 "運転を始めて%lld時間になります。そろそろ休憩しませんか" = "You've been driving for %lld hours. Time for a break?";
 "避けない" = "No";
 "避ける" = "Yes";

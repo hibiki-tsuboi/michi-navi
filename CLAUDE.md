@@ -336,6 +336,10 @@ CarPlay 層は触らずに済む設計。
   `.cancelled`（着信・Siri・`CPAlertTemplate` の提示などでタッチが取り消される）と
   `.failed` は素通りする。**「開始を受け取ったか」を状態の判別に使わないこと。**
   ピンチとタップの見分けは、タップが必ず持つ定数（`scale` が 1.0、`velocity` が ±1.0）で行う。
+  ただし**定数の完全一致には賭けない**。値の意味は逆アセンブルからの推測で、実機が
+  0.9999999 を送ってきたら判定が裏返る。裏返ったタップはピンチとして扱われ、基準
+  （`zoomBaseDistance`）を持たないので**黙って何も起きない**。幅で見たうえで、
+  **基準が無ければピンチの更新ではありえない**（ピンチは必ず開始から始まる）ことも根拠に足してある。
 - **ピンチと回転は同時に認識される**。`CPSMapTemplateViewController` の
   `gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:` が YES を
   返すのはこの組み合わせだけ。つまり**縮尺を変えるだけのつもりのピンチでも回転が始まる**ので、
@@ -346,12 +350,32 @@ CarPlay 層は触らずに済む設計。
   到着・案内開始で呼ぶため。進行中の回転・傾けの基準を捨てないと、指を離すまで
   ジェスチャと `follow` が 1 秒ごとに殴り合う。ズームの基準は捨てない（追従したまま
   効かせる操作なので、捨てるとピンチの続きをタップと取り違える）。
+  **捨てたあとの回転・傾けは指を離すまで無反応**になるので、そのままだとログには
+  「入力は届いているのに動かない」＝係数を間違えたときと同じ行が並ぶ。`rotate` /
+  `pitch` / `zoom` が `GestureOutcome` を返し、`recenter()` を呼ぶ側が
+  `CarPlayGestureLog.camera(_:)` を残しているのはこれを切り分けるため。
+- **ズームの基準に実カメラを読まない**。`baseCameraDistance` が実カメラから取るのは
+  全体表示の直後だけ（`setVisibleMapRect` はカメラを引いて `cameraDistance` を更新しない）。
+  **追従の有無で分けてはいけない。** パン UI に入ると追従が切れたうえで拡大・縮小ボタンだけが
+  残るので、追従していないことがズームボタンにとっての通常の状態になる。そこで実カメラを
+  読むと `animated: true` で飛んでいる最中の途中の値を掴み、連打するほど 1 回ぶんの
+  効きが小さくなる（500 → 250 の途中で 420 を読み、125 ではなく 210 を狙う）。
+  ログに出す距離も同じ理由で実カメラではなく保存値。読むと、効いているダブルタップが
+  「動く前の値」を並べて無反応に見える。
 - **回転とピッチは追従を切ってからでないと効かない**。`follow` が位置更新のたびに
   向きと傾きを `MapOrientation` から作り直すため。パンと同じく現在地ボタンで戻す。
   ズームは中心を動かさないので追従したまま効かせている（拡大・縮小ボタンと同じ扱い。
   ここで追従を切ると、縮小しただけで自車を見失う）。
 - **パンボタンは外せない**（ガイド p.33）。タッチでドラッグできる車があっても、ノブしか無い
   車のために「パン UI へ入るボタン」を必ず 1 つ置くことが要件。
+- **パンボタンの callback は 3 つある**。`panWithDirection:` はヘッダのとおり
+  **瞬間的に押したとき**だけで、押し続けると `panBeganWithDirection:` →（押しているあいだは
+  無音）→ `panEndedWithDirection:` に変わる。**押しているあいだ CarPlay は何も送ってこない**
+  ので、開始で自前の時計を回して終了で止める。`panWith:` だけ実装すると、**ノブしか無い車で
+  押し続けたときに地図が 1px も動かない**。しかもログも出ないので「ジェスチャが届いていない」と
+  まったく同じ見え方になる。ドラッグと違ってタッチ精度のゲートは無く、全部の車で必ず通る。
+  終了が来ないことがある（押したままパン UI ごと閉じられる）ので、
+  `mapTemplateDidDismissPanningInterface` と `stop()` でも止めている。
 - **`mapButtons` は 4 つまで。パン UI に入ると先頭 2 つしか残らない**（超過ぶんは配列の
   末尾から CarPlay が勝手に隠す）。**並び順まかせにしないこと**。4 つ置いた状態でパン UI に
   入ると 2 つ落ちる。`mapTemplateDidShowPanningInterface` で拡大・縮小の 2 つに差し替え、
@@ -550,19 +574,41 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   実車で最初に見るのは次の 3 つ: 回転の向き（逆なら
   `CarPlayMapViewController.rotate(byRadians:)` の符号）、傾きの重さ
   （`pitchDegreesPerPoint`）、ピンチの追従性（`scale` が累積でなかった場合、倍率が
-  ほぼ 1 のままになって「効かない」形で失敗する）。
+  ほぼ 1 のままになって「効かない」形で失敗する）。押しっぱなしのパンの速さ
+  （`sustainedPanInterval` × `sustainedPanStep` ＝毎秒 240pt）も同じく当て推量。
   切り分けには `CarPlayGestureLog` を見る。**「地図が動かない」は、ジェスチャが届いて
-  いない場合と、届いたうえで効き方がおかしい場合の両方で同じ見え方になる**ので、
-  まず行が出るかどうかを確かめる。行が出ないなら車の側（1 本指のパンはタッチ精度で
-  認識器が付かない車がある）で、こちらに直すところは無い。
+  いない場合と、届いたが受け付けていない場合と、受け付けたうえで効き方がおかしい場合の
+  3 つで同じ見え方になる。** 行末の `applied` / `pending` / `inactive` が真ん中を切り分け、
+  `(clamped)` が「上限に張り付いているだけ」を切り分ける。読む順序は次のとおり。
+
+  1. **行が出るか。** 出ないとき、**「車の側だから直すところは無い」で閉じないこと。**
+     同じ見え方になる原因がこちら側に 4 つある: `CPMapTemplateDelegate` は全メソッドが
+     任意なので**名前を 1 文字間違えても素通りする**（`#selector(CPMapTemplateDelegate.xxx)` が
+     解決するかで確かめる）、述語の subsystem が実際のバンドル ID と食い違っている、
+     捕捉レベルが足りない（`.info` を出す指定を忘れている）、`log stream` が取りこぼしている
+     （2 本指ジェスチャはピンチと回転を同時に出すので `--ignore-dropped` を付けない）。
+     これを潰してなお出ないなら車の側で、1 本指のパンはタッチ精度で認識器が付かない車がある。
+  2. **`inactive` / `pending` か。** 係数の話ではない。`inactive` は受け付けていない
+     （`recenter()` に基準を捨てられた・開始が届いていない・メーター内で禁じている）、
+     `pending` は追従を切るしきい値の手前かピッチの最初の 1 点。直前に
+     `camera recenter(...)` が挟まっていれば前者。
+  3. **`applied` なのに `→` の右が動かないか。** ここで初めて係数と符号を疑う。
+     ただし `(clamped)` が付いていたら上限（下限）に張り付いているだけで、正常。
+
+  **ログは `.info`。** `.debug` だと誰かが受け取っているあいだしか捕まらず、Mac を繋がずに
+  走ったあとで吸い出しても何も残らない。この記録が要るのはまさにその場面なので、
+  メモリバッファに載る `.info` にしてある。走り終えてから実機を Mac に繋いで取り出す:
 
   ```bash
-  xcrun simctl spawn booted log stream --style compact --level debug \
+  log collect --device --last 1h --output michinavi.logarchive
+  log show michinavi.logarchive --style compact --info \
     --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "gesture"'
   ```
 
-  実機は `--device` を付けるか Console.app。`.debug` なので Xcode を繋いでいない
-  ときは保存されない（走行中に置いたままでよい）。
+  Mac を繋いだまま流し見るなら Console.app（Action → Include Info Messages を入れる）。
+  **`log stream` に `--device` は無い**（`log stream --help` に出てこない）。`xcrun simctl
+  spawn booted` はシミュレータ専用で、しかもここで確かめたい 4 つ（ピンチ・回転・ピッチ・
+  ドラッグ）はシミュレータでは作れない。あちらで見えるのはパンボタン（`pan …`）だけ。
 - **車との目的地共有・ルート共有の動作確認**（2026-08-16 追加ぶん）。ビルドと、
   区間の切り出し・座標の受け渡しはシミュレータ上で確認済みだが、**車が受け取ったあとは
   一度も見ていない**。他と違って**これは CarPlay Simulator で確かめられる**（ガイド p.63）。
@@ -578,9 +624,12 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   何も起きないのが正常**なので、呼ばれているかどうかをログでしか切り分けられない。
 
   ```bash
-  xcrun simctl spawn booted log stream --style compact --level debug \
+  xcrun simctl spawn booted log stream --style compact --level info \
     --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "vehicle"'
   ```
+
+  こちらは CarPlay Simulator で起こせるのでシミュレータ相手でよい。実機から後で
+  取り出すときはジェスチャと同じ `log collect --device`。
 
   なお **26.4 未満のシミュレータでは新しい経路がまるごと動かない**。既定で起動している
   端末が 26.2 などだと「実装したのに何も起きない」に見えるので、先に OS を確かめること。

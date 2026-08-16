@@ -11,11 +11,14 @@ import os
 ///
 /// CarPlay Simulator の "Route Sharing" / "Destination Information" と突き合わせて読む。
 ///
-/// `.debug` なので既定では保存されず、Xcode を繋いでいるときだけ流れる。
-/// `privacy: .public` を付けているのは、既定だと中身が `<private>` に伏せられるため。
+/// レベルと `privacy` の扱いは [CarPlayGestureLog] と同じ。走り終えてから吸い出せるよう
+/// `.info` で出し、組み立て済みの文字列を渡すので `.public` を付けている。
 /// **座標は載せない**（名前と種別だけ）。
 enum CarPlayVehicleLog {
-    private static let logger = Logger(subsystem: "jp.hibiki.michinavi", category: "vehicle")
+    /// 書き写さない理由は [CarPlayGestureLog] と同じ。
+    private static let log = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "MichiNavi",
+                                   category: "vehicle")
+    private static let logger = Logger(log)
 
     /// 車が経路をどう扱っているか。`vehicle` は車の側が経路を持ち替えたことを表す。
     @available(iOS 26.4, *)
@@ -62,7 +65,11 @@ enum CarPlayVehicleLog {
         }
     }
 
-    private static func emit(_ message: String) {
-        logger.debug("\(message, privacy: .public)")
+    private static func emit(_ message: @autoclosure () -> String) {
+        guard log.isEnabled(type: .info) else { return }
+        // 組み立てるのはここまで来たときだけ。`logger` の補間はエスケープする
+        // `@autoclosure` なので、非エスケープの `message` をその中では呼べない。
+        let text = message()
+        logger.info("\(text, privacy: .public)")
     }
 }

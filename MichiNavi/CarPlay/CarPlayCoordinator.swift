@@ -45,6 +45,13 @@ final class CarPlayCoordinator: NSObject {
     private var routeSharingBox: AnyObject?
     private var cancellables = Set<AnyCancellable>()
 
+    /// パンボタンを押し続けているあいだ地図を送り続ける時計。**押しているあいだ CarPlay は
+    /// 何も送ってこない**（開始と終了だけ）ので、無いとノブしか無い車で押し続けても地図が動かない。
+    private var sustainedPanTimer: Timer?
+    /// 送る間隔と 1 回ぶんの量。掛けると毎秒 240pt で、瞬間押し（100pt）を続けるより少し速い。
+    private static let sustainedPanInterval: TimeInterval = 0.1
+    private static let sustainedPanStep: CGFloat = 24
+
     @available(iOS 26.4, *)
     private var routeSharing: CarPlayRouteSharing? { routeSharingBox as? CarPlayRouteSharing }
 
@@ -116,6 +123,8 @@ final class CarPlayCoordinator: NSObject {
         destinations = nil
         voiceControl = nil
         sessionConfiguration = nil
+        // 押しっぱなしのままシーンが切れることがある。時計は `self` を掴んでいるので必ず止める。
+        stopSustainedPan()
         clearSession()
     }
 
@@ -185,6 +194,10 @@ final class CarPlayCoordinator: NSObject {
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: nil)
             mapViewController.recenter()
+            // **`recenter()` は指が触れている最中にも来る**。進行中の回転・傾けの基準を
+            // ここで捨てるので、残しておかないとジェスチャのログだけを見ても
+            // 「急に効かなくなった」理由が読めない。
+            CarPlayGestureLog.camera("recenter(idle)", camera: mapViewController.cameraState())
             applyIdleButtons()
 
         case .calculating:
@@ -201,6 +214,7 @@ final class CarPlayCoordinator: NSObject {
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: route)
             mapViewController.recenter()
+            CarPlayGestureLog.camera("recenter(navigating)", camera: mapViewController.cameraState())
             applyNavigatingButtons()
             beginSessionIfNeeded(for: route)
         }
@@ -554,6 +568,8 @@ final class CarPlayCoordinator: NSObject {
     private func toggleMapOrientation() {
         MapOrientation.current = MapOrientation.current.toggled
         mapViewController.apply(orientation: MapOrientation.current)
+        CarPlayGestureLog.camera("orientation(\(MapOrientation.current.rawValue))",
+                                 camera: mapViewController.cameraState())
         // アイコンを新しい向きに差し替える。ナビゲーションバー側は変わらないので触らない。
         mapTemplate.mapButtons = navigatingMapButtons
     }
@@ -608,7 +624,11 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var recenterButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in self?.mapViewController.recenter() }
+        let button = CPMapButton { [weak self] _ in
+            guard let self else { return }
+            mapViewController.recenter()
+            CarPlayGestureLog.camera("recenter(button)", camera: mapViewController.cameraState())
+        }
         button.image = UIImage(systemName: "location.fill")
         return button
     }
@@ -624,13 +644,21 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var zoomInButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in self?.mapViewController.zoomIn() }
+        let button = CPMapButton { [weak self] _ in
+            guard let self else { return }
+            mapViewController.zoomIn()
+            CarPlayGestureLog.camera("zoom in(button)", camera: mapViewController.cameraState())
+        }
         button.image = UIImage(systemName: "plus.magnifyingglass")
         return button
     }
 
     private var zoomOutButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in self?.mapViewController.zoomOut() }
+        let button = CPMapButton { [weak self] _ in
+            guard let self else { return }
+            mapViewController.zoomOut()
+            CarPlayGestureLog.camera("zoom out(button)", camera: mapViewController.cameraState())
+        }
         button.image = UIImage(systemName: "minus.magnifyingglass")
         return button
     }
@@ -835,6 +863,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// 置き換えるのはナビゲーションバーのボタンだけでよい。
     func mapTemplateDidShowPanningInterface(_ mapTemplate: CPMapTemplate) {
         mapViewController.setFollowingUser(false)
+        CarPlayGestureLog.camera("panning began", camera: mapViewController.cameraState())
 
         // **パン中に残せるマップボタンは 2 つだけ**で、超過ぶんは配列の末尾から
         // CarPlay が勝手に隠す。並び順まかせにすると縮小が落ちるので、ここで
@@ -846,7 +875,10 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     }
 
     func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
+        // 押しっぱなしのまま「完了」へ移れる。終了が来ない経路なのでここでも止める。
+        stopSustainedPan()
         mapViewController.recenter()
+        CarPlayGestureLog.camera("panning done", camera: mapViewController.cameraState())
         // パンに入る前のボタンへ戻す。案内中に入った場合もあるので状態を見て選ぶ。
         if case .navigating = navigation.phase {
             applyNavigatingButtons()
@@ -872,8 +904,8 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdatePanGestureWithTranslation translation: CGPoint,
                      velocity: CGPoint) {
-        CarPlayGestureLog.drag(translation: translation, velocity: velocity)
-        mapViewController.pan(by: translation, animated: false)
+        let moved = mapViewController.pan(by: translation, animated: false)
+        CarPlayGestureLog.drag(translation: translation, velocity: velocity, moved: moved)
     }
 
     // MARK: ピンチ・回転・傾け（iOS 26）
@@ -897,19 +929,28 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// 3 つでしか分岐しておらず、**cancelled では終了を送ってこない**。着信や Siri で
     /// タッチが取り消されると終了が落ち、「ピンチ中」の印が残ったままになる。
     /// 定数の組で見分ければ、その取りこぼしに寄りかからずに済む。
+    ///
+    /// ただし**定数の一致だけには賭けない**。値の意味は逆アセンブルからの推測で、
+    /// 実機が 0.9999999 を送ってきたら判定が裏返る。裏返ったタップは `zoom(toScale:)` へ
+    /// 流れ、基準が無いので何も起きない — つまり「効かないダブルタップ」になる。
+    /// そこで完全一致ではなく幅で見たうえで、**基準を持っていないならピンチの更新では
+    /// ありえない**（ピンチは必ず開始から始まる）ことも根拠に足す。
     func mapTemplate(_ mapTemplate: CPMapTemplate,
                      didUpdateZoomGestureWithCenter center: CGPoint,
                      scale: CGFloat,
                      velocity: CGFloat) {
-        let isTap = scale == 1 && abs(velocity) == 1
+        let matchesTapConstants = abs(scale - 1) < 0.001 && abs(abs(velocity) - 1) < 0.001
+        let isTap = matchesTapConstants || !mapViewController.hasZoomBase
+        let outcome: GestureOutcome
         if isTap {
             // タップ。拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
             if velocity > 0 { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
+            outcome = .applied
         } else {
-            mapViewController.zoom(toScale: scale)
+            outcome = mapViewController.zoom(toScale: scale)
         }
         CarPlayGestureLog.zoom(center: center, scale: scale, velocity: velocity,
-                               isTap: isTap, camera: mapViewController.cameraSummary)
+                               isTap: isTap, outcome: outcome, camera: mapViewController.cameraState())
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, didEndZoomGestureWithVelocity velocity: CGFloat) {
@@ -926,9 +967,9 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
                      didRotateWithCenter center: CGPoint,
                      rotation: CGFloat,
                      velocity: CGFloat) {
-        mapViewController.rotate(byRadians: rotation)
+        let outcome = mapViewController.rotate(byRadians: rotation)
         CarPlayGestureLog.rotation(center: center, radians: rotation, velocity: velocity,
-                                   camera: mapViewController.cameraSummary)
+                                   outcome: outcome, camera: mapViewController.cameraState())
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, rotationDidEndWithVelocity velocity: CGFloat) {
@@ -942,8 +983,8 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, pitchWithCenter center: CGPoint) {
-        mapViewController.pitch(towards: center)
-        CarPlayGestureLog.pitch(center: center, camera: mapViewController.cameraSummary)
+        let outcome = mapViewController.pitch(towards: center)
+        CarPlayGestureLog.pitch(center: center, outcome: outcome, camera: mapViewController.cameraState())
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, pitchEndedWithCenter center: CGPoint) {
@@ -953,16 +994,59 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
 
     // MARK: ノブ・トラックパッドでのパン
 
-    /// ノブやボタンでの方向入力。1 回あたり画面の約 1/4 だけ動かす。
+    /// パンボタンの callback は**押し方で分かれていて 3 つある**。ヘッダのとおり
+    /// `panWithDirection:` は「瞬間的に押した」ぶんだけで、押し続けたときは
+    /// `panBeganWithDirection:` →（押しているあいだは無音）→ `panEndedWithDirection:`
+    /// に変わる。**揃えないと、ノブしか無い車で押し続けたときに地図が 1px も動かない。**
+    /// ドラッグと違ってタッチ精度のゲートが無いぶん、こちらは全部の車で必ず通る。
+    ///
+    /// 瞬間押しは 1 回あたり画面の約 1/4 だけ動かす。
     func mapTemplate(_ mapTemplate: CPMapTemplate, panWith direction: CPMapTemplate.PanDirection) {
-        let step: CGFloat = 100
+        let moved = mapViewController.pan(by: Self.translation(for: direction, step: 100))
+        CarPlayGestureLog.pan(direction: direction, moved: moved)
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, panBeganWith direction: CPMapTemplate.PanDirection) {
+        CarPlayGestureLog.panBegan(direction: direction)
+        startSustainedPan(towards: direction)
+    }
+
+    func mapTemplate(_ mapTemplate: CPMapTemplate, panEndedWith direction: CPMapTemplate.PanDirection) {
+        stopSustainedPan()
+        CarPlayGestureLog.panEnded(direction: direction)
+    }
+
+    /// 指に追従させるドラッグと同じく、送っているあいだはアニメーションを掛けない。
+    /// 0.1 秒ごとにアニメーションを重ねると、前のぶんが終わる前に次が始まって送りが詰まる。
+    private func startSustainedPan(towards direction: CPMapTemplate.PanDirection) {
+        stopSustainedPan()
+        sustainedPanTimer = Timer.scheduledTimer(withTimeInterval: Self.sustainedPanInterval,
+                                                 repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepSustainedPan(towards: direction) }
+        }
+    }
+
+    private func stepSustainedPan(towards direction: CPMapTemplate.PanDirection) {
+        let moved = mapViewController.pan(by: Self.translation(for: direction,
+                                                               step: Self.sustainedPanStep),
+                                          animated: false)
+        CarPlayGestureLog.pan(direction: direction, moved: moved)
+    }
+
+    /// **終了が来ないことがある**（パン UI ごと閉じられた場合など）。ジェスチャの
+    /// `.cancelled` と同じで、止める側を終了の到着だけに頼らない。
+    private func stopSustainedPan() {
+        sustainedPanTimer?.invalidate()
+        sustainedPanTimer = nil
+    }
+
+    private static func translation(for direction: CPMapTemplate.PanDirection, step: CGFloat) -> CGPoint {
         var translation = CGPoint.zero
         if direction.contains(.left) { translation.x += step }
         if direction.contains(.right) { translation.x -= step }
         if direction.contains(.up) { translation.y += step }
         if direction.contains(.down) { translation.y -= step }
-        CarPlayGestureLog.pan(direction: direction)
-        mapViewController.pan(by: translation)
+        return translation
     }
 }
 

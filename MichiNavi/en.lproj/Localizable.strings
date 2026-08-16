@@ -104,6 +104,7 @@
 "探しています" = "Searching";
 "斜め右" = "Bear right";
 "斜め左" = "Bear left";
+"新しいルートに切り替えました。%@" = "Switched to the new route. %@";
 "景色" = "Scenic spots";
 "曲がりくねった道を優先" = "Prefer winding roads";
 "最短時間" = "Fastest";
@@ -133,6 +134,7 @@
 "目的地を車に送れませんでした" = "Couldn't send the destination to your vehicle";
 "直進" = "Continue";
 "着きたい時刻" = "Arrive by";
+"立ち寄り先を追加しました。%@" = "Stop added. %@";
 "経由地として追加" = "Add as a stop";
 "経由地の%@に到着しました。案内を続けます" = "You've reached your stop at %@. Continuing.";
 "美術館・博物館" = "Museums";

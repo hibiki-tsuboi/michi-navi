@@ -869,7 +869,7 @@ final class CarPlayCoordinator: NSObject {
             subtitleVariants: [String(localized: "\(arrival) 着になります")],
             image: UIImage(systemName: "arrow.triangle.branch"),
             primaryAction: CPAlertAction(title: String(localized: "切り替える"), style: .default) { [weak self] _ in
-                self?.navigation.startNavigation(with: advice.route)
+                self?.navigation.startNavigation(with: advice.route, reason: .switched)
             },
             secondaryAction: CPAlertAction(title: String(localized: "そのまま"), style: .cancel) { _ in },
             duration: 20)

@@ -6,6 +6,11 @@ enum VoicePrompt: Equatable {
     case start(instruction: String)
     /// 経路を外れて引き直した直後のひと言。
     case rerouted(instruction: String)
+    /// 立ち寄り先を挟んで引き直した直後のひと言。
+    /// **引き直しと言い分ける。** 押した本人からすると勝手に再検索されたわけではない。
+    case waypointAdded(instruction: String)
+    /// 利用者が選んで別の道へ切り替えた直後のひと言。同上。
+    case switched(instruction: String)
     /// 「300メートル先、右折します」。`distance` が nil なら「まもなく」。
     case maneuver(instruction: String, distance: CLLocationDistance?)
     /// 経由地に着いたとき。案内は続くので、終了とは言い分ける。
@@ -20,6 +25,10 @@ enum VoicePrompt: Equatable {
             return String(localized: "案内を開始します。\(instruction)")
         case let .rerouted(instruction):
             return String(localized: "ルートを再検索しました。\(instruction)")
+        case let .waypointAdded(instruction):
+            return String(localized: "立ち寄り先を追加しました。\(instruction)")
+        case let .switched(instruction):
+            return String(localized: "新しいルートに切り替えました。\(instruction)")
         case let .maneuver(instruction, distance):
             guard let distance else { return String(localized: "まもなく\(instruction)") }
             return String(localized: "\(Formatters.spokenDistance(distance))先、\(instruction)")
@@ -47,8 +56,10 @@ final class VoicePromptScheduler {
     /// 300m しかない区間で「1キロ先を右折」と言わせないための比率。
     private let minimumStepRatio: Double = 1.4
 
-    /// リルート直後は「案内を開始します」ではなく「再検索しました」で始める。
-    private let isReroute: Bool
+    /// 最初のひと言をどう始めるか。**経路が入れ替わった理由で変わる。**
+    /// 利用者が押して切り替えたのに「再検索しました」と言われると、押したことが
+    /// 効いたのかどうかが分からない。
+    private let opening: RouteChangeReason
 
     private var announced: Set<Announcement> = []
     private var hasOpened = false
@@ -58,8 +69,8 @@ final class VoicePromptScheduler {
         let threshold: CLLocationDistance
     }
 
-    init(isReroute: Bool = false) {
-        self.isReroute = isReroute
+    init(opening: RouteChangeReason = .started) {
+        self.opening = opening
     }
 
     func prompt(for progress: RouteProgress, on route: NavRoute) -> VoicePrompt? {
@@ -73,8 +84,12 @@ final class VoicePromptScheduler {
             // 開始位置がすでに交差点の手前だった場合に、通り過ぎた予告を
             // 後から読まないよう済みにしておく。
             markPassed(stepIndex: progress.stepIndex, from: remaining)
-            return isReroute ? .rerouted(instruction: step.instruction)
-                             : .start(instruction: step.instruction)
+            switch opening {
+            case .started: return .start(instruction: step.instruction)
+            case .rerouted: return .rerouted(instruction: step.instruction)
+            case .waypointAdded: return .waypointAdded(instruction: step.instruction)
+            case .switched: return .switched(instruction: step.instruction)
+            }
         }
 
         if remaining <= Self.imminentThreshold {

@@ -45,6 +45,11 @@ final class NavigationController: ObservableObject {
     /// 立てたままにすると検索していないのにカードだけが残る。
     @Published private(set) var isRerouting = false
 
+    /// 直近の経路の入れ替えがなぜ起きたか。**`phase` が `.navigating` になった時点で
+    /// もう新しい値**なので、`$phase` を購読している側はそのまま読める
+    /// （`@Published` が `willSet` で流れることに乗っている）。
+    private(set) var lastRouteChange: RouteChangeReason = .started
+
     /// 案内中に次の指示が変わった瞬間だけ流れる。音声読み上げと
     /// CarPlay の `CPManeuver` 差し替えのトリガーになる。
     let maneuverChanged = PassthroughSubject<(route: NavRoute, stepIndex: Int), Never>()
@@ -179,7 +184,7 @@ final class NavigationController: ObservableObject {
             do {
                 let routes = try await calculateRoutes(to: route.destination, via: waypoints)
                 guard !Task.isCancelled, let best = routes.first else { return }
-                startNavigation(with: best)
+                startNavigation(with: best, reason: .waypointAdded)
             } catch is CancellationError {
                 return
             } catch {
@@ -273,7 +278,16 @@ final class NavigationController: ObservableObject {
 
     // MARK: - 案内の開始と終了
 
-    func startNavigation(with route: NavRoute) {
+    /// 計算済みの経路で案内を始める（差し替えも同じ道を通る）。
+    ///
+    /// `reason` は**読み上げの最初のひと言にしか効かない**。経路の差し替え方は理由に
+    /// よらず同じ。既定を `.started` にしてあるのは、外から呼ぶ入口（提示画面の開始
+    /// ボタン）がそれだから。
+    func startNavigation(with route: NavRoute, reason: RouteChangeReason = .started) {
+        // **`phase` を動かす前に置く。** `@Published` は `willSet` で流れるので、
+        // 購読側（`VoiceGuidance`）が `.navigating` を受け取った時点でここは
+        // もう新しい値でなければならない。
+        lastRouteChange = reason
         // 実際に案内を始めた地点だけを履歴に残す。ルートを見ただけでは残さない。
         DestinationStore.shared.remember(route.destination)
         guidance = GuidanceEngine(route: route)
@@ -522,7 +536,7 @@ final class NavigationController: ObservableObject {
                 rerouteFailures = 0
                 NavigationLog.rerouteFinished(succeeded: true, changed: best.signature != previous)
                 // 経路に戻せたときだけ `isRerouting` が下りる（startNavigation の末尾）。
-                startNavigation(with: best)
+                startNavigation(with: best, reason: .rerouted)
             } catch {
                 NavigationLog.rerouteFinished(succeeded: false, changed: false)
                 // 引き直しに失敗しても案内は止めない。間隔を空けてまた試す。
@@ -580,6 +594,27 @@ final class NavigationController: ObservableObject {
     /// （`lastRerouteFinished` が nil なので即座に走る）。ここで効かせるのは 2 回目以降で、
     /// わざと別の道へ入ったときの反応を鈍らせずに、連打だけを止める。
     private static let minimumRerouteInterval: TimeInterval = 5
+}
+
+/// 経路が入れ替わった理由。
+///
+/// **読み上げの最初のひと言がこれで変わる**ので、入れ替える側が必ず添える。
+/// 経路そのものは同じように差し替わるが、利用者から見ると「勝手に引き直された」のと
+/// 「自分で押して切り替えた」のはまったく別の出来事で、同じ文言で言われると
+/// 押したことが効いたのかどうかが分からない。
+///
+/// **`Phase` に持たせていない。** あちらは「いまどの段階か」で、こちらは「どうして
+/// そうなったか」。段階の比較（`Phase ==`）に理由が混ざると、同じ経路の出し直しが
+/// 別物として扱われる。
+enum RouteChangeReason {
+    /// 目的地を決めて案内を始めた。
+    case started
+    /// 経路を外れたので引き直した。
+    case rerouted
+    /// 立ち寄り先を挟んだ。
+    case waypointAdded
+    /// 利用者が選んで別の道へ切り替えた（渋滞の迂回）。
+    case switched
 }
 
 enum NavigationError: LocalizedError {

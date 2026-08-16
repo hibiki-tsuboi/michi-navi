@@ -128,8 +128,9 @@ final class VoiceGuidance: NSObject {
         // 到着を読み上げずに終わった場合（通話中などで promptStyle が none）に
         // フラグが立ったまま次の案内へ持ち越さないよう、ここで必ず倒す。
         isAnnouncingArrival = false
-        // 案内中に別ルートへ差し替わった＝リルート。最初のひと言が変わる。
-        scheduler = VoicePromptScheduler(isReroute: currentRouteSignature != nil)
+        // 最初のひと言は、**なぜ経路が入れ替わったか**で変わる。理由は
+        // `NavigationController` が `phase` を動かす前に置いているので、ここで読める。
+        scheduler = VoicePromptScheduler(opening: navigation.lastRouteChange)
         currentRouteSignature = signature
     }
 

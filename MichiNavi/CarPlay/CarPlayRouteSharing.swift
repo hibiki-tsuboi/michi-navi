@@ -104,7 +104,7 @@ final class CarPlayRouteSharing {
         var builtRanges: [ClosedRange<Int>] = []
         // 出発地は経路の先頭。`Place` を持たないので座標だけで作る。
         var origin = Self.waypoint(at: route.coordinates.first ?? route.destination.coordinate,
-                                   name: "現在地")
+                                   name: String(localized: "現在地"))
 
         for leg in legs {
             let destination = Self.waypoint(for: leg.destination)

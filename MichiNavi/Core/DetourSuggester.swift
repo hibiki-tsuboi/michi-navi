@@ -16,16 +16,16 @@ enum DetourSuggester {
     /// 用事で寄る場所（ガソリン・駐車場・病院）は入れない。あれは必要になったときに
     /// 名指しで探すもので、勧められて嬉しいものではない。
     private static let categories: [(title: String, points: [MKPointOfInterestCategory])] = [
-        ("カフェ", [.cafe]),
-        ("パン屋", [.bakery]),
-        ("公園", [.park]),
-        ("景色", [.beach, .nationalPark]),
-        ("美術館・博物館", [.museum]),
-        ("水族館・動物園", [.aquarium, .zoo]),
-        ("お城・史跡", [.castle, .fortress, .nationalMonument]),
-        ("市場", [.foodMarket]),
-        ("ワイナリー・醸造所", [.winery, .brewery]),
-        ("温泉・スパ", [.spa]),
+        (String(localized: "カフェ"), [.cafe]),
+        (String(localized: "パン屋"), [.bakery]),
+        (String(localized: "公園"), [.park]),
+        (String(localized: "景色"), [.beach, .nationalPark]),
+        (String(localized: "美術館・博物館"), [.museum]),
+        (String(localized: "水族館・動物園"), [.aquarium, .zoo]),
+        (String(localized: "お城・史跡"), [.castle, .fortress, .nationalMonument]),
+        (String(localized: "市場"), [.foodMarket]),
+        (String(localized: "ワイナリー・醸造所"), [.winery, .brewery]),
+        (String(localized: "温泉・スパ"), [.spa]),
     ]
 
     struct Suggestion {

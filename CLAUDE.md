@@ -502,8 +502,21 @@ CarPlay 層は触らずに済む設計。
 
 ## 記述の慣習
 
-- **コメント・UI 文言・コミットメッセージはすべて日本語**。コメントは「何を」ではなく「なぜ」を書く。
+- **コメント・コミットメッセージは日本語**。コメントは「何を」ではなく「なぜ」を書く。
 - 距離・時間・到着時刻の表示は `Formatters` に集約。両画面で表記がずれないよう、直に文字列を組まない。
+- **UI 文言は必ず `String(localized:)` で包む**。キーは日本語そのもの。
+  - 訳は `MichiNavi/en.lproj/Localizable.strings` と `ja.lproj/Localizable.strings`。
+    **ja も必ず要る**。プロジェクトの `developmentRegion` が `en` なので、`ja.lproj` を
+    置かないと日本語の端末でも英語に落ちる（キーが日本語なので気づきにくい）。
+  - **文字列を `+` でつなげない**。「16:30 にとめました」を足し算で組むと、語順の違う言語で
+    訳しようがなくなる。補間（`"\(time) にとめました"`）にして 1 つのキーにする。
+  - **App Intents の文言は包まない**。`LocalizedStringResource` と `AppShortcutPhrase` が
+    自前で localization を持っており、`String` を渡すと型が合わない。
+  - キーの正確な形（補間が `%@` か `%lld` か）は、ビルドが吐く `.stringsdata`（JSON）で確かめる。
+    `DerivedData/.../Objects-normal/arm64/*.stringsdata` に 1 ファイルずつ出ている。
+- **文言マッチの表は訳さない。日英を同じ配列に並べる。** `ManeuverDirection`（MapKit の指示文）と
+  `VoiceCommand`（話し言葉）がこれにあたる。どちらも**端末の言語で入力が変わる**ので、
+  「いまの言語の表」を選ぶのではなく両方を持って両方を見る。
 
 ## 未実装
 
@@ -511,8 +524,11 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 ゴールだった申請は通った。同日に実機の CarPlay で画面の見た目・音声案内・目的地選択まで
 通しで確認済み。残っているのは以下。
 
-- **英語ローカライズ**: UI 文言は日本語のみで、`.lproj` も `.xcstrings` も無い。
-  **穴は広がり続けている**（音声入力・休憩・補給・天気・ルート設定の文言が増えた）。
+- **英語ローカライズの訳文そのもの**: 仕組みと 136 件の訳は入れたが、**英語圏の運転者に
+  読んでもらったことは一度も無い**。とくに音声の読み上げ（`VoicePromptScheduler`）は
+  文字で見て自然でも耳で聞くと不自然になりやすい。
+  なお `knownRegions` への `ja` の追加は**ビルドシステムが自分で行った**（`ja.lproj` を
+  置いてビルドしたら pbxproj に足された）。手で編集したものではない。
 - **`com.apple.developer.weatherkit` を足していない**。`RouteWeather` のコードは入っているが、
   ケイパビリティが無いので問い合わせが失敗し、黙って何もしない状態。entitlements に
   先に書くと App ID 側で有効化されるまで実機ビルドが通らなくなるので、順序に注意

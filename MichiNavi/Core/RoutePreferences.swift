@@ -51,8 +51,8 @@ final class RoutePreferences: ObservableObject {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .gasStation: "ガソリンスタンド"
-            case .evCharger: "充電スタンド"
+            case .gasStation: String(localized: "ガソリンスタンド")
+            case .evCharger: String(localized: "充電スタンド")
             }
         }
 
@@ -88,9 +88,9 @@ final class RoutePreferences: ObservableObject {
     /// 設定が効いていることを画面に出すための短い説明。何も避けていなければ nil。
     var summary: String? {
         var parts: [String] = []
-        if avoidsTolls { parts.append("有料道路を避ける") }
-        if avoidsHighways { parts.append("高速を避ける") }
-        if prefersWinding { parts.append("曲がりくねった道を優先") }
+        if avoidsTolls { parts.append(String(localized: "有料道路を避ける")) }
+        if avoidsHighways { parts.append(String(localized: "高速を避ける")) }
+        if prefersWinding { parts.append(String(localized: "曲がりくねった道を優先")) }
         return parts.isEmpty ? nil : parts.joined(separator: "・")
     }
 }

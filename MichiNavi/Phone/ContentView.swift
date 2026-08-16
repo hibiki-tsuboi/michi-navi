@@ -75,7 +75,7 @@ struct ContentView: View {
                 ManeuverBanner(route: route, progress: navigation.progress)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("案内をもう一度読む")
+            .accessibilityLabel(String(localized: "案内をもう一度読む"))
             .padding(.horizontal)
         } else {
             Button {
@@ -83,7 +83,7 @@ struct ContentView: View {
             } label: {
                 HStack {
                     Image(systemName: "magnifyingglass")
-                    Text("目的地を検索")
+                    Text(String(localized: "目的地を検索"))
                     Spacer()
                 }
                 .padding(12)
@@ -101,15 +101,15 @@ struct ContentView: View {
         switch navigation.phase {
         case .idle:
             if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
-                notice("設定アプリで位置情報の利用を許可してください")
+                notice(String(localized: "設定アプリで位置情報の利用を許可してください"))
             }
 
         case let .calculating(place):
             HStack(spacing: 12) {
                 ProgressView()
-                Text("\(place.name) までのルートを計算中…")
+                Text(String(localized: "\(place.name) までのルートを計算中…"))
                 Spacer()
-                Button("中止") { navigation.cancelNavigation() }
+                Button(String(localized: "中止")) { navigation.cancelNavigation() }
             }
             .panel()
 
@@ -126,9 +126,9 @@ struct ContentView: View {
                     DepartureTimeRow(destination: route.destination)
 
                     HStack {
-                        Button("やめる") { navigation.cancelNavigation() }
+                        Button(String(localized: "やめる")) { navigation.cancelNavigation() }
                             .buttonStyle(.bordered)
-                        Button("案内開始") { navigation.startNavigation(with: route) }
+                        Button(String(localized: "案内開始")) { navigation.startNavigation(with: route) }
                             .buttonStyle(.borderedProminent)
                     }
                 }
@@ -140,13 +140,13 @@ struct ContentView: View {
                 if let progress = navigation.progress {
                     VStack(alignment: .leading) {
                         Text(Formatters.durationText(progress.timeRemaining)).font(.title3.bold())
-                        Text("\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着")
+                        Text(String(localized: "\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
-                Button("案内終了", role: .destructive) { navigation.cancelNavigation() }
+                Button(String(localized: "案内終了"), role: .destructive) { navigation.cancelNavigation() }
                     .buttonStyle(.bordered)
             }
             .panel()
@@ -209,18 +209,18 @@ private struct DepartureTimeRow: View {
     @State private var isCalculating = false
 
     var body: some View {
-        DisclosureGroup("到着時刻から逆算", isExpanded: $isExpanded) {
+        DisclosureGroup(String(localized: "到着時刻から逆算"), isExpanded: $isExpanded) {
             VStack(alignment: .leading, spacing: 8) {
-                DatePicker("着きたい時刻", selection: $arrival, displayedComponents: [.date, .hourAndMinute])
+                DatePicker(String(localized: "着きたい時刻"), selection: $arrival, displayedComponents: [.date, .hourAndMinute])
                     .font(.subheadline)
 
                 if isCalculating {
                     ProgressView().controlSize(.small)
                 } else if let departure {
-                    Text("\(Formatters.arrivalText(departure)) に出発")
+                    Text(String(localized: "\(Formatters.arrivalText(departure)) に出発"))
                         .font(.subheadline.bold())
                 } else {
-                    Text("計算できませんでした").font(.caption).foregroundStyle(.secondary)
+                    Text(String(localized: "計算できませんでした")).font(.caption).foregroundStyle(.secondary)
                 }
             }
             .padding(.top, 4)
@@ -265,7 +265,7 @@ private struct ManeuverBanner: View {
                             .lineLimit(1)
                     }
                 } else {
-                    Text("案内を開始しています…").font(.subheadline)
+                    Text(String(localized: "案内を開始しています…")).font(.subheadline)
                 }
             }
             Spacer()
@@ -276,7 +276,7 @@ private struct ManeuverBanner: View {
     }
 
     private func instruction(at index: Int) -> String {
-        route.steps.indices.contains(index) ? route.steps[index].instruction : "目的地に向かっています"
+        route.steps.indices.contains(index) ? route.steps[index].instruction : String(localized: "目的地に向かっています")
     }
 
     /// 区間ごとの注意（料金所・車線規制など）。CarPlay 側は割り込みで出すが、

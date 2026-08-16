@@ -80,7 +80,7 @@ final class DestinationStore: ObservableObject {
         let item = MKMapItem(location: CLLocation(latitude: coordinate.latitude,
                                                   longitude: coordinate.longitude),
                              address: nil)
-        let place = Place(mapItem: item, fallbackName: "\(destination.name) の駐車位置")
+        let place = Place(mapItem: item, fallbackName: String(localized: "\(destination.name) の駐車位置"))
         parking = ParkedCar(place: place, date: Date())
         saveParking()
     }

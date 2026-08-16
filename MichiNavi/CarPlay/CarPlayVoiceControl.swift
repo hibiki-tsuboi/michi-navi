@@ -25,7 +25,7 @@ final class CarPlayVoiceControl {
 
         var errorDescription: String? {
             switch self {
-            case let .notFound(query): "「\(query)」は見つかりませんでした"
+            case let .notFound(query): String(localized: "「\(query)」は見つかりませんでした")
             }
         }
     }
@@ -59,8 +59,8 @@ final class CarPlayVoiceControl {
         isRunning = true
 
         let template = CPVoiceControlTemplate(voiceControlStates: [
-            makeState(.listening, title: "行き先をどうぞ", symbol: "waveform"),
-            makeState(.searching, title: "探しています", symbol: "magnifyingglass"),
+            makeState(.listening, title: String(localized: "行き先をどうぞ"), symbol: "waveform"),
+            makeState(.searching, title: String(localized: "探しています"), symbol: "magnifyingglass"),
         ])
 
         // **状態を切り替えられるのは、出したあとだけ**（ヘッダの警告）。

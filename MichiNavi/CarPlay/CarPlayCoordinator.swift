@@ -230,9 +230,9 @@ final class CarPlayCoordinator: NSObject {
         let trip = makeTrip(for: routes)
         currentTrip = trip
 
-        let configuration = CPTripPreviewTextConfiguration(startButtonTitle: "案内開始",
-                                                           additionalRoutesButtonTitle: "他のルート",
-                                                           overviewButtonTitle: "全体表示")
+        let configuration = CPTripPreviewTextConfiguration(startButtonTitle: String(localized: "案内開始"),
+                                                           additionalRoutesButtonTitle: String(localized: "他のルート"),
+                                                           overviewButtonTitle: String(localized: "全体表示"))
         mapTemplate.showTripPreviews([trip], textConfiguration: configuration)
     }
 
@@ -251,7 +251,7 @@ final class CarPlayCoordinator: NSObject {
                 ? [summary]
                 : ["\(summary)・\(extras.joined(separator: "、"))", summary]
 
-            let choice = CPRouteChoice(summaryVariants: [route.name.isEmpty ? "ルート" : route.name],
+            let choice = CPRouteChoice(summaryVariants: [route.name.isEmpty ? String(localized: "ルート") : route.name],
                                        additionalInformationVariants: variants,
                                        selectionSummaryVariants: variants)
             choice.userInfo = route.id
@@ -267,7 +267,7 @@ final class CarPlayCoordinator: NSObject {
             // 座標を持たない特別な項目で、車へ渡す地点にはならないため。
             trip = CPTrip(originWaypoint: CarPlayRouteSharing.waypoint(
                               at: route.coordinates.first ?? route.destination.coordinate,
-                              name: "現在地"),
+                              name: String(localized: "現在地")),
                           destinationWaypoint: CarPlayRouteSharing.waypoint(for: route.destination),
                           routeChoices: choices)
         } else {
@@ -341,7 +341,7 @@ final class CarPlayCoordinator: NSObject {
             isTripPaused = true
             // description に nil を渡すと CarPlay 側の既定文言（英語環境なら英語）になる。
             // 他の画面の文言に合わせて日本語で出す。
-            navigationSession.pauseTrip(for: .rerouting, description: "ルートを再検索中")
+            navigationSession.pauseTrip(for: .rerouting, description: String(localized: "ルートを再検索中"))
         } else {
             guard isTripPaused else { return }
             isTripPaused = false
@@ -359,7 +359,7 @@ final class CarPlayCoordinator: NSObject {
     /// 前の経路を掴んだままになる。
     private func replaceRoute(reason: RouteChangeReason) {
         guard let navigationSession else { return }
-        navigationSession.pauseTrip(for: .rerouting, description: "ルートを引き直し中")
+        navigationSession.pauseTrip(for: .rerouting, description: String(localized: "ルートを引き直し中"))
         resume(navigationSession, reason: reason)
     }
 
@@ -559,7 +559,7 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var destinationsButton: CPBarButton {
-        CPBarButton(title: "目的地") { [weak self] _ in self?.destinations?.present() }
+        CPBarButton(title: String(localized: "目的地")) { [weak self] _ in self?.destinations?.present() }
     }
 
     /// 押して話す。**走行中でも押せる唯一の「新しい行き先を決める」導線**なので、
@@ -572,7 +572,7 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var endNavigationButton: CPBarButton {
-        CPBarButton(title: "案内終了") { [weak self] _ in
+        CPBarButton(title: String(localized: "案内終了")) { [weak self] _ in
             self?.cancelSession()
             self?.navigation.cancelNavigation()
         }
@@ -587,13 +587,13 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var donePanningButton: CPBarButton {
-        CPBarButton(title: "完了") { [weak self] _ in
+        CPBarButton(title: String(localized: "完了")) { [weak self] _ in
             self?.mapTemplate.dismissPanningInterface(animated: true)
         }
     }
 
     private var overviewButton: CPBarButton {
-        CPBarButton(title: "全体表示") { [weak self] _ in
+        CPBarButton(title: String(localized: "全体表示")) { [weak self] _ in
             guard let route = self?.navigation.currentRoute else { return }
             self?.mapViewController.showRouteOverview(route)
         }
@@ -674,13 +674,13 @@ final class CarPlayCoordinator: NSObject {
     /// 着けない**話なので、放置されたときのために表示を長めに取る。
     private func presentRangeAdvice(_ advice: RangeAdvisor.Advice) {
         let alert = CPNavigationAlert(
-            titleVariants: ["このままでは届きません"],
-            subtitleVariants: ["\(advice.place.name) に寄りますか"],
+            titleVariants: [String(localized: "このままでは届きません")],
+            subtitleVariants: [String(localized: "\(advice.place.name) に寄りますか")],
             image: UIImage(systemName: advice.kind == .evCharger ? "bolt.car.fill" : "fuelpump.fill"),
-            primaryAction: CPAlertAction(title: "寄る", style: .default) { [weak self] _ in
+            primaryAction: CPAlertAction(title: String(localized: "寄る"), style: .default) { [weak self] _ in
                 self?.navigation.addWaypoint(advice.place)
             },
-            secondaryAction: CPAlertAction(title: "いいえ", style: .cancel) { _ in },
+            secondaryAction: CPAlertAction(title: String(localized: "いいえ"), style: .cancel) { _ in },
             duration: 20)
         mapTemplate.present(navigationAlert: alert, animated: true)
     }
@@ -693,13 +693,13 @@ final class CarPlayCoordinator: NSObject {
     /// 読み上げは `VoiceGuidance` が同じ合図で受け持つので、ここでは出さない。
     private func presentRestSuggestion() {
         let alert = CPNavigationAlert(
-            titleVariants: ["2時間走りました。休憩しませんか"],
+            titleVariants: [String(localized: "2時間走りました。休憩しませんか")],
             subtitleVariants: nil,
             image: UIImage(systemName: "cup.and.heat.waves.fill"),
-            primaryAction: CPAlertAction(title: "さがす", style: .default) { [weak self] _ in
+            primaryAction: CPAlertAction(title: String(localized: "さがす"), style: .default) { [weak self] _ in
                 self?.destinations?.presentRestStops()
             },
-            secondaryAction: CPAlertAction(title: "あとで", style: .cancel) { _ in },
+            secondaryAction: CPAlertAction(title: String(localized: "あとで"), style: .cancel) { _ in },
             duration: 12)
         mapTemplate.present(navigationAlert: alert, animated: true)
     }
@@ -803,7 +803,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     @available(iOS 26.4, *)
     func mapTemplate(_ mapTemplate: CPMapTemplate, didFailToShareDestinationFor trip: CPTrip, error: any Error) {
         CarPlayVehicleLog.destinationShared(succeeded: false)
-        presentAlert(message: "目的地を車に送れませんでした")
+        presentAlert(message: String(localized: "目的地を車に送れませんでした"))
     }
 
     // MARK: 案内の開始と終了

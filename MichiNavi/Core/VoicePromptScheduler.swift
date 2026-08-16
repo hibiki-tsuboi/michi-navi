@@ -17,18 +17,18 @@ enum VoicePrompt: Equatable {
     var spokenText: String {
         switch self {
         case let .start(instruction):
-            return "案内を開始します。\(instruction)"
+            return String(localized: "案内を開始します。\(instruction)")
         case let .rerouted(instruction):
-            return "ルートを再検索しました。\(instruction)"
+            return String(localized: "ルートを再検索しました。\(instruction)")
         case let .maneuver(instruction, distance):
-            guard let distance else { return "まもなく\(instruction)" }
-            return "\(Formatters.spokenDistance(distance))先、\(instruction)"
+            guard let distance else { return String(localized: "まもなく\(instruction)") }
+            return String(localized: "\(Formatters.spokenDistance(distance))先、\(instruction)")
         case let .waypoint(name):
-            return "経由地の\(name)に到着しました。案内を続けます"
+            return String(localized: "経由地の\(name)に到着しました。案内を続けます")
         case let .arrival(destination):
-            return "\(destination)に到着しました。案内を終了します"
+            return String(localized: "\(destination)に到着しました。案内を終了します")
         case let .rest(hours):
-            return "運転を始めて\(hours)時間になります。そろそろ休憩しませんか"
+            return String(localized: "運転を始めて\(hours)時間になります。そろそろ休憩しませんか")
         }
     }
 }

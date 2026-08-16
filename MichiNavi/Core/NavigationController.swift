@@ -391,7 +391,7 @@ enum NavigationError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noCurrentLocation: "現在地が取得できていません"
+        case .noCurrentLocation: String(localized: "現在地が取得できていません")
         }
     }
 }

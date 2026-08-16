@@ -24,9 +24,9 @@ final class RouteWeather {
 
         var message: String {
             switch self {
-            case .rain: "この先は雨の予報です"
-            case .snow: "この先は雪の予報です"
-            case .freezing: "この先は気温が低く、路面が凍結する恐れがあります"
+            case .rain: String(localized: "この先は雨の予報です")
+            case .snow: String(localized: "この先は雪の予報です")
+            case .freezing: String(localized: "この先は気温が低く、路面が凍結する恐れがあります")
             }
         }
 

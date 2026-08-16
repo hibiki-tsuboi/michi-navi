@@ -33,12 +33,12 @@ struct SearchSheet: View {
                     suggestionRows
                 }
             }
-            .searchable(text: $query, prompt: "住所・施設名で検索")
-            .navigationTitle("目的地")
+            .searchable(text: $query, prompt: String(localized: "住所・施設名で検索"))
+            .navigationTitle(String(localized: "目的地"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") { dismiss() }
+                    Button(String(localized: "閉じる")) { dismiss() }
                 }
             }
             .overlay {
@@ -59,21 +59,23 @@ struct SearchSheet: View {
     @ViewBuilder
     private var parkedCar: some View {
         if let parking = store.parking {
-            Section("車をとめた場所") {
+            Section(String(localized: "車をとめた場所")) {
                 Button {
                     parking.place.mapItem.openInMaps(launchOptions: [
                         MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
                     ])
                 } label: {
                     HStack {
-                        summary(name: "ここまで歩いて戻る",
-                                detail: parking.date.formatted(date: .omitted, time: .shortened) + " にとめました")
+                        summary(name: String(localized: "ここまで歩いて戻る"),
+                                // 時刻と文をつなげずに 1 つの文言にする。英語では語順が逆になるので、
+                                // 足し算で組むと訳しようがない。
+                                detail: String(localized: "\(parking.date.formatted(date: .omitted, time: .shortened)) にとめました"))
                         Image(systemName: "figure.walk").foregroundStyle(.secondary)
                     }
                 }
                 .buttonStyle(.plain)
 
-                Button("記録を消す", role: .destructive) { store.clearParking() }
+                Button(String(localized: "記録を消す"), role: .destructive) { store.clearParking() }
             }
         }
     }
@@ -84,32 +86,32 @@ struct SearchSheet: View {
     /// 選んだあとに気づいても遅い。**走っている案内は引き直さない**（次の計算から効く）。
     @ViewBuilder
     private var routePreferences: some View {
-        Section("ルートの引き方") {
-            Toggle("有料道路を避ける", isOn: $preferences.avoidsTolls)
-            Toggle("高速道路を避ける", isOn: $preferences.avoidsHighways)
-            Toggle("曲がりくねった道を優先", isOn: $preferences.prefersWinding)
+        Section(String(localized: "ルートの引き方")) {
+            Toggle(String(localized: "有料道路を避ける"), isOn: $preferences.avoidsTolls)
+            Toggle(String(localized: "高速道路を避ける"), isOn: $preferences.avoidsHighways)
+            Toggle(String(localized: "曲がりくねった道を優先"), isOn: $preferences.prefersWinding)
         }
 
         Section {
-            Picker("補給先", selection: $preferences.refuelKind) {
+            Picker(String(localized: "補給先"), selection: $preferences.refuelKind) {
                 ForEach(RoutePreferences.RefuelKind.allCases) { kind in
                     Text(kind.title).tag(kind)
                 }
             }
             HStack {
-                Text("航続距離")
+                Text(String(localized: "航続距離"))
                 Spacer()
-                TextField("未設定", value: rangeKilometres, format: .number)
+                TextField(String(localized: "未設定"), value: rangeKilometres, format: .number)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
                 Text("km").foregroundStyle(.secondary)
             }
         } header: {
-            Text("補給")
+            Text(String(localized: "補給"))
         } footer: {
             // 数字の意味を書いておかないと、残量と取り違えられる。
-            Text("満タン・満充電で走れる距離を入れると、届かない経路のときに途中の\(preferences.refuelKind.title)を提案します。車から残量を読む手段が無いため、この数字で判断します。")
+            Text(String(localized: "満タン・満充電で走れる距離を入れると、届かない経路のときに途中の\(preferences.refuelKind.title)を提案します。車から残量を読む手段が無いため、この数字で判断します。"))
         }
     }
 
@@ -124,18 +126,18 @@ struct SearchSheet: View {
     @ViewBuilder
     private var savedDestinations: some View {
         if store.favorites.isEmpty, store.recents.isEmpty {
-            ContentUnavailableView("目的地の履歴はまだありません",
+            ContentUnavailableView(String(localized: "目的地の履歴はまだありません"),
                                    systemImage: "mappin.slash",
-                                   description: Text("案内を始めるとここに残ります。\n星を付けると CarPlay のお気に入りに並びます。"))
+                                   description: Text(String(localized: "案内を始めるとここに残ります。\n星を付けると CarPlay のお気に入りに並びます。")))
         } else {
             if !store.favorites.isEmpty {
-                Section("お気に入り") {
+                Section(String(localized: "お気に入り")) {
                     ForEach(store.favorites) { place in row(for: place) }
                 }
             }
 
             if !store.recents.isEmpty {
-                Section("最近の目的地") {
+                Section(String(localized: "最近の目的地")) {
                     ForEach(store.recents) { place in row(for: place) }
                 }
             }
@@ -160,7 +162,7 @@ struct SearchSheet: View {
                     .foregroundStyle(isFavorite ? .yellow : .secondary)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel(store.isFavorite(place) ? "お気に入りから外す" : "お気に入りに追加")
+            .accessibilityLabel(store.isFavorite(place) ? String(localized: "お気に入りから外す") : String(localized: "お気に入りに追加"))
         }
     }
 
@@ -200,7 +202,7 @@ struct SearchSheet: View {
             do {
                 let places = try await SearchService.shared.resolve(suggestion)
                 guard let place = places.first else {
-                    errorMessage = "場所が特定できませんでした"
+                    errorMessage = String(localized: "場所が特定できませんでした")
                     return
                 }
                 onSelect(place)

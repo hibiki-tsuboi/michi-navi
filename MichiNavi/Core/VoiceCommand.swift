@@ -73,18 +73,25 @@ extension VoiceCommand {
     static func fallback(from text: String, isNavigating: Bool) -> VoiceCommand {
         let normalized = text.trimmed
 
-        if normalized.containsAny(of: ["案内をやめ", "案内を終了", "案内終了", "ナビを終了", "案内をストップ"]) {
+        // **日英どちらの言い回しも同じ表に置く**（`ManeuverDirection` と同じ形）。
+        // 認識は端末の言語で動くので、どちらが来るかはここでは決まらない。
+        if normalized.containsAny(of: ["案内をやめ", "案内を終了", "案内終了", "ナビを終了", "案内をストップ",
+                                       "stop navigation", "end navigation", "cancel navigation",
+                                       "stop the route", "stop guidance"]) {
             return .endNavigation
         }
-        if normalized.containsAny(of: ["もう一度", "もういちど", "もう1回", "もう一回", "聞き逃"]) {
+        if normalized.containsAny(of: ["もう一度", "もういちど", "もう1回", "もう一回", "聞き逃",
+                                       "say that again", "repeat that", "repeat the"]) {
             return .repeatGuidance
         }
-        if normalized.containsAny(of: ["全体を表示", "全体表示", "ルート全体"]) {
+        if normalized.containsAny(of: ["全体を表示", "全体表示", "ルート全体",
+                                       "show the whole route", "show the route", "route overview"]) {
             return .overview
         }
 
         let asWaypoint = isNavigating
-            && normalized.containsAny(of: ["途中で", "ついでに", "寄って", "寄りたい", "立ち寄"])
+            && normalized.containsAny(of: ["途中で", "ついでに", "寄って", "寄りたい", "立ち寄",
+                                           "stop by", "stop at", "on the way", "along the way"])
         return .destination(query: normalized.trimmedForSearch, asWaypoint: asWaypoint)
     }
 }

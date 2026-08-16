@@ -75,7 +75,7 @@ enum RouteError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noRouteFound: "ルートが見つかりませんでした"
+        case .noRouteFound: String(localized: "ルートが見つかりませんでした")
         }
     }
 }

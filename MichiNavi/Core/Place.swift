@@ -12,7 +12,7 @@ struct Place: Identifiable {
 
     init(mapItem: MKMapItem, fallbackName: String? = nil) {
         self.mapItem = mapItem
-        name = mapItem.name ?? fallbackName ?? "目的地"
+        name = mapItem.name ?? fallbackName ?? String(localized: "目的地")
         subtitle = Place.addressLine(for: mapItem)
         coordinate = mapItem.location.coordinate
         id = Place.identifier(for: mapItem, name: name, coordinate: coordinate)

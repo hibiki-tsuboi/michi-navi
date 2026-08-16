@@ -27,11 +27,11 @@ final class SpeechInput {
 
         var errorDescription: String? {
             switch self {
-            case .busy: "音声入力がすでに動いています"
-            case .microphoneDenied: "マイクの使用が許可されていません"
-            case .unsupportedLanguage: "この言語の音声入力に対応していません"
-            case .modelUnavailable: "音声認識の準備ができませんでした"
-            case .heardNothing: "聞き取れませんでした"
+            case .busy: String(localized: "音声入力がすでに動いています")
+            case .microphoneDenied: String(localized: "マイクの使用が許可されていません")
+            case .unsupportedLanguage: String(localized: "この言語の音声入力に対応していません")
+            case .modelUnavailable: String(localized: "音声認識の準備ができませんでした")
+            case .heardNothing: String(localized: "聞き取れませんでした")
             }
         }
     }

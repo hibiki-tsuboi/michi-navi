@@ -26,15 +26,15 @@ enum RouteCharacter {
             tags[index].append(label)
         }
 
-        markBest(routes.map(\.expectedTravelTime), by: <, label: "最短時間")
-        markBest(routes.map(\.distance), by: <, label: "距離が短い")
-        markBest(profiles.map(\.rightTurns), by: <, label: "右折が少ない")
+        markBest(routes.map(\.expectedTravelTime), by: <, label: String(localized: "最短時間"))
+        markBest(routes.map(\.distance), by: <, label: String(localized: "距離が短い"))
+        markBest(profiles.map(\.rightTurns), by: <, label: String(localized: "右折が少ない"))
 
         // 高速の有無は比較ではなく事実として出す。ただし全部が同じなら違いにならない。
         let usesHighway = profiles.map(\.usesHighway)
         if Set(usesHighway).count > 1 {
             for index in routes.indices {
-                tags[index].append(usesHighway[index] ? "高速を使う" : "下道のみ")
+                tags[index].append(usesHighway[index] ? String(localized: "高速を使う") : String(localized: "下道のみ"))
             }
         }
 
@@ -43,7 +43,7 @@ enum RouteCharacter {
         if let most = curvature.max(), let least = curvature.min(),
            most > least * Self.curvatureRatio,
            let index = curvature.firstIndex(of: most) {
-            tags[index].append("カーブが多い")
+            tags[index].append(String(localized: "カーブが多い"))
         }
 
         return tags

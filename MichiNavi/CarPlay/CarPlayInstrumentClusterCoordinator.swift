@@ -30,7 +30,7 @@ final class CarPlayInstrumentClusterCoordinator: NSObject {
         super.init()
         controller.delegate = self
         // 案内していないときにメーター内へ出る文言。
-        controller.inactiveDescriptionVariants = ["MichiNavi で目的地を選んでください", "MichiNavi"]
+        controller.inactiveDescriptionVariants = [String(localized: "MichiNavi で目的地を選んでください"), "MichiNavi"]
     }
 
     func stop() {

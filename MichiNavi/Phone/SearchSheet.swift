@@ -26,6 +26,7 @@ struct SearchSheet: View {
                 }
 
                 if query.isEmpty {
+                    parkedCar
                     routePreferences
                     savedDestinations
                 } else {
@@ -45,6 +46,34 @@ struct SearchSheet: View {
             }
             .onChange(of: query) { _, text in
                 SearchService.shared.suggest(text, near: currentRegion) { suggestions = $0 }
+            }
+        }
+    }
+
+    // MARK: - 車をとめた場所
+
+    /// 案内を終えた地点＝車を置いた場所。
+    ///
+    /// **ここへの案内はこのアプリでやらない。** 歩いて戻る場面なので、徒歩の経路を
+    /// 持っているマップへ渡す。カーナビが車で車を迎えに行く経路を出しても意味がない。
+    @ViewBuilder
+    private var parkedCar: some View {
+        if let parking = store.parking {
+            Section("車をとめた場所") {
+                Button {
+                    parking.place.mapItem.openInMaps(launchOptions: [
+                        MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking,
+                    ])
+                } label: {
+                    HStack {
+                        summary(name: "ここまで歩いて戻る",
+                                detail: parking.date.formatted(date: .omitted, time: .shortened) + " にとめました")
+                        Image(systemName: "figure.walk").foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button("記録を消す", role: .destructive) { store.clearParking() }
             }
         }
     }

@@ -228,6 +228,9 @@ final class NavigationController: ObservableObject {
         progress = updated
 
         if updated.hasArrived {
+            // 着いた地点を車の置き場所として残す。目的地の座標ではなく**実際に
+            // 着いた座標**を使う（施設が目的地なら、車は入口ではなく駐車場にある）。
+            DestinationStore.shared.rememberParking(at: current.coordinate, near: route.destination)
             arrived.send(route)
             cancelNavigation()
             return

@@ -145,6 +145,19 @@ final class NavigationController: ObservableObject {
         return (best.distance, best.expectedTravelTime)
     }
 
+    /// その時刻に着くには何時に出ればよいか。
+    ///
+    /// 予定のある移動では、検索より使う数字になる。所要時間は到着時刻によって変わる
+    /// （朝の 9 時着と深夜 2 時着では混み具合が違う）ので、単純に「いまの所要時間」を
+    /// 引き算しても答えにならない。
+    func departureTime(toArriveBy date: Date, at destination: Place) async -> Date? {
+        guard let origin = location.location?.coordinate else { return nil }
+        guard let travelTime = try? await routeProvider.travelTime(from: origin,
+                                                                   to: destination,
+                                                                   arrivingBy: date) else { return nil }
+        return date.addingTimeInterval(-travelTime)
+    }
+
     /// まだ通っていない経由地。引き直すときに引き継ぐ。
     private func remainingWaypoints(of route: NavRoute) -> [Place] {
         let stepIndex = progress?.stepIndex ?? 0

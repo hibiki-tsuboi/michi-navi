@@ -66,6 +66,14 @@ protocol RouteProviding: AnyObject {
     func routes(from origin: CLLocationCoordinate2D,
                 via waypoints: [Place],
                 to destination: Place) async throws -> [NavRoute]
+
+    /// **その時刻に着くつもりで走った場合の**所要時間。
+    ///
+    /// いまの所要時間とは別物。経路提供側は到着時刻から道路の混み具合を見積もるので、
+    /// 朝の 9 時着と深夜 2 時着では返る値が違う。
+    func travelTime(from origin: CLLocationCoordinate2D,
+                    to destination: Place,
+                    arrivingBy date: Date) async throws -> TimeInterval
 }
 
 final class MapKitRouteProvider: RouteProviding {
@@ -93,6 +101,24 @@ final class MapKitRouteProvider: RouteProviding {
             from = place.mapItem
         }
         return [NavRoute(legs: stitched, waypoints: waypoints, destination: destination)]
+    }
+
+    func travelTime(from origin: CLLocationCoordinate2D,
+                    to destination: Place,
+                    arrivingBy date: Date) async throws -> TimeInterval {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude),
+                                   address: nil)
+        request.destination = destination.mapItem
+        request.transportType = .automobile
+        request.tollPreference = RoutePreferences.shared.tollPreference
+        request.highwayPreference = RoutePreferences.shared.highwayPreference
+        // これを渡すと、いまの交通量ではなく**その時刻の見込み**で計算される。
+        request.arrivalDate = date
+
+        let response = try await MKDirections(request: request).calculate()
+        guard let route = response.routes.first else { throw RouteError.noRouteFound }
+        return route.expectedTravelTime
     }
 
     private func legs(from source: MKMapItem,

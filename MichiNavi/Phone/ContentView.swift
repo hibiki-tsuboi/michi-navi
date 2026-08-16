@@ -122,6 +122,7 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
 
                     advisories(route.advisoryNotices)
+                    DepartureTimeRow(destination: route.destination)
 
                     HStack {
                         Button("やめる") { navigation.cancelNavigation() }
@@ -170,6 +171,54 @@ struct ContentView: View {
                         .foregroundStyle(.orange)
                 }
             }
+        }
+    }
+}
+
+// MARK: - 出発時刻の逆算
+
+/// 「何時に着きたいか」から出発時刻を出す。
+///
+/// **iPhone にしか置いていない。** 車に乗ってから「何時に出ればいいか」を知っても
+/// もう遅く、これは出かける前に見る数字だから。CarPlay に置くと、運転中に
+/// DatePicker を回させることにもなる。
+private struct DepartureTimeRow: View {
+    let destination: Place
+
+    @EnvironmentObject private var navigation: NavigationController
+    @State private var isExpanded = false
+    @State private var arrival = Date(timeIntervalSinceNow: 3600)
+    @State private var departure: Date?
+    @State private var isCalculating = false
+
+    var body: some View {
+        DisclosureGroup("到着時刻から逆算", isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                DatePicker("着きたい時刻", selection: $arrival, displayedComponents: [.date, .hourAndMinute])
+                    .font(.subheadline)
+
+                if isCalculating {
+                    ProgressView().controlSize(.small)
+                } else if let departure {
+                    Text("\(Formatters.arrivalText(departure)) に出発")
+                        .font(.subheadline.bold())
+                } else {
+                    Text("計算できませんでした").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 4)
+        }
+        .font(.subheadline)
+        .onChange(of: arrival) { _, _ in calculate() }
+        .onChange(of: isExpanded) { _, expanded in if expanded { calculate() } }
+    }
+
+    private func calculate() {
+        guard isExpanded else { return }
+        isCalculating = true
+        Task {
+            departure = await navigation.departureTime(toArriveBy: arrival, at: destination)
+            isCalculating = false
         }
     }
 }

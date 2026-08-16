@@ -32,6 +32,8 @@ final class GuidanceEngine {
     private let offRouteThreshold: CLLocationDistance = 50
     /// 逸脱候補が続けてこの回数出たらリルートする。GPS の跳ねで誤爆しないための保険。
     private let offRouteConfirmationCount = 3
+    /// 経路に乗らないまま出発地からこれだけ離れたら、乗っていなくても逸脱を数え始める。
+    private let departureThreshold: CLLocationDistance = 100
     /// 目的地にこれだけ近づいたら到着とみなす。
     private let arrivalThreshold: CLLocationDistance = 30
 
@@ -45,6 +47,21 @@ final class GuidanceEngine {
     /// ループ路や折り返しで経路の別の場所に飛びつくのを防ぐ。
     private var lastSegmentIndex = 0
     private var offRouteStreak = 0
+
+    /// 一度でも経路の上に乗ったか。**乗るまでは逸脱を数えない。**
+    ///
+    /// MapKit は経路の始点を最寄りの車道へ寄せるので、駐車場・駅・施設の中から
+    /// 案内を始めると**動く前から中心線の外に居る**（実測で Apple Park の中央から
+    /// 312m、東京駅から 228m。しきい値の 50m をはるかに超える）。そこを逸脱として
+    /// 数えると、止まったまま引き直しが走る。しかも引き直しても始点は同じ車道へ
+    /// 寄るので何も変わらず、「再検索中」のカードと「ルートを再検索しました」の
+    /// 読み上げが数秒おきに繰り返される。
+    private var hasJoinedRoute = false
+
+    /// 最初の測位の位置。経路に乗らないまま走り出したときに判定を復活させる基準
+    /// （[departureThreshold]）。**これが無いと、駐車場から経路とは別の道へ出た場合に
+    /// 最後まで一度も引き直せなくなる。**
+    private var startPoint: MKMapPoint?
 
     /// 最後の測位で経路上をどこまで進んでいたか。測位が途切れたときの推測の起点。
     private var lastTravelled: CLLocationDistance = 0
@@ -77,20 +94,27 @@ final class GuidanceEngine {
                                  hasArrived: true)
         }
 
-        let match = nearestPointOnRoute(to: MKMapPoint(location.coordinate))
+        let target = MKMapPoint(location.coordinate)
+        if startPoint == nil { startPoint = target }
+
+        let match = nearestPointOnRoute(to: target)
         lastSegmentIndex = match.segmentIndex
 
         let travelled = cumulativeDistances[match.segmentIndex] + match.distanceIntoSegment
 
         // 逸脱判定。1 回外れただけでは切り替えず、連続で外れたときだけ確定させる。
         //
-        // **測位の誤差がしきい値より大きい間は数えない**。誤差 100m の位置で
+        // **まだ経路に乗っていないうちは数えない**（[hasJoinedRoute]）。
+        // **測位の誤差がしきい値より大きい間も数えない**。誤差 100m の位置で
         // 「中心線から 50m 以上離れている」とは言い切れないため。ビルの谷間や
         // トンネル前後でこれを数えると、実際には経路上にいるのにリルートが連発する。
-        // 経路に戻ったときの解除は精度に関係なく効かせる（早く戻すほうが安全側）。
+        // 経路に戻ったときの解除はどちらの条件にも関係なく効かせる（早く戻すほうが安全側）。
         if match.lateralDistance <= offRouteThreshold {
+            hasJoinedRoute = true
             offRouteStreak = 0
-        } else if location.horizontalAccuracy >= 0, location.horizontalAccuracy <= offRouteThreshold {
+        } else if canJudgeOffRoute(at: target),
+                  location.horizontalAccuracy >= 0,
+                  location.horizontalAccuracy <= offRouteThreshold {
             offRouteStreak += 1
         }
 
@@ -102,6 +126,17 @@ final class GuidanceEngine {
                         distanceFromRoute: match.lateralDistance,
                         isOffRoute: offRouteStreak >= offRouteConfirmationCount,
                         canArrive: true)
+    }
+
+    /// 逸脱を数えてよいか。経路に乗ったあとか、乗らないまま出発地から離れたあと。
+    ///
+    /// 後者が要るのは、駐車場から経路とは別の道へ出ていく場合があるため。そこを
+    /// 「乗るまで数えない」だけで塞ぐと、**一度も引き直せないまま案内が続く**という、
+    /// 直そうとしている症状より悪い状態になる。
+    private func canJudgeOffRoute(at target: MKMapPoint) -> Bool {
+        if hasJoinedRoute { return true }
+        guard let startPoint else { return false }
+        return startPoint.distance(to: target) > departureThreshold
     }
 
     /// 測位が途切れているあいだ、最後の速度で経路上を進めた進捗を作る。

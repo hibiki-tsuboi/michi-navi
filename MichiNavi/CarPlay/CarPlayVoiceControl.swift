@@ -32,6 +32,7 @@ final class CarPlayVoiceControl {
 
     private let interfaceController: CPInterfaceController
     private let onSelect: (CarPlayDestinationBrowser.Choice) -> Void
+    private let onCommand: (VoiceCommand) -> Void
     private let onError: (String) -> Void
 
     private let search = SearchService.shared
@@ -43,9 +44,11 @@ final class CarPlayVoiceControl {
 
     init(interfaceController: CPInterfaceController,
          onSelect: @escaping (CarPlayDestinationBrowser.Choice) -> Void,
+         onCommand: @escaping (VoiceCommand) -> Void,
          onError: @escaping (String) -> Void) {
         self.interfaceController = interfaceController
         self.onSelect = onSelect
+        self.onCommand = onCommand
         self.onError = onError
     }
 
@@ -80,11 +83,19 @@ final class CarPlayVoiceControl {
                 let text = try await SpeechInput.shared.listen(hints: hints)
                 template.activateVoiceControlState(withIdentifier: Step.searching.rawValue)
 
-                let intent = await DestinationIntent.parse(text)
-                let place = try await resolve(intent.query)
+                let command = await VoiceCommand.parse(text, isNavigating: NavigationController.shared.currentRoute != nil)
 
+                // 行き先だけは検索が要るので、画面を出したまま探す。
+                // それ以外は待たせる意味が無いので、先に畳んでから実行する。
+                guard case let .destination(query, asWaypoint) = command else {
+                    await dismiss()
+                    onCommand(command)
+                    return
+                }
+
+                let place = try await resolve(query)
                 await dismiss()
-                onSelect(intent.kind == .waypoint ? .waypoint(place) : .destination(place))
+                onSelect(asWaypoint ? .waypoint(place) : .destination(place))
             } catch {
                 // 先に畳む。音声画面を出したままアラートを重ねられない。
                 await dismiss()

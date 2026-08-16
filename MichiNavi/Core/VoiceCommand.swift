@@ -1,0 +1,108 @@
+import Foundation
+import FoundationModels
+
+/// 話した言葉から取り出した「やってほしいこと」。
+///
+/// 目的地を言うのがいちばん多いが、**走行中に押せるボタンの数は物理的に限られる**ので、
+/// 声の側を厚くするほうが理にかなっている。読み直しや案内終了はボタンも残してあるが、
+/// 手を伸ばさずに済むならそのほうがよい。
+enum VoiceCommand: Equatable {
+    /// 行き先を決める。`asWaypoint` なら、いまの経路に挟む。
+    case destination(query: String, asWaypoint: Bool)
+    /// 案内をやめる。
+    case endNavigation
+    /// いまの指示をもう一度読む。
+    case repeatGuidance
+    /// 経路全体を表示する。
+    case overview
+}
+
+/// 言語モデルに埋めさせる形。`@Generable` を付けた型は、返答が必ずこの形に収まる。
+@Generable
+private struct SpokenRequest {
+    @Guide(description: "やってほしいことの種類。destination（行き先を決める）、waypoint（途中に立ち寄る）、end（案内をやめる）、repeat（もう一度案内を読む）、overview（全体を表示）のいずれか。")
+    var action: String
+
+    @Guide(description: "行き先や立ち寄り先の検索語。地名・施設名・カテゴリ名だけを残し、「〜に行きたい」「〜に寄って」のような言い回しは落とす。行き先の指定でなければ空文字。")
+    var query: String
+}
+
+extension VoiceCommand {
+    /// 話した文を読み解く。
+    ///
+    /// **言語モデルが使えなくても止めない。** Apple Intelligence は対応機種かつ利用者が
+    /// 有効にしている場合しか動かないので、そのときは決まった言い回しの拾い出しに落ちる
+    /// （`fallback`）。効きは落ちるが、口で言えること自体は保たれる。
+    static func parse(_ text: String, isNavigating: Bool) async -> VoiceCommand {
+        guard SystemLanguageModel.default.isAvailable else {
+            return fallback(from: text, isNavigating: isNavigating)
+        }
+
+        do {
+            let session = LanguageModelSession {
+                """
+                あなたはカーナビの入力を整える係です。運転者が話した言葉から、
+                やってほしいことと、地図の検索に渡す語を取り出してください。
+                説明や言い換えを足さず、話に出てきた語だけを使ってください。
+                """
+            }
+            let answer = try await session.respond(to: text, generating: SpokenRequest.self)
+            let query = answer.content.query.trimmed
+
+            switch answer.content.action.lowercased() {
+            case "end": return .endNavigation
+            case "repeat": return .repeatGuidance
+            case "overview": return .overview
+            case "waypoint" where !query.isEmpty: return .destination(query: query, asWaypoint: isNavigating)
+            default:
+                // 行き先のつもりなのに検索語が空なら、読み解きが外れている。
+                // 話した文をそのまま渡したほうがまだ当たる。
+                return .destination(query: query.isEmpty ? text.trimmedForSearch : query, asWaypoint: false)
+            }
+        } catch {
+            NSLog("[MichiNavi] 音声入力の読み解きに失敗: \(error.localizedDescription)")
+            return fallback(from: text, isNavigating: isNavigating)
+        }
+    }
+
+    /// 言語モデルを通さない読み解き。
+    ///
+    /// 決まった言い回しだけを拾い、当てはまらなければ行き先として扱う。**取りこぼしても
+    /// 検索に落ちるだけ**なので、無理に拾おうとして誤爆させるより漏らすほうがよい。
+    /// 「終わり」だけで案内を切ると、同乗者との会話でも切れてしまう。
+    static func fallback(from text: String, isNavigating: Bool) -> VoiceCommand {
+        let normalized = text.trimmed
+
+        if normalized.containsAny(of: ["案内をやめ", "案内を終了", "案内終了", "ナビを終了", "案内をストップ"]) {
+            return .endNavigation
+        }
+        if normalized.containsAny(of: ["もう一度", "もういちど", "もう1回", "もう一回", "聞き逃"]) {
+            return .repeatGuidance
+        }
+        if normalized.containsAny(of: ["全体を表示", "全体表示", "ルート全体"]) {
+            return .overview
+        }
+
+        let asWaypoint = isNavigating
+            && normalized.containsAny(of: ["途中で", "ついでに", "寄って", "寄りたい", "立ち寄"])
+        return .destination(query: normalized.trimmedForSearch, asWaypoint: asWaypoint)
+    }
+}
+
+private extension String {
+    var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// 検索語にするときだけ末尾の句読点を落とす。
+    ///
+    /// 認識結果には「〜に寄って。」のように句点が付いてくることがあり、検索語に
+    /// 混ぜても何の役にも立たない。言い回しそのものを削るのは言語モデルの仕事で、
+    /// ここで語尾を並べて削り始めると当たり外れが大きくなる。
+    var trimmedForSearch: String {
+        let stripped = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "。、．，.,!?！？"))
+        return stripped.isEmpty ? trimmed : stripped
+    }
+
+    func containsAny(of needles: [String]) -> Bool {
+        needles.contains { localizedCaseInsensitiveContains($0) }
+    }
+}

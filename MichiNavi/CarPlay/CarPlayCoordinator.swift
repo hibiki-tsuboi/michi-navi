@@ -92,6 +92,7 @@ final class CarPlayCoordinator: NSObject {
         voiceControl = CarPlayVoiceControl(
             interfaceController: interfaceController,
             onSelect: select,
+            onCommand: { [weak self] in self?.perform($0) },
             onError: { [weak self] in self?.presentAlert(message: $0) })
 
         mapTemplate.mapDelegate = self
@@ -627,6 +628,25 @@ final class CarPlayCoordinator: NSObject {
     }
 
     // MARK: - 通知
+
+    /// 声で言われたことを実行する。行き先は `onSelect` 側が受け持つので、ここには来ない。
+    ///
+    /// **どれもボタンでもできることに揃えてある。** 声でしかできない操作を作ると、
+    /// 認識が外れたときに手段が無くなる。
+    private func perform(_ command: VoiceCommand) {
+        switch command {
+        case .endNavigation:
+            cancelSession()
+            navigation.cancelNavigation()
+        case .repeatGuidance:
+            VoiceGuidance.shared.repeatCurrentGuidance()
+        case .overview:
+            guard let route = navigation.currentRoute else { return }
+            mapViewController.showRouteOverview(route)
+        case .destination:
+            break
+        }
+    }
 
     /// 連続運転が長くなったときの催促。
     ///

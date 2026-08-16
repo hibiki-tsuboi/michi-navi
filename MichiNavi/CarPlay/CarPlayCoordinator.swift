@@ -584,6 +584,25 @@ final class CarPlayCoordinator: NSObject {
         }
     }
 
+    /// 指示文の道路番号を標識の画像に差し替えた文。番号が無ければ nil。
+    ///
+    /// 添付できるのは**テキストアタッチメントだけ**で、ほかの属性は CarPlay が剥がす
+    /// （ヘッダに明記）。色や字体を付けても消えるので、渡すのは画像 1 つに絞る。
+    private func attributedInstruction(for instruction: String) -> NSAttributedString? {
+        guard let found = RoadNumber.first(in: instruction),
+              let image = RoadShieldImage.make(for: found.road) else { return nil }
+
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        // 行の中で下がって見えないよう、少しだけ持ち上げる。
+        attachment.bounds = CGRect(x: 0, y: -4, width: image.size.width, height: image.size.height)
+
+        let result = NSMutableAttributedString(string: String(instruction[..<found.range.lowerBound]))
+        result.append(NSAttributedString(attachment: attachment))
+        result.append(NSAttributedString(string: String(instruction[found.range.upperBound...])))
+        return result
+    }
+
     private func makeManeuver(for step: NavStep,
                               at stepIndex: Int,
                               on route: NavRoute,
@@ -608,6 +627,15 @@ final class CarPlayCoordinator: NSObject {
         if let short {
             maneuver.dashboardInstructionVariants = [short, step.instruction]
             maneuver.notificationInstructionVariants = [short, step.instruction]
+        }
+        // 道路番号を標識の画像に差し替える（「国道156号を右方向」→「[156] を右方向」）。
+        //
+        // **見つかったときだけ渡す。** `attributedInstructionVariants` は
+        // `instructionVariants` より優先されるので、常に渡すと上の短縮形の落とし先が
+        // 効かなくなる。短縮形のぶんも同じ配列に入れて並びを保つ。
+        if let attributed = attributedInstruction(for: step.instruction) {
+            maneuver.attributedInstructionVariants = [attributed]
+                + [short].compactMap { $0 }.map { NSAttributedString(string: $0) }
         }
         maneuver.symbolImage = kind.image
         // 画面のアイコンだけでなく、車のメーター・HUD へもこの型で送られる。

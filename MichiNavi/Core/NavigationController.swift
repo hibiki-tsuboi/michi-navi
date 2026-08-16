@@ -201,7 +201,13 @@ final class NavigationController: ObservableObject {
         guard let origin = location.location?.coordinate else {
             throw NavigationError.noCurrentLocation
         }
-        return try await routeProvider.routes(from: origin, via: waypoints, to: destination)
+        let routes = try await routeProvider.routes(from: origin, via: waypoints, to: destination)
+
+        // 曲がりくねった道を優先する設定は、経路の引き方ではなく**候補の並べ替え**で効く。
+        // MapKit にそういう要望を出す手段が無いため。先頭は「提示で最初に見えるもの」
+        // であり、提示を挟まない入口（Dashboard・Siri）が実際に走るものでもある。
+        guard RoutePreferences.shared.prefersWinding else { return routes }
+        return RouteCharacter.sortedByCurvature(routes)
     }
 
     // MARK: - 案内の開始と終了

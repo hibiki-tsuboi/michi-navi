@@ -96,7 +96,9 @@ final class CarPlayDestinationBrowser: NSObject {
                                       sectionIndexTitle: nil))
 
         sections.append(CPListSection(items: [avoidItem(\.avoidsTolls, title: "有料道路を避ける"),
-                                              avoidItem(\.avoidsHighways, title: "高速道路を避ける")],
+                                              avoidItem(\.avoidsHighways, title: "高速道路を避ける"),
+                                              avoidItem(\.prefersWinding, title: "曲がりくねった道を優先",
+                                                        on: "優先する", off: "しない")],
                                       header: "ルートの引き方",
                                       sectionIndexTitle: nil))
 
@@ -124,10 +126,12 @@ final class CarPlayDestinationBrowser: NSObject {
     /// 押した後にリストを作り直しているのは、`CPListItem` を後から差し替えるより
     /// 素直なため。ここは走行中に何度も触る場所ではないので、作り直しの重さは問題にならない。
     private func avoidItem(_ key: ReferenceWritableKeyPath<RoutePreferences, Bool>,
-                           title: String) -> CPListItem {
+                           title: String,
+                           on: String = "避ける",
+                           off: String = "避けない") -> CPListItem {
         let isOn = preferences[keyPath: key]
         let item = CPListItem(text: title,
-                              detailText: isOn ? "避ける" : "避けない",
+                              detailText: isOn ? on : off,
                               image: nil,
                               accessoryImage: isOn ? UIImage(systemName: "checkmark") : nil,
                               accessoryType: .none)

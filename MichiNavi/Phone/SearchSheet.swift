@@ -86,6 +86,7 @@ struct SearchSheet: View {
         Section("ルートの引き方") {
             Toggle("有料道路を避ける", isOn: $preferences.avoidsTolls)
             Toggle("高速道路を避ける", isOn: $preferences.avoidsHighways)
+            Toggle("曲がりくねった道を優先", isOn: $preferences.prefersWinding)
         }
     }
 

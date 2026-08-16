@@ -22,15 +22,25 @@ final class RoutePreferences: ObservableObject {
         didSet { defaults.set(avoidsHighways, forKey: Self.highwaysKey) }
     }
 
+    /// 曲がりくねった道を優先する。
+    ///
+    /// **できるのは候補の並べ替えまで**（`RouteCharacter.sortedByCurvature`）。
+    /// MapKit に「曲がりくねった道を引いて」と頼む手段は無い。
+    @Published var prefersWinding: Bool {
+        didSet { defaults.set(prefersWinding, forKey: Self.windingKey) }
+    }
+
     private let defaults: UserDefaults
     private static let tollsKey = "route.avoidsTolls"
     private static let highwaysKey = "route.avoidsHighways"
+    private static let windingKey = "route.prefersWinding"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         // 既定はどちらも「避けない」。速い順に出すのが素直で、避けたい人だけが入れる。
         avoidsTolls = defaults.bool(forKey: Self.tollsKey)
         avoidsHighways = defaults.bool(forKey: Self.highwaysKey)
+        prefersWinding = defaults.bool(forKey: Self.windingKey)
     }
 
     /// `MKDirections.Request` に渡す形。
@@ -39,11 +49,10 @@ final class RoutePreferences: ObservableObject {
 
     /// 設定が効いていることを画面に出すための短い説明。何も避けていなければ nil。
     var summary: String? {
-        switch (avoidsTolls, avoidsHighways) {
-        case (true, true): "有料道路と高速を避けています"
-        case (true, false): "有料道路を避けています"
-        case (false, true): "高速を避けています"
-        case (false, false): nil
-        }
+        var parts: [String] = []
+        if avoidsTolls { parts.append("有料道路を避ける") }
+        if avoidsHighways { parts.append("高速を避ける") }
+        if prefersWinding { parts.append("曲がりくねった道を優先") }
+        return parts.isEmpty ? nil : parts.joined(separator: "・")
     }
 }

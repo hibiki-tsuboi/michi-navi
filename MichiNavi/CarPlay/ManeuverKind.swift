@@ -13,30 +13,43 @@ import UIKit
 /// 向きは表示以外にも使う（候補ルートの右折の数を数えるなど）ので、CarPlay の型と
 /// 一緒にしておけない。
 struct ManeuverKind {
+    /// 読み取った向き。**短縮形の指示文（`shortInstruction`）を作るのに要る**ので、
+    /// 読み替えたあとも捨てずに持っておく。捨てると呼ぶ側が推測をもう一度走らせることになり、
+    /// 同じ文から 2 通りの結果が出る余地を作ってしまう。
+    let direction: ManeuverDirection
     let symbolName: String
     let type: CPManeuverType
 
     static func inferred(from instruction: String) -> ManeuverKind {
-        kind(for: ManeuverDirection.inferred(from: instruction))
+        let direction = ManeuverDirection.inferred(from: instruction)
+        let appearance = appearance(for: direction)
+        return ManeuverKind(direction: direction,
+                            symbolName: appearance.symbolName,
+                            type: appearance.type)
     }
 
     /// どの規則にも当てはまらなかったときは、矢印を直進のまま出したいので
     /// 型も「いまの道をそのまま進む」に寄せて、画面と HUD の食い違いを避ける。
-    private static func kind(for direction: ManeuverDirection) -> ManeuverKind {
+    private static func appearance(for direction: ManeuverDirection) -> (symbolName: String, type: CPManeuverType) {
         switch direction {
-        case .uTurn: ManeuverKind(symbolName: "arrow.uturn.down", type: .uTurn)
-        case .roundabout: ManeuverKind(symbolName: "arrow.triangle.turn.up.right.circle", type: .enterRoundabout)
-        case .offRamp: ManeuverKind(symbolName: "arrow.triangle.turn.up.right", type: .offRamp)
-        case .onRamp: ManeuverKind(symbolName: "arrow.triangle.merge", type: .onRamp)
-        case .merge: ManeuverKind(symbolName: "arrow.merge", type: .onRamp)
-        case .slightRight: ManeuverKind(symbolName: "arrow.up.right", type: .slightRightTurn)
-        case .slightLeft: ManeuverKind(symbolName: "arrow.up.left", type: .slightLeftTurn)
-        case .right: ManeuverKind(symbolName: "arrow.turn.up.right", type: .rightTurn)
-        case .left: ManeuverKind(symbolName: "arrow.turn.up.left", type: .leftTurn)
-        case .arrive: ManeuverKind(symbolName: "mappin.and.ellipse", type: .arriveAtDestination)
-        case .depart: ManeuverKind(symbolName: "arrow.up", type: .startRoute)
-        case .straight: ManeuverKind(symbolName: "arrow.up", type: .straightAhead)
-        case .unknown: ManeuverKind(symbolName: "arrow.up", type: .followRoad)
+        case .uTurn: ("arrow.uturn.down", .uTurn)
+        case .roundabout: ("arrow.triangle.turn.up.right.circle", .enterRoundabout)
+        case .offRamp: ("arrow.triangle.turn.up.right", .offRamp)
+        case .onRamp: ("arrow.triangle.merge", .onRamp)
+        case .merge: ("arrow.merge", .onRamp)
+        // 車線の指示は矢印ではなく道路の記号にする。**斜め右折と見分けが付かないと
+        // 分岐の手前でハンドルを切られる。** 型のほうも `.keepRight` があるので、
+        // 車のメーター・HUD には正確な意味で届く。
+        case .keepRight: ("road.lanes.curved.right", .keepRight)
+        case .keepLeft: ("road.lanes.curved.left", .keepLeft)
+        case .slightRight: ("arrow.up.right", .slightRightTurn)
+        case .slightLeft: ("arrow.up.left", .slightLeftTurn)
+        case .right: ("arrow.turn.up.right", .rightTurn)
+        case .left: ("arrow.turn.up.left", .leftTurn)
+        case .arrive: ("mappin.and.ellipse", .arriveAtDestination)
+        case .depart: ("arrow.up", .startRoute)
+        case .straight: ("arrow.up", .straightAhead)
+        case .unknown: ("arrow.up", .followRoad)
         }
     }
 

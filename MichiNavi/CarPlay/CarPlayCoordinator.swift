@@ -585,7 +585,18 @@ final class CarPlayCoordinator: NSObject {
         let kind = ManeuverKind.inferred(from: step.instruction)
 
         let maneuver = CPManeuver()
-        maneuver.instructionVariants = [step.instruction]
+        // **候補は「長い順」に並べる。** CarPlay は先頭から見て**入るものを選ぶ**ので、
+        // 1 件しか渡さないと入らなかったときに省略される。地名と道路名を落とした
+        // 短縮形を後ろに置いておけば、狭い画面でも向きだけは必ず残る。
+        let short = kind.direction.shortInstruction
+        maneuver.instructionVariants = [step.instruction, short].compactMap { $0 }
+        // Dashboard と通知バナーは案内カードよりさらに狭いので、**短いほうを先に**する。
+        // 渡さなければ `instructionVariants` に落ちるだけなので、短縮形が作れないとき
+        // （向きが読めなかったとき）は触らない。
+        if let short {
+            maneuver.dashboardInstructionVariants = [short, step.instruction]
+            maneuver.notificationInstructionVariants = [short, step.instruction]
+        }
         maneuver.symbolImage = kind.image
         // 画面のアイコンだけでなく、車のメーター・HUD へもこの型で送られる。
         maneuver.maneuverType = kind.type

@@ -22,6 +22,7 @@
 "ATM・銀行" = "ATM & Banks";
 "EV充電" = "EV charging";
 "MichiNavi で目的地を選んでください" = "Choose a destination in MichiNavi";
+"Uターン" = "U-turn";
 "km" = "km";
 "「%@」は見つかりませんでした" = "Couldn't find \"%@\"";
 "あとで" = "Later";
@@ -67,6 +68,7 @@
 "ルートを再検索中" = "Finding a new route";
 "ルートを引き直し中" = "Updating the route";
 "ルート沿いをさがす" = "Search along the route";
+"ロータリー" = "Roundabout";
 "ワイナリー・醸造所" = "Wineries & breweries";
 "下道のみ" = "No highways";
 "中止" = "Stop";
@@ -75,11 +77,18 @@
 "住所・施設名で検索" = "Search by address or name";
 "優先する" = "Yes";
 "充電スタンド" = "Charging stations";
+"入口" = "On-ramp";
 "全体表示" = "Overview";
 "公園" = "Parks";
+"出口" = "Exit";
+"出発" = "Depart";
 "切り替える" = "Switch";
+"到着" = "Arrive";
 "到着時刻から逆算" = "Work back from arrival time";
+"右折" = "Turn right";
 "右折が少ない" = "Fewer right turns";
+"右車線" = "Keep right";
+"合流" = "Merge";
 "周辺のカテゴリから" = "Browse nearby categories";
 "周辺をさがす" = "Search nearby";
 "圏外です。電波の届く場所で試してください" = "No signal. Try again where you have coverage";
@@ -89,8 +98,12 @@
 "寄り道してみる" = "Take a detour";
 "寄り道できそうな場所が見つかりませんでした" = "Couldn't find anywhere to stop";
 "寄る" = "Stop there";
+"左折" = "Turn left";
+"左車線" = "Keep left";
 "市場" = "Markets";
 "探しています" = "Searching";
+"斜め右" = "Bear right";
+"斜め左" = "Bear left";
 "景色" = "Scenic spots";
 "曲がりくねった道を優先" = "Prefer winding roads";
 "最短時間" = "Fastest";
@@ -118,6 +131,7 @@
 "目的地を変更" = "Change destination";
 "目的地を検索" = "Search for a destination";
 "目的地を車に送れませんでした" = "Couldn't send the destination to your vehicle";
+"直進" = "Continue";
 "着きたい時刻" = "Arrive by";
 "経由地として追加" = "Add as a stop";
 "経由地の%@に到着しました。案内を続けます" = "You've reached your stop at %@. Continuing.";

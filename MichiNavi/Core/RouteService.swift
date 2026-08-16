@@ -166,7 +166,9 @@ final class MapKitRouteProvider: RouteProviding {
 
         let response = try await MKDirections(request: request).calculate()
         guard let route = response.routes.first else { throw RouteError.noRouteFound }
-        return route.expectedTravelTime
+        // 案内に使う経路と同じく徒歩ぶんを除く。ここだけ含めると、「何時に出れば
+        // よいか」が歩く時間ぶん早く出る。
+        return route.drivingTravelTime
     }
 
     func travelTime(from origin: CLLocationCoordinate2D,
@@ -183,7 +185,8 @@ final class MapKitRouteProvider: RouteProviding {
             guard let leg = try await legs(from: source, to: place.mapItem, alternates: false).first else {
                 throw RouteError.noRouteFound
             }
-            total += leg.expectedTravelTime
+            // 徒歩ぶんを除く。含めると、測り直すたびに到着予定が歩く時間ぶん遅くなる。
+            total += leg.drivingTravelTime
             source = place.mapItem
         }
         return total
@@ -215,9 +218,14 @@ private extension NavRoute {
         var waypointStepIndices: [Int] = []
 
         for (index, leg) in legs.enumerated() {
+            // **徒歩の step を落とす**（`MKRoute.drivingSteps`）。落とさないと案内が
+            // 駐車地点で終わらず、「階段を上がる」を運転中に読み上げることになる。
+            // 全部が徒歩なら（車で近づけない目的地）落とさない。案内が空になるより、
+            // 歩く指示が混ざるほうがまだ役に立つ。
+            let driving = leg.drivingSteps
             // `compactMap(NavStep.init(step:))` と書かないこと。関数として渡すと
             // MainActor の隔離が落ちる（既定で全部が MainActor）。
-            steps.append(contentsOf: leg.steps.compactMap { NavStep(step: $0) })
+            steps.append(contentsOf: (driving.isEmpty ? leg.steps : driving).compactMap { NavStep(step: $0) })
             // 最後の区間の終わりは目的地なので、経由地には数えない。
             if index < legs.count - 1 { waypointStepIndices.append(max(steps.count - 1, 0)) }
         }
@@ -232,8 +240,12 @@ private extension NavRoute {
         }
 
         // 描画用の線は MKRoute のものをそのまま使う。step から組み直したものより細かい。
+        // **ただし徒歩ぶんを落としたときは使えない。** 案内は駐車地点で終わるのに、
+        // 線だけが建物の入口まで（階段やエスカレータを通って）伸びる。
         let shape: MKPolyline
-        if let only = legs.first, legs.count == 1 {
+        if legs.contains(where: { !$0.walkingSteps.isEmpty }) {
+            shape = MKPolyline(coordinates: merged, count: merged.count)
+        } else if let only = legs.first, legs.count == 1 {
             shape = only.polyline
         } else {
             let joined = legs.flatMap(\.polyline.coordinates)
@@ -241,8 +253,11 @@ private extension NavRoute {
         }
 
         self.init(name: legs.first?.name ?? "",
-                  distance: legs.reduce(0) { $0 + $1.distance },
-                  expectedTravelTime: legs.reduce(0) { $0 + $1.expectedTravelTime },
+                  // **残した step から数える。** `MKRoute.distance` は step の合計と
+                  // 一致する（実測: 7486m ＝ 車 7270m + 徒歩 215m）ので、そのまま使うと
+                  // 歩くぶんが残り距離に混ざる。
+                  distance: steps.reduce(0) { $0 + $1.distance },
+                  expectedTravelTime: legs.reduce(0) { $0 + $1.drivingTravelTime },
                   polyline: shape,
                   steps: steps,
                   advisoryNotices: legs.flatMap(\.advisoryNotices),
@@ -252,6 +267,37 @@ private extension NavRoute {
                   coordinates: merged,
                   stepEndIndices: endIndices)
     }
+}
+
+private extension MKRoute {
+    /// 末尾に付いてくる徒歩の step。
+    ///
+    /// **`.automobile` で頼んでも返ってくる。** MapKit は目的地が施設のとき「駐車を準備」で
+    /// 車を降ろし、そこから入口まで歩かせる経路を返す（`route.transportType` は
+    /// `.automobile` のままなので、`step.transportType` を見ないと区別できない）。
+    /// 2026-08-16 の実測では 6 目的地中 4 つで発生し、62〜215m（全体の 1〜7%）。
+    ///
+    /// このアプリは車を運ぶところまでしか受け持たない（駐車位置から目的地へ歩くぶんを
+    /// `DestinationStore` が徒歩の地図へ渡すのと同じ線引き）ので、案内からは落とす。
+    var walkingSteps: [MKRoute.Step] { steps.filter { $0.transportType == .walking } }
+
+    /// 車で走る step だけ。
+    var drivingSteps: [MKRoute.Step] { steps.filter { $0.transportType != .walking } }
+
+    /// 徒歩ぶんを除いた所要時間。
+    ///
+    /// **`expectedTravelTime` にも徒歩ぶんが入っている。** MapKit は step ごとの所要時間を
+    /// 返さないので、歩く速さを決めて引くしかない。実測では歩行区間の距離を時間差で
+    /// 割ると 1.13 m/s（金沢・62m/55秒）と 1.27 m/s（東京タワー・75m/59秒）だったので、
+    /// あいだを取って 1.2 m/s とする。効くのは数十秒から 2 分ほど（渋谷の 215m で 152 秒）で、
+    /// **運転者がいちばん見る数字がそのぶん遅く出ていた**。
+    var drivingTravelTime: TimeInterval {
+        let walking = walkingSteps.reduce(0) { $0 + $1.distance }
+        return max(expectedTravelTime - walking / MKRoute.walkingSpeed, 0)
+    }
+
+    /// 歩く速さ（m/s）。上の実測から。
+    static let walkingSpeed: CLLocationSpeed = 1.2
 }
 
 private extension NavStep {

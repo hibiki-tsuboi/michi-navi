@@ -288,7 +288,7 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 
 ### MapKit の制約と、その回避策
 
-`RouteProviding` プロトコルの裏に経路計算を隔離してあるのは、以下 3 つを将来消せるようにするため。
+`RouteProviding` プロトコルの裏に経路計算を隔離してあるのは、以下を将来消せるようにするため。
 
 1. **step ごとの所要時間を返さない** → 経路全体の平均速度で距離按分している
    （`GuidanceEngine.update` と `CarPlayCoordinator.estimatedTime` の 2 か所）。
@@ -312,6 +312,24 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 4. **経由地を扱えない** → `MapKitRouteProvider` が区間ごとに `MKDirections` を投げ、
    結果を 1 本の `NavRoute` に繋いでいる。**経由地があるときは候補ルートを求めない**。
    区間の数だけ組み合わせが増えて、運転中に選べる形にならないため。
+5. **`.automobile` で頼んでも、末尾に徒歩の step が付いてくる** → `NavRoute` の組み立てで
+   落とす（`MKRoute.drivingSteps`）。目的地が施設のとき、MapKit は「駐車を準備」で車を
+   降ろし、そこから入口まで歩かせる経路を返す。**`route.transportType` は `.automobile` の
+   ままなので、`step.transportType` を見ないと区別できない。** 2026-08-16 の実測では
+   6 目的地中 4 つで発生し、62〜215m（全体の 1〜7%）。落とさないと次の 3 つが同時に壊れる。
+   - **案内が終わらない。** 到着判定は残り 30m なので、車が徒歩ぶん手前で止まると成立
+     しない。`DestinationStore.rememberParking` も走らず、`RestReminder` は運転時間を
+     数え続ける。
+   - **「階段を上がる」「エスカレータで下りる」を運転中に読み上げる**（`VoiceGuidance`）。
+     `ManeuverKind` はそれを `CPManeuver` にして車のメーター・HUD へも送る。
+   - **距離と所要時間に歩くぶんが混ざる。** `MKRoute.distance` は step の合計と一致する
+     （実測: 7486m ＝ 車 7270m + 徒歩 215m）ので、残した step から数え直す。
+     `expectedTravelTime` にも入っていて、**引くには歩く速さを決めるしかない**
+     （step ごとの所要時間が返らないため）。実測から 1.2 m/s（金沢 62m/55秒 → 1.13、
+     東京タワー 75m/59秒 → 1.27）。効くのは 52〜179 秒。
+   - 裏返しとして、**案内は目的地ピンの 65〜141m 手前で終わる**。線もそこで止める
+     （`MKRoute.polyline` をそのまま使うと線だけが建物の入口まで伸びる）。
+     Apple のマップも車の案内は駐車地点で終えて、そこから先は徒歩に切り替える。
 
 Mapbox / Valhalla などに差し替えるときは `RouteProviding` の実装を足すだけで、
 CarPlay 層は触らずに済む設計。

@@ -253,6 +253,7 @@ final class CarPlayCoordinator: NSObject {
 
         switch phase {
         case .idle:
+            previewedRoute = nil
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: nil)
             if entered { recenterMap("idle") }
@@ -264,11 +265,14 @@ final class CarPlayCoordinator: NSObject {
 
         case let .previewing(routes):
             guard let first = routes.first else { return }
+            previewedRoute = first
             mapViewController.show(route: first)
             mapViewController.showRouteOverview(first)
+            applyPreviewingButtons()
             showTripPreview(for: routes)
 
         case let .navigating(route):
+            previewedRoute = nil
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: route)
             if entered { recenterMap("navigating") }
@@ -644,6 +648,39 @@ final class CarPlayCoordinator: NSObject {
     ///
     /// パン UI に入るとここの並びは使われない。2 つしか残せないので
     /// `mapTemplateDidShowPanningInterface` で差し替えている。
+    /// ルート提示中に選ばれている候補。詳細を出す対象。
+    ///
+    /// 候補を切り替えても `phase` は動かない（`.previewing` のまま）ので、
+    /// `selectedPreviewFor` で追いかけないと、いつも先頭の詳細を出すことになる。
+    private var previewedRoute: NavRoute?
+
+    /// ルート提示中だけ「この経路について」を出す。
+    ///
+    /// **案内が始まったら入口ごと消える**（`applyNavigatingButtons` に無い）。
+    /// 走行中に読ませる画面ではないし、案内中は左右とも枠が埋まっている。
+    /// `destinationsButton` は端に残す。1 つだけのときと押す場所を変えないため。
+    private func applyPreviewingButtons() {
+        mapTemplate.mapButtons = idleMapButtons
+        mapTemplate.leadingNavigationBarButtons = [voiceButton]
+        mapTemplate.trailingNavigationBarButtons = [routeInfoButton, destinationsButton]
+    }
+
+    private var routeInfoButton: CPBarButton {
+        CPBarButton(title: String(localized: "この経路について")) { [weak self] _ in
+            self?.presentRouteInformation()
+        }
+    }
+
+    /// 選ばれている候補の中身を出す。
+    private func presentRouteInformation() {
+        guard let route = previewedRoute ?? navigation.previewedRoutes.first else { return }
+        let template = CarPlayRouteInformation.template(for: route) { [weak self] in
+            self?.interfaceController.popToRootTemplate(animated: true, completion: nil)
+            self?.navigation.startNavigation(with: route)
+        }
+        interfaceController.pushTemplate(template, animated: true, completion: nil)
+    }
+
     private func applyIdleButtons() {
         mapTemplate.mapButtons = idleMapButtons
         mapTemplate.leadingNavigationBarButtons = [voiceButton]
@@ -1044,6 +1081,9 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     /// 「他のルート」で候補を切り替えたとき、地図側の線も差し替える。
     func mapTemplate(_ mapTemplate: CPMapTemplate, selectedPreviewFor trip: CPTrip, using routeChoice: CPRouteChoice) {
         guard let route = route(for: routeChoice) else { return }
+        // 「この経路について」が出す対象もここで動かす。動かさないと、候補を切り替えても
+        // 先頭の詳細が出続ける（`advisoryNotices` は候補ごとに違うので実害が出る）。
+        previewedRoute = route
         mapViewController.show(route: route)
         mapViewController.showRouteOverview(route)
     }

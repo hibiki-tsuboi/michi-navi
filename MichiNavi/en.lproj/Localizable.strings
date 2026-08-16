@@ -42,6 +42,8 @@
 "この先は気温が低く、路面が凍結する恐れがあります" = "It's cold ahead — roads may be icy";
 "この先は雨の予報です" = "Rain is forecast ahead";
 "この先は雪の予報です" = "Snow is forecast ahead";
+"この経路で開始" = "Start this route";
+"この経路について" = "About this route";
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";
 "さがす" = "Find one";
 "しない" = "No";
@@ -74,6 +76,7 @@
 "中止" = "Stop";
 "他のルート" = "Other routes";
 "休憩" = "Rest stops";
+"住所" = "Address";
 "住所・施設名で検索" = "Search by address or name";
 "優先する" = "Yes";
 "充電スタンド" = "Charging stations";
@@ -84,6 +87,7 @@
 "出発" = "Depart";
 "切り替える" = "Switch";
 "到着" = "Arrive";
+"到着予定" = "Arrival";
 "到着時刻から逆算" = "Work back from arrival time";
 "右折" = "Turn right";
 "右折が少ない" = "Fewer right turns";
@@ -101,6 +105,7 @@
 "左折" = "Turn left";
 "左車線" = "Keep left";
 "市場" = "Markets";
+"所要" = "Duration";
 "探しています" = "Searching";
 "探しています…" = "Searching…";
 "斜め右" = "Bear right";
@@ -122,6 +127,7 @@
 "案内開始" = "Go";
 "検索" = "Search";
 "水族館・動物園" = "Aquariums & zoos";
+"注意" = "Notice";
 "温泉・スパ" = "Hot springs & spas";
 "満タン・満充電で走れる距離を入れると、届かない経路のときに途中の%@を提案します。車から残量を読む手段が無いため、この数字で判断します。" = "Enter how far you can go on a full tank or charge, and we'll suggest %@ along routes that are too long. There's no way to read the level from your vehicle, so this number is what we go on.";
 "現在地" = "Current location";
@@ -135,9 +141,11 @@
 "目的地を車に送れませんでした" = "Couldn't send the destination to your vehicle";
 "直進" = "Continue";
 "着きたい時刻" = "Arrive by";
+"立ち寄り先" = "Stop";
 "立ち寄り先を追加しました。%@" = "Stop added. %@";
 "経由地として追加" = "Add as a stop";
 "経由地の%@に到着しました。案内を続けます" = "You've reached your stop at %@. Continuing.";
+"経路の詳細" = "Route details";
 "美術館・博物館" = "Museums";
 "聞き取れませんでした" = "Didn't catch that";
 "職場" = "Work";
@@ -153,6 +161,7 @@
 "設定アプリで位置情報の利用を許可してください" = "Allow location access in Settings";
 "買い物" = "Shopping";
 "走っている案内をやめます。" = "Stops the guidance in progress.";
+"距離" = "Distance";
 "距離が短い" = "Shortest";
 "車をとめた場所" = "Where you parked";
 "近くから 1 件えらぶ" = "Pick one nearby";
@@ -163,6 +172,7 @@
 "避ける" = "Yes";
 "閉じる" = "Close";
 "電波が戻ったら自動で引き直します" = "It will retry once you're back in range";
+"電話" = "Phone";
 "音声入力がすでに動いています" = "Voice input is already running";
 "音声認識の準備ができませんでした" = "Couldn't get speech recognition ready";
 "食事" = "Food";

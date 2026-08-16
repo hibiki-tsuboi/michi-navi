@@ -479,13 +479,18 @@ final class CarPlayMapViewController: UIViewController {
         return value < 0 ? value + 360 : value
     }
 
-    /// テンプレートが重なっている領域を避けるための余白。
+    /// 全体表示の余白。**テンプレートが重なっている領域は `setVisibleMapRect` が
+    /// 自分で避ける**ので（`MKMapView.layoutMargins` が既定で安全領域を含む）、
+    /// ここで渡すのは見た目の余白だけ。
+    ///
+    /// **安全領域を足してはいけない。** 二重になり、CarPlay の案内カードのように
+    /// 大きな余白があると `left + right` が画面幅を超える。そうなると当て込みが
+    /// 破綻して、経路が右へ寄った細い帯に潰れる（実測: 幅 800pt・左 300pt・右 90pt の
+    /// 安全領域に対し、足すと余白の合計が 812pt になり、経路が x 604…616 の 12pt に
+    /// なった。足さなければ 316…694 に収まる）。しかも**余白を増やすほど経路が
+    /// 大きくなる**という逆の効き方をするので、症状から原因を辿りにくい。
     private var overviewPadding: UIEdgeInsets {
-        let insets = view.safeAreaInsets
-        return UIEdgeInsets(top: insets.top + 16,
-                            left: insets.left + 16,
-                            bottom: insets.bottom + 16,
-                            right: insets.right + 16)
+        UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
     }
 }
 

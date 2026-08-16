@@ -319,9 +319,13 @@ CarPlay 層は触らずに済む設計。
   （iOS 26.2 で実測。傾けているとさらに増える）。
   - 裏返すと **`setCamera(lookingAtCenter:)` と `setVisibleMapRect(edgePadding:)` は
     こちらが何もしなくても安全領域に収めてくれる**。`follow` の中心合わせは既に
-    安全領域基準で正しく、`showRouteOverview` が `edgePadding` に `safeAreaInsets` を
-    足しているのは**二重計上**（padding=0 でも安全領域の内側に入るのを実測で確認）。
-    実車で見た目を合わせたあとなので直していないが、余白が広く感じたらここ。
+    安全領域基準で正しく、**全体表示の `edgePadding` に `safeAreaInsets` を足しては
+    いけない**（`overviewPadding`）。足すと二重になり、`left + right` が画面幅を
+    超えたところで**当て込みが破綻する**。実測（幅 800pt・左 300pt・右 90pt の安全領域）:
+    足すと余白の合計が 812pt になり、経路が **x 604…616 の 12pt に潰れて右へ寄る**。
+    足さなければ 316…694 に収まる。**余白を増やすほど経路が大きくなる**という逆の
+    効き方をするので、「全体表示なのに右で見切れる」から原因を辿りにくい。
+    2026-08-16 まで足していた。
 - **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or
   drag events in the base view」）。`MKMapView` に自前のジェスチャを付ける手は使えず、入力は
   すべて `CPMapTemplateDelegate` 経由。指のドラッグは `didUpdatePanGestureWithTranslation`

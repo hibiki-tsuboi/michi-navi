@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // シーンの寿命ではなくアプリの寿命に合わせる必要がある。
         RestReminder.shared.start()
         RangeAdvisor.shared.start()
+        RouteWeather.shared.start()
         return true
     }
 }

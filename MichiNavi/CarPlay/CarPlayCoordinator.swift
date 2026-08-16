@@ -171,6 +171,10 @@ final class CarPlayCoordinator: NSObject {
         RangeAdvisor.shared.advice
             .sink { [weak self] in self?.presentRangeAdvice($0) }
             .store(in: &cancellables)
+
+        RouteWeather.shared.hazard
+            .sink { [weak self] in self?.presentWeatherHazard($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -650,6 +654,18 @@ final class CarPlayCoordinator: NSObject {
         case .destination:
             break
         }
+    }
+
+    /// 経路の先の天気。知らせるだけで、押させることは何も無い。
+    private func presentWeatherHazard(_ hazard: RouteWeather.Hazard) {
+        let alert = CPNavigationAlert(
+            titleVariants: [hazard.message],
+            subtitleVariants: nil,
+            image: UIImage(systemName: hazard.symbolName),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 10)
+        mapTemplate.present(navigationAlert: alert, animated: true)
     }
 
     /// 航続距離で届かないときの補給先の提案。

@@ -71,6 +71,8 @@ final class NavigationController: ObservableObject {
     private var lastRerouteFinished: Date?
     /// 連続で失敗した回数。空ける間隔を決める。成功したら 0 に戻す。
     private var rerouteFailures = 0
+    /// 直前に引き直した地点。次を投げるまでに動くべき距離をここから測る。
+    private var lastRerouteOrigin: CLLocation?
 
     private init() {
         location.$location
@@ -180,6 +182,7 @@ final class NavigationController: ObservableObject {
         isRerouting = false
         lastRerouteFinished = nil
         rerouteFailures = 0
+        lastRerouteOrigin = nil
         phase = .calculating(destination)
 
         routingTask = Task {
@@ -253,6 +256,7 @@ final class NavigationController: ObservableObject {
         isRerouting = false
         lastRerouteFinished = nil
         rerouteFailures = 0
+        lastRerouteOrigin = nil
         phase = .idle
         location.setNavigating(false)
     }
@@ -276,7 +280,7 @@ final class NavigationController: ObservableObject {
         }
 
         if updated.isOffRoute {
-            reroute(to: route.destination, via: remainingWaypoints(of: route))
+            reroute(to: route.destination, via: remainingWaypoints(of: route), from: current)
             return
         }
 
@@ -334,11 +338,13 @@ final class NavigationController: ObservableObject {
     ///   - 成功したとき: 数秒ごとにルートが入れ替わり、音声が「再検索しました」を言い続け、
     ///     CarPlay の「再検索中」カードが点滅する
     ///
-    /// という形で確実に破綻する。
-    private func reroute(to destination: Place, via waypoints: [Place]) {
-        guard !isCalculatingReroute, canAttemptReroute else { return }
+    /// という形で確実に破綻する。**間隔だけでは足りない**ので、停まっているあいだは
+    /// そもそも投げない（[canReroute(from:)]）。
+    private func reroute(to destination: Place, via waypoints: [Place], from current: CLLocation) {
+        guard !isCalculatingReroute, canAttemptReroute, canReroute(from: current) else { return }
         isCalculatingReroute = true
         isRerouting = true
+        lastRerouteOrigin = current
 
         routingTask?.cancel()
         routingTask = Task {
@@ -373,6 +379,38 @@ final class NavigationController: ObservableObject {
         guard let lastRerouteFinished else { return true }
         return Date().timeIntervalSince(lastRerouteFinished) >= rerouteInterval
     }
+
+    /// **停まっているあいだは引き直さない。**
+    ///
+    /// 停まっている車に新しい経路を渡しても、走り出す道は変わらない。得るものが無い一方、
+    /// 引き直しは必ず「ルートを再検索しました」の読み上げと「再検索中」のカードを連れてくる。
+    ///
+    /// 実害はここから始まる。逸脱判定は経路に戻るまで下りないので、外れた場所に停めると
+    /// [minimumRerouteInterval] ごとに引き直しが走り続ける。しかも停まっている＝入力が
+    /// 同じなので、MapKit は毎回**まったく同じ経路**を返す。中心線から 50m 前後
+    /// （＝`GuidanceEngine.offRouteThreshold` の境目）に停めた場合はもっと悪く、測位の
+    /// 揺れで逸脱の成立と解除を往復するため、引き直しは何度でも成立する。
+    /// 一般のカーナビが停車中に引き直さないのはこれを避けるため。
+    ///
+    /// 判定は 2 段。速度が取れるならそれで見て、取れない端末や、停車中に速度だけ
+    /// 跳ねた測位のために、前回引いた地点からの移動距離でも受ける。
+    private func canReroute(from current: CLLocation) -> Bool {
+        // `speed` は取れないとき負を返す。取れているときだけ停車の判定に使う。
+        if current.speed >= 0, current.speed < Self.stoppedSpeed { return false }
+
+        // **1 回目は通す**（`lastRerouteOrigin` が nil）。わざと別の道へ入ったときの
+        // 反応を鈍らせない。効かせるのは 2 回目以降だけで、時間の間隔と同じ考え方。
+        guard let lastRerouteOrigin else { return true }
+        return current.distance(from: lastRerouteOrigin) >= Self.minimumRerouteDistance
+    }
+
+    /// これを下回ったら停まっているとみなす速度（m/s）。徒歩よりはっきり遅くしてある。
+    /// 渋滞の徐行で引き直しを止めてしまわないため。
+    private static let stoppedSpeed: CLLocationSpeed = 1
+
+    /// 2 回目以降の引き直しに必要な移動距離。測位の揺れでは届かず、走っていれば
+    /// 数秒で越える値。
+    private static let minimumRerouteDistance: CLLocationDistance = 50
 
     /// 次に試すまでの間隔。連続で失敗するほど空けて、MapKit を叩き続けない。
     /// 5 / 10 / 20 / 40 秒で頭打ちにする。

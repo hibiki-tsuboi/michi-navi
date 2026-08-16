@@ -39,6 +39,26 @@ struct NavRoute: Identifiable {
 }
 
 extension NavRoute {
+    /// 中身から作る指紋。**引き直した結果が前とまったく同じ経路かどうか**を見分ける。
+    ///
+    /// `id` は生成のたびに変わるので、同じ道を同じ順に曲がる経路でも別物になる。
+    /// 引き直しを「`id` が変わったこと」で判定している側（`VoiceGuidance`）は、それを
+    /// リルートとみなして「ルートを再検索しました」を読み上げてしまう。停まったまま
+    /// 引き直すと入力が同じ＝毎回同じ経路が返るので、**同じ経路を繰り返し
+    /// 「再検索しました」と読み上げる**という、いちばん不快な形になる。
+    ///
+    /// 座標列ではなく step の指示と距離で作る。座標は数千点あって毎回舐めると重く、
+    /// 同じ道をたどるなら指示と距離も必ず一致する。
+    var signature: Int {
+        var hasher = Hasher()
+        hasher.combine(destination.id)
+        for step in steps {
+            hasher.combine(step.instruction)
+            hasher.combine(Int(step.distance.rounded()))
+        }
+        return hasher.finalize()
+    }
+
     /// `stepIndex` の区間の始まりから先の座標列。まだ通っていない部分を指す。
     /// ルート沿いに施設を探すときの範囲になる。
     func remainingCoordinates(from stepIndex: Int) -> [CLLocationCoordinate2D] {

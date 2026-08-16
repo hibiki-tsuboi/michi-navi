@@ -17,7 +17,10 @@ final class VoiceGuidance: NSObject {
 
     private var scheduler: VoicePromptScheduler?
     /// 案内中のルート。これが変わったらリルートとみなす。
-    private var currentRouteID: UUID?
+    ///
+    /// `NavRoute.id` ではなく中身の指紋で持つ（理由は `NavRoute.signature`）。
+    /// 引き直した結果が前と同じ経路なら、利用者にとっては何も起きていない。
+    private var currentRouteSignature: Int?
 
     private var isSessionConfigured = false
     /// 音声入力のあいだ読み上げを止めているか。
@@ -112,19 +115,22 @@ final class VoiceGuidance: NSObject {
     private func apply(phase: NavigationController.Phase) {
         guard case let .navigating(route) = phase else {
             scheduler = nil
-            currentRouteID = nil
+            currentRouteSignature = nil
             // 到着のひと言だけは最後まで言わせる。
             if !isAnnouncingArrival { stopSpeaking() }
             return
         }
 
-        guard currentRouteID != route.id else { return }
+        // 同じ経路を引き直しただけなら、読み上げも予告の記録もそのまま続ける。
+        // ここでスケジューラを作り直すと、済ませた予告が白紙に戻って読み直しにもなる。
+        let signature = route.signature
+        guard currentRouteSignature != signature else { return }
         // 到着を読み上げずに終わった場合（通話中などで promptStyle が none）に
         // フラグが立ったまま次の案内へ持ち越さないよう、ここで必ず倒す。
         isAnnouncingArrival = false
         // 案内中に別ルートへ差し替わった＝リルート。最初のひと言が変わる。
-        scheduler = VoicePromptScheduler(isReroute: currentRouteID != nil)
-        currentRouteID = route.id
+        scheduler = VoicePromptScheduler(isReroute: currentRouteSignature != nil)
+        currentRouteSignature = signature
     }
 
     private func handle(progress: RouteProgress) {

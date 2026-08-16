@@ -1,4 +1,5 @@
 import CarPlay
+import CoreLocation
 import MapKit
 
 /// CarPlay で目的地を選ぶ画面群。
@@ -50,6 +51,24 @@ final class CarPlayDestinationBrowser: NSObject {
     private let location = LocationService.shared
     private let navigation = NavigationController.shared
     private let preferences = RoutePreferences.shared
+
+    /// いま出している検索結果の画面と、その検索条件。地図を動かされたときに
+    /// 探し直すのに要る。同時に 1 つしか出ないので 1 組だけ持つ。
+    private weak var poiTemplate: CPPointOfInterestTemplate?
+    private var poiCategory: Category?
+    /// 最後に探した中心と時刻。地図の動きを間引くために見る。
+    private var lastSearchCenter: CLLocation?
+    private var lastSearchAt: Date?
+    private var isSearchingRegion = false
+
+    /// `CPPointOfInterestTemplate` に載る上限（ヘッダに明記。超えたぶんは黙って切られる）。
+    /// **運転中に選べる件数**としても、これ以上並べても読めない。
+    private static let maximumPointsOfInterest = 12
+    /// 地図を動かして探し直すときの半径。映っている範囲から決めるが、上下は切る。
+    private static let minimumSearchRadius: CLLocationDistance = 1_000
+    private static let maximumSearchRadius: CLLocationDistance = 20_000
+    /// 探し直しの最短間隔。
+    private static let minimumSearchInterval: TimeInterval = 2
 
     init(interfaceController: CPInterfaceController,
          sessionConfiguration: CPSessionConfiguration,
@@ -295,25 +314,97 @@ final class CarPlayDestinationBrowser: NSObject {
         interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
+    /// 検索結果は**地図とカード**で出す（`CPPointOfInterestTemplate`）。
+    ///
+    /// 文字だけのリストにしないのは、走行中に効くのが「どれが経路のどちら側にあるか」
+    /// だから。「タイムズ第 3」と「タイムズ第 5」を名前で選べる運転者はいない。
+    /// カードには寄る／行くのボタンが載るので、リストのときに挟んでいた
+    /// アクションシート（[choose(_:)]）の 1 段も要らなくなる。
     private func presentResults(for category: Category) {
-        // 先に空のリストを出してから埋める。結果を待ってから画面を出すと、
-        // 押したのに何も起きない時間ができて運転中に不安になる。
-        let template = CPListTemplate(title: category.title, sections: [])
-        template.emptyViewSubtitleVariants = [String(localized: "探しています…")]
+        // 先に空のまま出してから埋める。結果を待ってから画面を出すと、押したのに
+        // 何も起きない時間ができて運転中に不安になる。
+        let template = CPPointOfInterestTemplate(title: category.title,
+                                                 pointsOfInterest: [],
+                                                 selectedIndex: NSNotFound)
+        template.pointOfInterestDelegate = self
+        poiTemplate = template
+        poiCategory = category
+        lastSearchCenter = nil
+        lastSearchAt = nil
         interfaceController.pushTemplate(template, animated: true, completion: nil)
 
         Task {
             do {
-                let places = try await places(for: category)
-                let items = places.prefix(CPListTemplate.maximumItemCount).map(makeItem(for:))
-                template.updateSections([CPListSection(items: Array(items))])
-                template.emptyViewSubtitleVariants = [isNavigating
-                    ? String(localized: "この先には見つかりませんでした")
-                    : String(localized: "近くに見つかりませんでした")]
+                show(try await places(for: category), on: template)
             } catch {
-                template.emptyViewSubtitleVariants = [error.localizedDescription]
+                dismissResults(message: error.localizedDescription)
             }
         }
+    }
+
+    /// 検索結果をカードに載せる。**空なら畳んで知らせる。**
+    ///
+    /// `CPPointOfInterestTemplate` には「見つかりませんでした」を出す口が無い
+    /// （`CPListTemplate.emptyViewSubtitleVariants` にあたるものが無い）。0 件のまま
+    /// 置くと空の地図だけが残り、運転中に何が起きたのか分からないまま手が止まる。
+    private func show(_ places: [Place], on template: CPPointOfInterestTemplate) {
+        guard !places.isEmpty else {
+            dismissResults(message: isNavigating
+                ? String(localized: "この先には見つかりませんでした")
+                : String(localized: "近くに見つかりませんでした"))
+            return
+        }
+        // 先頭を選んだ状態で開く。いちばん近い（案内中は手前にある）1 件のカードが
+        // すぐ出るので、そのまま押せる。
+        template.setPointsOfInterest(pointsOfInterest(from: places), selectedIndex: 0)
+    }
+
+    private func pointsOfInterest(from places: [Place]) -> [CPPointOfInterest] {
+        places.prefix(Self.maximumPointsOfInterest).map(makePointOfInterest(for:))
+    }
+
+    private func dismissResults(message: String) {
+        poiTemplate = nil
+        poiCategory = nil
+        interfaceController.popTemplate(animated: true) { [weak self] _, _ in
+            self?.onError(message)
+        }
+    }
+
+    private func makePointOfInterest(for place: Place) -> CPPointOfInterest {
+        // 直線距離。経路に沿った距離は安く出せないので、地図のピンと素直に対応する
+        // ほうを見せる。カードで真っ先に読まれる数字なので `subtitle` に置く。
+        let distance = location.location.map {
+            Formatters.distanceText($0.distance(from: CLLocation(latitude: place.coordinate.latitude,
+                                                                 longitude: place.coordinate.longitude)))
+        }
+        let poi = CPPointOfInterest(location: place.mapItem,
+                                    title: place.name,
+                                    subtitle: distance,
+                                    summary: place.subtitle,
+                                    detailTitle: place.name,
+                                    detailSubtitle: distance,
+                                    detailSummary: place.subtitle,
+                                    pinImage: nil)
+
+        // **案内中は「寄る」を主役にする。** 走っている最中に押されるのはほぼこちらで、
+        // 行き先ごと変えるのは押し間違いのほうが多い。押し分けの中身は [choose(_:)] と同じ。
+        if isNavigating {
+            poi.primaryButton = CPTextButton(title: String(localized: "寄る"),
+                                             textStyle: .confirm) { [weak self] _ in
+                self?.finish(with: .waypoint(place))
+            }
+            poi.secondaryButton = CPTextButton(title: String(localized: "目的地を変更"),
+                                               textStyle: .normal) { [weak self] _ in
+                self?.finish(with: .destination(place))
+            }
+        } else {
+            poi.primaryButton = CPTextButton(title: String(localized: "ここへ行く"),
+                                             textStyle: .confirm) { [weak self] _ in
+                self?.finish(with: .destination(place))
+            }
+        }
+        return poi
     }
 
     /// 案内中は経路の先を、そうでなければ現在地のまわりを探す。
@@ -364,6 +455,62 @@ final class CarPlayDestinationBrowser: NSObject {
     private var currentRegion: MKCoordinateRegion? {
         guard let coordinate = location.location?.coordinate else { return nil }
         return MKCoordinateRegion(center: coordinate, latitudinalMeters: 20_000, longitudinalMeters: 20_000)
+    }
+}
+
+// MARK: - CPPointOfInterestTemplateDelegate
+
+extension CarPlayDestinationBrowser: CPPointOfInterestTemplateDelegate {
+    /// 地図を動かされたら、その辺りを探し直す。
+    ///
+    /// **必ず間引くこと。** 指を動かしているあいだ何度でも呼ばれるので、そのまま
+    /// 検索を投げると MapKit のレート制限に当たる（`SearchService.alongRoute` の
+    /// 検索点を増やすなというのと同じ枠）。動いた距離と経過時間の両方で見る。
+    ///
+    /// **最初の 1 回は探さない。** 画面を押し出した直後にも呼ばれるので、そこで
+    /// 探すと開いた瞬間に 2 回検索することになる。基準を置くだけにする。
+    ///
+    /// 探し直しは経路沿いではなく**その辺り**にする（`nearby`）。動かした先は経路から
+    /// 離れているかもしれず、そこで経路沿いの結果を返すと地図に映っている範囲と合わない。
+    func pointOfInterestTemplate(_ pointOfInterestTemplate: CPPointOfInterestTemplate,
+                                 didChangeMapRegion region: MKCoordinateRegion) {
+        guard poiTemplate === pointOfInterestTemplate, let category = poiCategory else { return }
+
+        let center = CLLocation(latitude: region.center.latitude, longitude: region.center.longitude)
+        // 緯度 1 度はおよそ 111km。映っている範囲の半分を検索半径にする。
+        let radius = min(max(region.span.latitudeDelta * 111_000 / 2, Self.minimumSearchRadius),
+                         Self.maximumSearchRadius)
+
+        guard let last = lastSearchCenter else {
+            lastSearchCenter = center
+            return
+        }
+        // 映っている範囲の中で動いただけなら、まだ同じ辺りを見ている。
+        guard center.distance(from: last) >= radius, !isSearchingRegion else { return }
+        if let lastSearchAt, Date().timeIntervalSince(lastSearchAt) < Self.minimumSearchInterval { return }
+
+        isSearchingRegion = true
+        lastSearchCenter = center
+        lastSearchAt = Date()
+
+        Task {
+            // 次に投げてよい時刻は、始めたときではなく**終わったとき**から測る
+            // （`NavigationController.reroute` と同じ理由）。
+            defer {
+                isSearchingRegion = false
+                lastSearchAt = Date()
+            }
+
+            guard let places = try? await search.nearby(pointsOfInterest: category.pointsOfInterest,
+                                                        around: region.center,
+                                                        radius: radius) else { return }
+            // 待っているあいだに画面が変わっていたら捨てる。
+            guard poiTemplate === pointOfInterestTemplate, !places.isEmpty else { return }
+            // **ここでは選び直さない。** 動かした先で勝手にカードが開くと、地図を
+            // 見ている最中に視線を取られる。
+            pointOfInterestTemplate.setPointsOfInterest(pointsOfInterest(from: places),
+                                                        selectedIndex: NSNotFound)
+        }
     }
 }
 

@@ -167,6 +167,10 @@ final class CarPlayCoordinator: NSObject {
         RestReminder.shared.suggestion
             .sink { [weak self] in self?.presentRestSuggestion() }
             .store(in: &cancellables)
+
+        RangeAdvisor.shared.advice
+            .sink { [weak self] in self?.presentRangeAdvice($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -646,6 +650,23 @@ final class CarPlayCoordinator: NSObject {
         case .destination:
             break
         }
+    }
+
+    /// 航続距離で届かないときの補給先の提案。
+    ///
+    /// 休憩の催促と同じく `CPNavigationAlert` で出す。ただしこちらは**押さないと
+    /// 着けない**話なので、放置されたときのために表示を長めに取る。
+    private func presentRangeAdvice(_ advice: RangeAdvisor.Advice) {
+        let alert = CPNavigationAlert(
+            titleVariants: ["このままでは届きません"],
+            subtitleVariants: ["\(advice.place.name) に寄りますか"],
+            image: UIImage(systemName: advice.kind == .evCharger ? "bolt.car.fill" : "fuelpump.fill"),
+            primaryAction: CPAlertAction(title: "寄る", style: .default) { [weak self] _ in
+                self?.navigation.addWaypoint(advice.place)
+            },
+            secondaryAction: CPAlertAction(title: "いいえ", style: .cancel) { _ in },
+            duration: 20)
+        mapTemplate.present(navigationAlert: alert, animated: true)
     }
 
     /// 連続運転が長くなったときの催促。

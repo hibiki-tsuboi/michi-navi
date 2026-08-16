@@ -30,7 +30,43 @@ final class RoutePreferences: ObservableObject {
         didSet { defaults.set(prefersWinding, forKey: Self.windingKey) }
     }
 
+    /// 満タン・満充電からの航続距離（メートル）。0 なら未設定で、補給の提案をしない。
+    ///
+    /// **残量ではなく航続距離**なのは、こちらから車の残量を読む手段が無いため。
+    /// CarPlay は車の充電状態を教えてくれない（車の側から「充電に寄れ」と
+    /// 言ってくることはある）。利用者が一度入れるだけの数字にしてある。
+    @Published var vehicleRange: CLLocationDistance {
+        didSet { defaults.set(vehicleRange, forKey: Self.rangeKey) }
+    }
+
+    /// 補給先。EV か内燃機関かで探す先が変わる。
+    @Published var refuelKind: RefuelKind {
+        didSet { defaults.set(refuelKind.rawValue, forKey: Self.refuelKey) }
+    }
+
+    enum RefuelKind: String, CaseIterable, Identifiable {
+        case gasStation
+        case evCharger
+
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .gasStation: "ガソリンスタンド"
+            case .evCharger: "充電スタンド"
+            }
+        }
+
+        var pointsOfInterest: [MKPointOfInterestCategory] {
+            switch self {
+            case .gasStation: [.gasStation]
+            case .evCharger: [.evCharger]
+            }
+        }
+    }
+
     private let defaults: UserDefaults
+    private static let rangeKey = "route.vehicleRange"
+    private static let refuelKey = "route.refuelKind"
     private static let tollsKey = "route.avoidsTolls"
     private static let highwaysKey = "route.avoidsHighways"
     private static let windingKey = "route.prefersWinding"
@@ -41,6 +77,8 @@ final class RoutePreferences: ObservableObject {
         avoidsTolls = defaults.bool(forKey: Self.tollsKey)
         avoidsHighways = defaults.bool(forKey: Self.highwaysKey)
         prefersWinding = defaults.bool(forKey: Self.windingKey)
+        vehicleRange = defaults.double(forKey: Self.rangeKey)
+        refuelKind = RefuelKind(rawValue: defaults.string(forKey: Self.refuelKey) ?? "") ?? .gasStation
     }
 
     /// `MKDirections.Request` に渡す形。

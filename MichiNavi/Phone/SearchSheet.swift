@@ -82,12 +82,41 @@ struct SearchSheet: View {
 
     /// 目的地を選ぶ手前に置く。ここを変えると返ってくる経路そのものが変わるので、
     /// 選んだあとに気づいても遅い。**走っている案内は引き直さない**（次の計算から効く）。
+    @ViewBuilder
     private var routePreferences: some View {
         Section("ルートの引き方") {
             Toggle("有料道路を避ける", isOn: $preferences.avoidsTolls)
             Toggle("高速道路を避ける", isOn: $preferences.avoidsHighways)
             Toggle("曲がりくねった道を優先", isOn: $preferences.prefersWinding)
         }
+
+        Section {
+            Picker("補給先", selection: $preferences.refuelKind) {
+                ForEach(RoutePreferences.RefuelKind.allCases) { kind in
+                    Text(kind.title).tag(kind)
+                }
+            }
+            HStack {
+                Text("航続距離")
+                Spacer()
+                TextField("未設定", value: rangeKilometres, format: .number)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                Text("km").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("補給")
+        } footer: {
+            // 数字の意味を書いておかないと、残量と取り違えられる。
+            Text("満タン・満充電で走れる距離を入れると、届かない経路のときに途中の\(preferences.refuelKind.title)を提案します。車から残量を読む手段が無いため、この数字で判断します。")
+        }
+    }
+
+    /// 保存はメートル、入力はキロメートル。運転者が言う単位に合わせる。
+    private var rangeKilometres: Binding<Double?> {
+        Binding(get: { preferences.vehicleRange > 0 ? preferences.vehicleRange / 1_000 : nil },
+                set: { preferences.vehicleRange = ($0 ?? 0) * 1_000 })
     }
 
     // MARK: - お気に入りと履歴

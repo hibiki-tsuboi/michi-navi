@@ -48,6 +48,26 @@ extension NavRoute {
         guard coordinates.indices.contains(start) else { return coordinates }
         return Array(coordinates[start...])
     }
+
+    /// 先頭から `distance` メートルぶんの座標列。
+    /// 「ここまでなら届く」範囲を切り出して、その中だけを探すために使う。
+    static func coordinates(_ coordinates: [CLLocationCoordinate2D],
+                            upTo distance: CLLocationDistance) -> [CLLocationCoordinate2D] {
+        guard let first = coordinates.first, distance > 0 else { return [] }
+
+        var result = [first]
+        var travelled: CLLocationDistance = 0
+        var previous = MKMapPoint(first)
+
+        for coordinate in coordinates.dropFirst() {
+            let point = MKMapPoint(coordinate)
+            travelled += point.distance(to: previous)
+            previous = point
+            guard travelled <= distance else { break }
+            result.append(coordinate)
+        }
+        return result
+    }
 }
 
 enum RouteError: LocalizedError {

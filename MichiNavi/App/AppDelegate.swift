@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // 連続運転の数え上げも同じ理由でここから。案内をまたいで積み上げるので、
         // シーンの寿命ではなくアプリの寿命に合わせる必要がある。
         RestReminder.shared.start()
+        RangeAdvisor.shared.start()
         return true
     }
 }

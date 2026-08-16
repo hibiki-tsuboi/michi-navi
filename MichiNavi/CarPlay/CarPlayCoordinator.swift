@@ -549,6 +549,7 @@ final class CarPlayCoordinator: NSObject {
     private func rebuildManeuvers(for route: NavRoute, stepIndex: Int, isNewSession: Bool) {
         routeManeuvers = route.steps.enumerated().map { index, step in
             makeManeuver(for: step,
+                         at: index,
                          on: route,
                          distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
         }
@@ -580,11 +581,18 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private func makeManeuver(for step: NavStep,
+                              at stepIndex: Int,
                               on route: NavRoute,
                               distance: CLLocationDistance) -> CPManeuver {
         let kind = ManeuverKind.inferred(from: step.instruction)
 
         let maneuver = CPManeuver()
+        // 交差点の拡大図。MapKit は交差点のデータを返さないので、経路そのものの形を
+        // 曲がる地点のまわりだけ拡大して描く。曲がらない指示では nil が返る。
+        // **Dashboard 用は渡さない。** 指定しなければ CarPlay がこれを使う。
+        maneuver.junctionImage = JunctionImage.make(for: route,
+                                                    stepIndex: stepIndex,
+                                                    direction: kind.direction)
         // **候補は「長い順」に並べる。** CarPlay は先頭から見て**入るものを選ぶ**ので、
         // 1 件しか渡さないと入らなかったときに省略される。地名と道路名を落とした
         // 短縮形を後ろに置いておけば、狭い画面でも向きだけは必ず残る。

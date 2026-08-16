@@ -42,6 +42,28 @@ enum CarPlayGestureLog {
         emit("drag translation=\(point(translation)) velocity=\(point(velocity)) moved=\(meters(moved))")
     }
 
+    /// 指が触れた・離れた。`drag` の行がこの 2 行に挟まれていなければ、開始か終了だけが
+    /// 落ちている（中断されたジェスチャに終了は来ない）。**追従を切っているのは開始の側**
+    /// なので、`drag began` が出ていないのに `drag` が並ぶなら、そのドラッグは
+    /// 追従と綱引きしている。
+    static func dragBegan() {
+        emit("drag began")
+    }
+
+    static func dragEnded(velocity: CGPoint) {
+        emit("drag ended velocity=\(point(velocity))")
+    }
+
+    /// 指を離したあとの惰性。**車から来た入力ではなくこちらが作った動き**なので
+    /// `drag` と分けてある。混ぜると、届いていない入力を届いたと読み違える。
+    static func glideBegan(velocity: CGPoint) {
+        emit("glide began velocity=\(point(velocity))")
+    }
+
+    static func glideEnded(moved: CLLocationDistance) {
+        emit("glide ended moved=\(meters(moved))")
+    }
+
     /// ノブ・トラックパッドでの方向入力（瞬間的に押したぶん）。指のドラッグと区別するために分けてある。
     static func pan(direction: CPMapTemplate.PanDirection, moved: CLLocationDistance) {
         emit("pan direction=\(names(of: direction)) moved=\(meters(moved))")

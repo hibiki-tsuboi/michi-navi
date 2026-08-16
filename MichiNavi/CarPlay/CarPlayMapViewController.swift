@@ -57,7 +57,17 @@ final class CarPlayMapViewController: UIViewController {
     private var routeAnnotations: [MKPointAnnotation] = []
 
     /// 自車を追従する（案内中）か、地図を自由に見せる（パン中・全体表示中）か。
-    private(set) var isFollowingUser = true
+    private(set) var isFollowingUser = true {
+        didSet {
+            guard oldValue != isFollowingUser else { return }
+            onFollowingChanged?(isFollowingUser)
+        }
+    }
+
+    /// 追従が入り切りした合図。**マップボタンを貼り直す**ために要る。
+    /// 現在地ボタンとパンボタンは 4 つしかない枠の同じ場所を分け合っているので、
+    /// 切り替わった瞬間に貼り直さないと「追従が外れているのに戻すボタンが無い」が起きる。
+    var onFollowingChanged: ((Bool) -> Void)?
 
     /// 追従時のカメラ高度。ズームボタンとピンチで上下する。
     private var cameraDistance: CLLocationDistance
@@ -313,11 +323,24 @@ final class CarPlayMapViewController: UIViewController {
     func pan(by translation: CGPoint, animated: Bool = true) -> CLLocationDistance {
         isFollowingUser = false
         let before = mapView.centerCoordinate
-        let point = CGPoint(x: mapView.bounds.midX - translation.x,
-                            y: mapView.bounds.midY - translation.y)
+        let anchor = centerPoint
+        let point = CGPoint(x: anchor.x - translation.x, y: anchor.y - translation.y)
         let after = mapView.convert(point, toCoordinateFrom: mapView)
         mapView.setCenter(after, animated: animated)
         return MKMapPoint(before).distance(to: MKMapPoint(after))
+    }
+
+    /// 中心座標がいま画面のどこに描かれているか。**`bounds` の中心ではない。**
+    /// `MKMapView` は中心座標を安全領域の中心に置く（`layoutMargins` が既定で安全領域を
+    /// 含むため）。CarPlay ではそれを作るのが上部バーと案内カードなので、案内中は
+    /// 縦にも横にもずれる。
+    ///
+    /// **`bounds` の中心で座標を読んで `setCenter` へ渡してはいけない。** 読んだ点と
+    /// 置かれる点が違うので、渡すたびにその差ぶん地図が飛ぶ。指を止めていても飛ぶうえ、
+    /// ドラッグは毎秒 60 回来るので積み上がる（iPhone の 14pt でも 1 秒で 250m 以上、
+    /// 240pt のドラッグが 4.5 倍動く。iOS 26.2 で実測）。
+    private var centerPoint: CGPoint {
+        mapView.convert(mapView.centerCoordinate, toPointTo: mapView)
     }
 
     // MARK: - タッチジェスチャ（iOS 26）

@@ -52,6 +52,38 @@ final class CarPlayCoordinator: NSObject {
     private static let sustainedPanInterval: TimeInterval = 0.1
     private static let sustainedPanStep: CGFloat = 24
 
+    /// 指を離したあとの惰性。**指が離れたあとも CarPlay は何も送ってこない**ので、
+    /// 押しっぱなしのパンと同じく最後の速度から自分で送り続ける。無いと地図が指の下で
+    /// ぴたりと止まり、放り投げて先を見るという地図アプリの手触りがそのまま消える。
+    private var glideLink: CADisplayLink?
+    private var glideVelocity: CGPoint = .zero
+    private var glideMoved: CLLocationDistance = 0
+    /// 1 ミリ秒あたりの減衰率。`UIScrollView.DecelerationRate.normal` と同じ値にしてある。
+    private static let glideDecay: CGFloat = 0.998
+    /// これを下回ったら止める（pt/秒）。
+    private static let glideCutoff: CGFloat = 24
+
+    /// 直前に反映した段階。**同じ段階が出し直されたときに中心へ戻さない**ための記録。
+    /// リルートが成功すると `NavigationController.startNavigation(with:)` を通って
+    /// `phase` は `.navigating` のまま経路だけ入れ替わる。見分けないと、地図を動かして
+    /// 先を眺めているあいだにリルートのたびに自車へ引き戻される。
+    private var lastPhaseKind: PhaseKind?
+
+    /// 段階の中身を落として種類だけにしたもの。`Phase` に `Equatable` を足すと
+    /// `NavRoute` まで比較の対象になるので、こちらで畳む。
+    private enum PhaseKind {
+        case idle, calculating, previewing, navigating
+
+        init(_ phase: NavigationController.Phase) {
+            switch phase {
+            case .idle: self = .idle
+            case .calculating: self = .calculating
+            case .previewing: self = .previewing
+            case .navigating: self = .navigating
+            }
+        }
+    }
+
     @available(iOS 26.4, *)
     private var routeSharing: CarPlayRouteSharing? { routeSharingBox as? CarPlayRouteSharing }
 
@@ -82,6 +114,8 @@ final class CarPlayCoordinator: NSObject {
 
     func start() {
         window.rootViewController = mapViewController
+        // 追従が入り切りしたら、その枠のボタンを現在地 ⇄ パンで貼り替える。
+        mapViewController.onFollowingChanged = { [weak self] _ in self?.refreshMapButtons() }
 
         let configuration = CPSessionConfiguration(delegate: self)
         sessionConfiguration = configuration
@@ -123,8 +157,10 @@ final class CarPlayCoordinator: NSObject {
         destinations = nil
         voiceControl = nil
         sessionConfiguration = nil
-        // 押しっぱなしのままシーンが切れることがある。時計は `self` を掴んでいるので必ず止める。
+        // 押しっぱなし・惰性の途中でシーンが切れることがある。どちらも `self` を
+        // 掴んでいるので必ず止める。
         stopSustainedPan()
+        stopGlide()
         clearSession()
     }
 
@@ -189,15 +225,18 @@ final class CarPlayCoordinator: NSObject {
     // MARK: - 状態の反映
 
     private func apply(phase: NavigationController.Phase) {
+        // **段階そのものが変わったときだけ**中心へ戻す。同じ段階の出し直し（リルートの
+        // 完了が代表）で戻すと、地図を動かして先を眺めているあいだに引き戻される。
+        // 追従へ戻す道は現在地ボタンとパン UI の「完了」に残してある。
+        let kind = PhaseKind(phase)
+        let entered = lastPhaseKind != kind
+        lastPhaseKind = kind
+
         switch phase {
         case .idle:
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: nil)
-            mapViewController.recenter()
-            // **`recenter()` は指が触れている最中にも来る**。進行中の回転・傾けの基準を
-            // ここで捨てるので、残しておかないとジェスチャのログだけを見ても
-            // 「急に効かなくなった」理由が読めない。
-            CarPlayGestureLog.camera("recenter(idle)", camera: mapViewController.cameraState())
+            if entered { recenterMap("idle") }
             applyIdleButtons()
 
         case .calculating:
@@ -213,11 +252,22 @@ final class CarPlayCoordinator: NSObject {
         case let .navigating(route):
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: route)
-            mapViewController.recenter()
-            CarPlayGestureLog.camera("recenter(navigating)", camera: mapViewController.cameraState())
+            if entered { recenterMap("navigating") }
             applyNavigatingButtons()
             beginSessionIfNeeded(for: route)
         }
+    }
+
+    /// 追従へ戻す。**惰性も一緒に止める**（止めないと、戻した直後も地図が流れ続けて
+    /// 次の位置更新まで自車から離れていく）。
+    ///
+    /// **ここは指が触れている最中にも通る**。`recenter()` が進行中の回転・傾けの基準を
+    /// 捨てるので、必ずログを残す。残さないとジェスチャの行だけを見ても
+    /// 「急に効かなくなった」理由が読めない。
+    private func recenterMap(_ reason: String) {
+        stopGlide()
+        mapViewController.recenter()
+        CarPlayGestureLog.camera("recenter(\(reason))", camera: mapViewController.cameraState())
     }
 
     private func apply(progress: RouteProgress) {
@@ -546,13 +596,20 @@ final class CarPlayCoordinator: NSObject {
     /// パン UI に入るとここの並びは使われない。2 つしか残せないので
     /// `mapTemplateDidShowPanningInterface` で差し替えている。
     private func applyIdleButtons() {
-        mapTemplate.mapButtons = [recenterButton, zoomInButton, zoomOutButton, panButton]
+        mapTemplate.mapButtons = idleMapButtons
         mapTemplate.leadingNavigationBarButtons = [voiceButton]
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
-    /// 向きの切り替えは案内中だけ出す。押す場所を変えないよう、前 3 つは
-    /// `applyIdleButtons` と同じ並びにしてある。
+    /// 案内していないときは向きの切り替えを出さないぶん枠が余るので、現在地とパンを
+    /// 両方置ける。案内中だけが分け合う（[followSlotButton]）。
+    private var idleMapButtons: [CPMapButton] {
+        [recenterButton, zoomInButton, zoomOutButton, panButton]
+    }
+
+    /// 向きの切り替えは案内中だけ出す。押す場所を変えないよう、並びは
+    /// `applyIdleButtons` に揃えてある（先頭の枠だけは追従の状態で中身が入れ替わる。
+    /// [followSlotButton]）。
     private func applyNavigatingButtons() {
         mapTemplate.mapButtons = navigatingMapButtons
         // ナビゲーションバーは左右 2 つずつが上限。マップボタンは 4 つで埋まっている
@@ -562,7 +619,34 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var navigatingMapButtons: [CPMapButton] {
-        [recenterButton, zoomInButton, zoomOutButton, orientationButton]
+        [followSlotButton, zoomInButton, zoomOutButton, orientationButton]
+    }
+
+    /// 現在地ボタンとパンボタンで分け合う枠。**追従しているあいだ現在地ボタンには
+    /// 用が無い**（押しても何も変わらない）のでパンボタンを出し、地図を動かして
+    /// 追従が外れたら現在地ボタンへ入れ替える。押す場所は動かさないので、
+    /// 走行中に探し直さずに済む。この 1 枠が「いま追従しているか」の表示も兼ねる。
+    ///
+    /// 分け合っているのは案内中の 4 つが埋まっているため。**パン UI へ入るボタンは
+    /// 外せない**（ガイド p.33。ノブしか無い車には他に地図を動かす手が無く、以前は
+    /// 案内中にこれが落ちていて動かしようが無かった）ので、向きの切り替えを
+    /// 落とすか分け合うかの二択になる。
+    private var followSlotButton: CPMapButton {
+        mapViewController.isFollowingUser ? panButton : recenterButton
+    }
+
+    /// 追従の入り切りに合わせてマップボタンを貼り直す。
+    ///
+    /// パン UI に入っているあいだは触らない。CarPlay が 2 つしか残さないので、
+    /// その 2 つは `mapTemplateDidShowPanningInterface` が決めている。
+    ///
+    /// 段階を `navigation.phase` ではなく `lastPhaseKind` から見るのは、**`@Published` が
+    /// `willSet` で流れる**ため。`apply(phase:)` の中から（`recenter()` 経由で）ここへ来た
+    /// ときの `navigation.phase` はまだ 1 つ前の値で、案内へ入った瞬間に案内用の並びを
+    /// 選べない。`lastPhaseKind` は `apply(phase:)` の先頭で更新済み。
+    private func refreshMapButtons() {
+        guard !mapTemplate.isPanningInterfaceVisible else { return }
+        mapTemplate.mapButtons = lastPhaseKind == .navigating ? navigatingMapButtons : idleMapButtons
     }
 
     private func toggleMapOrientation() {
@@ -624,11 +708,7 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var recenterButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in
-            guard let self else { return }
-            mapViewController.recenter()
-            CarPlayGestureLog.camera("recenter(button)", camera: mapViewController.cameraState())
-        }
+        let button = CPMapButton { [weak self] _ in self?.recenterMap("button") }
         button.image = UIImage(systemName: "location.fill")
         return button
     }
@@ -877,8 +957,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     func mapTemplateDidDismissPanningInterface(_ mapTemplate: CPMapTemplate) {
         // 押しっぱなしのまま「完了」へ移れる。終了が来ない経路なのでここでも止める。
         stopSustainedPan()
-        mapViewController.recenter()
-        CarPlayGestureLog.camera("panning done", camera: mapViewController.cameraState())
+        recenterMap("panning done")
         // パンに入る前のボタンへ戻す。案内中に入った場合もあるので状態を見て選ぶ。
         if case .navigating = navigation.phase {
             applyNavigatingButtons()
@@ -906,6 +985,63 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
                      velocity: CGPoint) {
         let moved = mapViewController.pan(by: translation, animated: false)
         CarPlayGestureLog.drag(translation: translation, velocity: velocity, moved: moved)
+    }
+
+    /// 指が触れた。**追従を切るのはここ**で、最初のデルタを待たない。待つと、
+    /// 直前の位置更新で始まった `follow` のアニメーション（0.3 秒ほど）とドラッグの
+    /// 頭が殴り合い、動きだしが引っかかってから飛ぶ。触れた時点で切っておけば、
+    /// 指を置いたまま動かさないあいだも地図が自車を追って逃げない。
+    ///
+    /// 惰性で流れている最中に触ったら止める。地図アプリはどれもそう動く。
+    func mapTemplateDidBeginPanGesture(_ mapTemplate: CPMapTemplate) {
+        stopGlide()
+        CarPlayGestureLog.dragBegan()
+        mapViewController.setFollowingUser(false)
+    }
+
+    /// 指が離れた。最後の速度を惰性へ渡す。
+    ///
+    /// **中断（着信・Siri・アラートの提示）ではここへ来ない。** CarPlay ホストの
+    /// `_handlePanGesture:` は began / changed / ended の 3 つしか分岐しておらず、
+    /// `.cancelled` と `.failed` は素通りする（iOS 26.5 の逆アセンブルで確認）。
+    /// 惰性を始めそこねるだけで、掴んだままの状態は残らない。
+    func mapTemplate(_ mapTemplate: CPMapTemplate, didEndPanGestureWithVelocity velocity: CGPoint) {
+        CarPlayGestureLog.dragEnded(velocity: velocity)
+        startGlide(velocity: velocity)
+    }
+
+    // MARK: 指を離したあとの惰性
+
+    private func startGlide(velocity: CGPoint) {
+        stopGlide()
+        // ゆっくり置いただけの指で地図を流さない。
+        guard hypot(velocity.x, velocity.y) > Self.glideCutoff else { return }
+        glideVelocity = velocity
+        glideMoved = 0
+        // 送りは画面の更新に合わせる。`Timer` だと表示と歩調が合わず、
+        // 減速の終わりぎわがかくつく。**止め忘れると `self` を掴んだまま回り続ける**
+        // （`CADisplayLink` は target を強く持つ）ので、終わりと `stop()` の両方で切る。
+        let link = CADisplayLink(target: self, selector: #selector(stepGlide(_:)))
+        link.add(to: .main, forMode: .common)
+        glideLink = link
+        CarPlayGestureLog.glideBegan(velocity: velocity)
+    }
+
+    @objc private func stepGlide(_ link: CADisplayLink) {
+        let elapsed = CGFloat(link.targetTimestamp - link.timestamp)
+        glideMoved += mapViewController.pan(by: CGPoint(x: glideVelocity.x * elapsed,
+                                                        y: glideVelocity.y * elapsed),
+                                            animated: false)
+        let decay = pow(Self.glideDecay, elapsed * 1_000)
+        glideVelocity = CGPoint(x: glideVelocity.x * decay, y: glideVelocity.y * decay)
+        if hypot(glideVelocity.x, glideVelocity.y) <= Self.glideCutoff { stopGlide() }
+    }
+
+    private func stopGlide() {
+        guard let glideLink else { return }
+        glideLink.invalidate()
+        self.glideLink = nil
+        CarPlayGestureLog.glideEnded(moved: glideMoved)
     }
 
     // MARK: ピンチ・回転・傾け（iOS 26）

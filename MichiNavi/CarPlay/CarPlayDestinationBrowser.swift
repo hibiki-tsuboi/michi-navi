@@ -46,6 +46,7 @@ final class CarPlayDestinationBrowser: NSObject {
     private let store = DestinationStore.shared
     private let location = LocationService.shared
     private let navigation = NavigationController.shared
+    private let preferences = RoutePreferences.shared
 
     init(interfaceController: CPInterfaceController,
          sessionConfiguration: CPSessionConfiguration,
@@ -84,6 +85,11 @@ final class CarPlayDestinationBrowser: NSObject {
                                       header: "さがす",
                                       sectionIndexTitle: nil))
 
+        sections.append(CPListSection(items: [avoidItem(\.avoidsTolls, title: "有料道路を避ける"),
+                                              avoidItem(\.avoidsHighways, title: "高速道路を避ける")],
+                                      header: "ルートの引き方",
+                                      sectionIndexTitle: nil))
+
         let template = CPListTemplate(title: "目的地", sections: sections)
         // キーボードが塞がれているときに検索ボタンを出すと、押しても何も起きない
         // 導線になってしまう。そのときは最初から出さない。
@@ -97,6 +103,32 @@ final class CarPlayDestinationBrowser: NSObject {
         let item = CPListItem(text: place.name, detailText: place.subtitle)
         item.handler = { [weak self] _, completion in
             self?.choose(place)
+            completion()
+        }
+        return item
+    }
+
+    /// 入り／切りの 1 行。**CarPlay のリストにスイッチは無い**ので、状態は
+    /// チェックの有無で示し、押すたびに裏返す。
+    ///
+    /// 押した後にリストを作り直しているのは、`CPListItem` を後から差し替えるより
+    /// 素直なため。ここは走行中に何度も触る場所ではないので、作り直しの重さは問題にならない。
+    private func avoidItem(_ key: ReferenceWritableKeyPath<RoutePreferences, Bool>,
+                           title: String) -> CPListItem {
+        let isOn = preferences[keyPath: key]
+        let item = CPListItem(text: title,
+                              detailText: isOn ? "避ける" : "避けない",
+                              image: nil,
+                              accessoryImage: isOn ? UIImage(systemName: "checkmark") : nil,
+                              accessoryType: .none)
+        item.handler = { [weak self] _, completion in
+            guard let self else { return completion() }
+            preferences[keyPath: key].toggle()
+            // 走っている案内は引き直さない（次に計算するときから効く）ので、
+            // ここで伝えておかないと「押したのに何も変わらない」と見える。
+            interfaceController.popTemplate(animated: false) { [weak self] _, _ in
+                self?.present()
+            }
             completion()
         }
         return item

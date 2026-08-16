@@ -11,6 +11,7 @@ struct SearchSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var store = DestinationStore.shared
+    @ObservedObject private var preferences = RoutePreferences.shared
 
     @State private var query = ""
     @State private var suggestions: [MKLocalSearchCompletion] = []
@@ -25,6 +26,7 @@ struct SearchSheet: View {
                 }
 
                 if query.isEmpty {
+                    routePreferences
                     savedDestinations
                 } else {
                     suggestionRows
@@ -44,6 +46,17 @@ struct SearchSheet: View {
             .onChange(of: query) { _, text in
                 SearchService.shared.suggest(text, near: currentRegion) { suggestions = $0 }
             }
+        }
+    }
+
+    // MARK: - ルートの引き方
+
+    /// 目的地を選ぶ手前に置く。ここを変えると返ってくる経路そのものが変わるので、
+    /// 選んだあとに気づいても遅い。**走っている案内は引き直さない**（次の計算から効く）。
+    private var routePreferences: some View {
+        Section("ルートの引き方") {
+            Toggle("有料道路を避ける", isOn: $preferences.avoidsTolls)
+            Toggle("高速道路を避ける", isOn: $preferences.avoidsHighways)
         }
     }
 

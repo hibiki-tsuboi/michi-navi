@@ -103,6 +103,10 @@ final class MapKitRouteProvider: RouteProviding {
         request.destination = destination
         request.transportType = .automobile
         request.requestsAlternateRoutes = alternates
+        // **要望であって指示ではない**。避けようがない区間（離島の有料橋など）では
+        // MapKit がそのまま有料道路を含む経路を返す。返ってきた経路を弾いてはいけない。
+        request.tollPreference = RoutePreferences.shared.tollPreference
+        request.highwayPreference = RoutePreferences.shared.highwayPreference
 
         let response = try await MKDirections(request: request).calculate()
         guard !response.routes.isEmpty else { throw RouteError.noRouteFound }

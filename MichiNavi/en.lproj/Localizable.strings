@@ -102,6 +102,7 @@
 "左車線" = "Keep left";
 "市場" = "Markets";
 "探しています" = "Searching";
+"探しています…" = "Searching…";
 "斜め右" = "Bear right";
 "斜め左" = "Bear left";
 "新しいルートに切り替えました。%@" = "Switched to the new route. %@";

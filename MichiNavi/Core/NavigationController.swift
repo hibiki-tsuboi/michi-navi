@@ -227,6 +227,7 @@ final class NavigationController: ObservableObject {
         phase = .navigating(route)
         location.setNavigating(true)
         startDeadReckoning()
+        NavigationLog.navigationStarted(steps: route.steps.count, distance: route.distance)
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
         if let current = location.location { handle(location: current) }
@@ -282,6 +283,9 @@ final class NavigationController: ObservableObject {
         }
 
         if updated.isOffRoute {
+            NavigationLog.offRoute(distanceFromRoute: updated.distanceFromRoute,
+                                   accuracy: current.horizontalAccuracy,
+                                   speed: current.speed)
             reroute(to: route.destination, via: remainingWaypoints(of: route), from: current)
             return
         }
@@ -349,12 +353,23 @@ final class NavigationController: ObservableObject {
             // 成功するまで赤いカードが出っぱなしになる（停めたまま案内を切れば永久に）。
             // 計算が走っている最中だけは触らない。終わらせ方はそちらに任せる。
             if !isCalculatingReroute { isRerouting = false }
+            NavigationLog.rerouteSkipped("stopped")
             return
         }
-        guard !isCalculatingReroute, canAttemptReroute else { return }
+        guard !isCalculatingReroute else {
+            NavigationLog.rerouteSkipped("calculating")
+            return
+        }
+        guard canAttemptReroute else {
+            NavigationLog.rerouteSkipped("interval")
+            return
+        }
         isCalculatingReroute = true
         isRerouting = true
         lastRerouteOrigin = current
+        NavigationLog.rerouteStarted()
+
+        let previous = currentRoute?.signature
 
         routingTask?.cancel()
         routingTask = Task {
@@ -371,12 +386,15 @@ final class NavigationController: ObservableObject {
 
                 guard let best = routes.first else {
                     rerouteFailures += 1
+                    NavigationLog.rerouteFinished(succeeded: false, changed: false)
                     return
                 }
                 rerouteFailures = 0
+                NavigationLog.rerouteFinished(succeeded: true, changed: best.signature != previous)
                 // 経路に戻せたときだけ `isRerouting` が下りる（startNavigation の末尾）。
                 startNavigation(with: best)
             } catch {
+                NavigationLog.rerouteFinished(succeeded: false, changed: false)
                 // 引き直しに失敗しても案内は止めない。間隔を空けてまた試す。
                 rerouteFailures += 1
                 NSLog("[MichiNavi] リルートに失敗: \(error.localizedDescription)")

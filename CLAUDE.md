@@ -498,6 +498,16 @@ CarPlay 層は触らずに済む設計。
   検索していないのに「再検索中」の赤いカードだけが残る。動き出せばまた立つ。
   計算が走っている最中は触らない（終わらせ方はそちらに任せる。失敗しても、次の
   位置更新でここへ来て下りる）。
+- **引き直しの切り分けは `NavigationLog`（category `route`）を見る**。ジェスチャと同じで、
+  **画面を見ても何が起きたか分からない**（「逸脱と判断した」「判断したが見送った」
+  「投げたが失敗した」が全部同じ見え方になる）。`off-route` の行に中心線からの距離・
+  測位の精度・速度が揃って出るので、しきい値のどれを疑えばよいかもここで決まる。
+  `reroute succeeded changed=false` は**引き直したのに前と同じ経路が返った**印。
+
+  ```bash
+  xcrun simctl spawn booted log stream --style compact --level info \
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "route"'
+  ```
 - **引き直しの見分けは `NavRoute.id` ではなく `NavRoute.signature`**。`id` は生成のたびに
   変わる UUID なので、**同じ道を同じ順に曲がる経路でも別物になる**。`VoiceGuidance` は
   これでリルートを判定して「ルートを再検索しました」を読むため、`id` で見ていると
@@ -571,6 +581,11 @@ CarPlay 層は触らずに済む設計。
     pauseTripForReason:description:turnCardColor:]`）。つまり赤いパネルはほぼ
     「再検索中」のカードで、これがターン案内カードと同じ位置に同じ形で出るために
     案内カードが赤くなったように見える。**文言で切り分けること。**
+  - **文言はどちらの側のものか必ず確かめる。** CarPlay 自身が出す日本語は
+    `CarPlaySupport.framework/ja.lproj/Localizable.strings` にあり、
+    `REROUTING = 経路の変更中…` / `LOADING = 読み込み中…` / `PROCEED_TO_ROUTE = 経路へ進む`。
+    **「再検索中」はこのアプリの文字列**（`ルートを再検索中`）なので、それが出ていたら
+    `isRerouting` が本当に立っている。書き手は `NavigationController.reroute` 1 か所しかない。
 - **走行中はキーボードが塞がれる**。`CPSessionConfiguration.limitedUserInterfaces` に
   `.keyboard` が入っている間、`CarPlayDestinationBrowser` は検索ボタンを出さない。
   押しても何も起きない導線を運転中に見せないため。**検索が使えない前提で目的地に

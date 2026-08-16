@@ -63,6 +63,14 @@ final class GuidanceEngine {
     /// 最後まで一度も引き直せなくなる。**
     private var startPoint: MKMapPoint?
 
+    /// 交通状況で測り直した残り時間の基準点。「あの地点で残り N 秒」を覚えておき、
+    /// 以降はそこからの距離比で減らす。
+    ///
+    /// **出発時の見積もりを全体の距離で按分しない**理由がここにある。按分は渋滞に入っても
+    /// 数字が動かず、運転者がいちばん見る数字がいちばん当たらなくなる。基準点を置き直せば、
+    /// 少なくとも最後に測った時点の混み具合までは反映される。
+    private var timeReference: (remaining: CLLocationDistance, time: TimeInterval)?
+
     /// 最後の測位で経路上をどこまで進んでいたか。測位が途切れたときの推測の起点。
     private var lastTravelled: CLLocationDistance = 0
     /// 最後の測位での速度（m/s）。`CLLocation.speed` は取れないとき負を返すので、
@@ -80,6 +88,14 @@ final class GuidanceEngine {
         }
         cumulativeDistances = cumulative
         totalDistance = cumulative.last ?? route.distance
+    }
+
+    /// いま測り直した残り時間を反映する。以降の進捗はここを起点に減る。
+    ///
+    /// 呼ぶ側は**引き直しを挟んでいないこと**を確かめること。経路が入れ替わっていれば
+    /// この engine ごと作り直されているので、古い経路で測った時間が紛れ込むことはない。
+    func applyMeasuredTimeRemaining(_ time: TimeInterval) {
+        timeReference = (remaining: max(totalDistance - lastTravelled, 0), time: time)
     }
 
     func update(with location: CLLocation) -> RouteProgress {
@@ -171,18 +187,26 @@ final class GuidanceEngine {
         let stepIndex = currentStepIndex(travelled: travelled)
         let stepEnd = cumulativeDistances[route.stepEndIndices[stepIndex]]
 
-        // 残り時間は残距離に比例させる。MKRoute は step ごとの所要時間を返さないため、
-        // これが MapKit だけで出せる最良の近似になる。
-        let ratio = totalDistance > 0 ? remaining / totalDistance : 0
-
         return RouteProgress(stepIndex: stepIndex,
                              distanceToNextManeuver: max(stepEnd - travelled, 0),
                              distanceRemaining: remaining,
-                             timeRemaining: route.expectedTravelTime * ratio,
+                             timeRemaining: timeRemaining(at: remaining),
                              snappedCoordinate: coordinate,
                              distanceFromRoute: distanceFromRoute,
                              isOffRoute: isOffRoute,
                              hasArrived: canArrive && remaining <= arrivalThreshold)
+    }
+
+    /// 残り時間。**測り直した基準点があればそこから、無ければ出発時の見積もりを按分する。**
+    ///
+    /// どちらも残距離への比例で、違うのは何を基準に比例させるか。MKRoute は step ごとの
+    /// 所要時間を返さないので、比例以上のことは MapKit だけではできない。
+    private func timeRemaining(at remaining: CLLocationDistance) -> TimeInterval {
+        if let timeReference, timeReference.remaining > 0 {
+            return timeReference.time * (remaining / timeReference.remaining)
+        }
+        guard totalDistance > 0 else { return 0 }
+        return route.expectedTravelTime * (remaining / totalDistance)
     }
 
     /// 経路の始点から `travelled` メートル進んだ地点。

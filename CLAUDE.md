@@ -260,6 +260,15 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 
 1. **step ごとの所要時間を返さない** → 経路全体の平均速度で距離按分している
    （`GuidanceEngine.update` と `CarPlayCoordinator.estimatedTime` の 2 か所）。
+   **按分の基準は出発時の見積もりのままにしない。** そのままだと渋滞に入っても
+   到着予定が動かず、運転者がいちばん見る数字がいちばん当たらなくなる。
+   `NavigationController.refreshTravelTimeIfNeeded` が 3 分おきに
+   `travelTime(from:via:to:)`（`arrivalDate` を渡さない＝いまの交通量）で測り直し、
+   `GuidanceEngine.applyMeasuredTimeRemaining` が基準点を置き直す。以降はそこからの
+   距離比で減る。**動かすのは数字だけで、経路は差し替えない**（走行中に経路が
+   入れ替わると音声も案内カードも追随できない。`RoutePreferences` を変えても
+   引き直さないのと同じ判断）。**間隔を詰めないこと**。経由地があると区間の数だけ
+   `MKDirections` を投げるので、引き直しと同じ重さの問い合わせが走り続ける。
 2. **maneuver type（曲がる向きの列挙）を返さない** → `ManeuverKind` が
    「右折します」等の**指示文の文言マッチ**で推測する。日英どちらも見る。
    ルールは上から順に評価するため、長い語（「斜め右」）を短い語（「右」）より必ず先に置く。

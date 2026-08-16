@@ -114,6 +114,14 @@ protocol RouteProviding: AnyObject {
     func travelTime(from origin: CLLocationCoordinate2D,
                     to destination: Place,
                     arrivingBy date: Date) async throws -> TimeInterval
+
+    /// **いま出発した場合の**所要時間。案内中に到着予定を測り直すために使う。
+    ///
+    /// `routes` と違って経路の形は返さない。走行中に経路そのものを差し替えると音声も
+    /// 案内カードも追随できないので、**動かしてよいのは数字だけ**。
+    func travelTime(from origin: CLLocationCoordinate2D,
+                    via waypoints: [Place],
+                    to destination: Place) async throws -> TimeInterval
 }
 
 final class MapKitRouteProvider: RouteProviding {
@@ -159,6 +167,26 @@ final class MapKitRouteProvider: RouteProviding {
         let response = try await MKDirections(request: request).calculate()
         guard let route = response.routes.first else { throw RouteError.noRouteFound }
         return route.expectedTravelTime
+    }
+
+    func travelTime(from origin: CLLocationCoordinate2D,
+                    via waypoints: [Place],
+                    to destination: Place) async throws -> TimeInterval {
+        // `arrivalDate` を渡さないので、いまの交通量で計算される。測り直しの狙いはそこ。
+        var source = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude),
+                               address: nil)
+        var total: TimeInterval = 0
+
+        // 経由地があると区間の数だけ問い合わせが要る。呼ぶ間隔はそれを前提に決めること
+        // （`NavigationController.travelTimeRefreshInterval`）。
+        for place in waypoints + [destination] {
+            guard let leg = try await legs(from: source, to: place.mapItem, alternates: false).first else {
+                throw RouteError.noRouteFound
+            }
+            total += leg.expectedTravelTime
+            source = place.mapItem
+        }
+        return total
     }
 
     private func legs(from source: MKMapItem,

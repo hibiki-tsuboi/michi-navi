@@ -76,6 +76,10 @@ final class NavigationController: ObservableObject {
     /// 直前に引き直した地点。次を投げるまでに動くべき距離をここから測る。
     private var lastRerouteOrigin: CLLocation?
 
+    /// 到着予定を最後に測り直した時刻。
+    private var lastTravelTimeRefresh: Date?
+    private var isRefreshingTravelTime = false
+
     private init() {
         location.$location
             .compactMap { $0 }
@@ -227,6 +231,8 @@ final class NavigationController: ObservableObject {
         phase = .navigating(route)
         location.setNavigating(true)
         startDeadReckoning()
+        // 引いたばかりの経路には出発時の見積もりが入っているので、すぐには測り直さない。
+        lastTravelTimeRefresh = Date()
         NavigationLog.navigationStarted(steps: route.steps.count, distance: route.distance)
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
@@ -260,6 +266,8 @@ final class NavigationController: ObservableObject {
         lastRerouteFinished = nil
         rerouteFailures = 0
         lastRerouteOrigin = nil
+        isRefreshingTravelTime = false
+        lastTravelTimeRefresh = nil
         phase = .idle
         location.setNavigating(false)
     }
@@ -291,7 +299,50 @@ final class NavigationController: ObservableObject {
         }
 
         announceIfNeeded(on: route, stepIndex: updated.stepIndex)
+        refreshTravelTimeIfNeeded(on: route)
     }
+
+    // MARK: - 到着予定の測り直し
+
+    /// 残り時間を交通状況で測り直す。
+    ///
+    /// `GuidanceEngine` の残り時間は残距離への比例でしか出せない（MKRoute が step ごとの
+    /// 所要時間を返さない）。基準を出発時の見積もりのままにすると、**渋滞に入っても
+    /// 数字が動かない**。運転者がいちばん見る数字なので、時々測り直して基準を置き直す。
+    ///
+    /// **経路そのものは差し替えない。** 走行中に経路が入れ替わると音声も案内カードも
+    /// 追随できないというのは、`RoutePreferences` を変えても引き直さないのと同じ判断。
+    /// 動かすのは数字だけ。
+    private func refreshTravelTimeIfNeeded(on route: NavRoute) {
+        // 引き直している最中は測らない。どのみち経路が入れ替われば基準ごと作り直しになる。
+        guard !isRefreshingTravelTime, !isRerouting else { return }
+        if let lastTravelTimeRefresh,
+           Date().timeIntervalSince(lastTravelTimeRefresh) < Self.travelTimeRefreshInterval { return }
+        guard let origin = location.location?.coordinate else { return }
+
+        isRefreshingTravelTime = true
+        Task {
+            defer {
+                isRefreshingTravelTime = false
+                lastTravelTimeRefresh = Date()
+            }
+
+            guard let time = try? await routeProvider.travelTime(from: origin,
+                                                                 via: remainingWaypoints(of: route),
+                                                                 to: route.destination) else { return }
+            // 待っているあいだに引き直しが挟まっていたら、測った値は前の経路のもの。捨てる。
+            guard case let .navigating(current) = phase, current.id == route.id else { return }
+            guidance?.applyMeasuredTimeRemaining(time)
+        }
+    }
+
+    /// 測り直す間隔。
+    ///
+    /// **短くしないこと**。経由地があると区間の数だけ `MKDirections` を投げるので、
+    /// ここを詰めると引き直しと同じ重さの問い合わせを走り続けることになる
+    /// （`SearchService.alongRoute` の検索点を増やすなという話と同じ枠）。
+    /// 混み具合は分単位でしか変わらないので、これで足りる。
+    private static let travelTimeRefreshInterval: TimeInterval = 180
 
     private func announceIfNeeded(on route: NavRoute, stepIndex: Int) {
         guard announcedStepIndex != stepIndex else { return }

@@ -527,7 +527,7 @@ final class CarPlayCoordinator: NSObject {
         // ナビゲーションバーは左右 2 つずつが上限。マップボタンは 4 つで埋まっている
         // （しかもパン UI に入ると 2 つ落ちる）ので、音声はこちらへ置く。
         mapTemplate.leadingNavigationBarButtons = [voiceButton, overviewButton]
-        mapTemplate.trailingNavigationBarButtons = [endNavigationButton]
+        mapTemplate.trailingNavigationBarButtons = [repeatButton, endNavigationButton]
     }
 
     private var navigatingMapButtons: [CPMapButton] {
@@ -558,6 +558,14 @@ final class CarPlayCoordinator: NSObject {
         CPBarButton(title: "案内終了") { [weak self] _ in
             self?.cancelSession()
             self?.navigation.cancelNavigation()
+        }
+    }
+
+    /// いまの指示をもう一度読ませる。案内中だけ出す。
+    /// 聞き逃しは走行中にいちばん起きることなのに、直す手段が無かった。
+    private var repeatButton: CPBarButton {
+        CPBarButton(image: UIImage(systemName: "speaker.wave.2.fill") ?? UIImage()) { _ in
+            VoiceGuidance.shared.repeatCurrentGuidance()
         }
     }
 

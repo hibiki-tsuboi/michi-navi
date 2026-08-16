@@ -36,8 +36,9 @@ enum VoicePrompt: Equatable {
 final class VoicePromptScheduler {
     /// 手前から予告する距離。長い区間ほど早い段階から知らせる。
     private let thresholds: [CLLocationDistance] = [1000, 500, 200]
-    /// 曲がる直前の「まもなく」。
-    private let imminentThreshold: CLLocationDistance = 60
+    /// 曲がる直前の「まもなく」。読み直し（`VoiceGuidance.repeatCurrentGuidance`）も
+    /// 同じ値で言い分けるので `static`。
+    static let imminentThreshold: CLLocationDistance = 60
     /// 区間がしきい値に対して十分長いときだけ予告する。
     /// 300m しかない区間で「1キロ先を右折」と言わせないための比率。
     private let minimumStepRatio: Double = 1.4
@@ -72,8 +73,8 @@ final class VoicePromptScheduler {
                              : .start(instruction: step.instruction)
         }
 
-        if remaining <= imminentThreshold {
-            guard claim(stepIndex: progress.stepIndex, threshold: imminentThreshold) else { return nil }
+        if remaining <= Self.imminentThreshold {
+            guard claim(stepIndex: progress.stepIndex, threshold: Self.imminentThreshold) else { return nil }
             return .maneuver(instruction: step.instruction, distance: nil)
         }
 

@@ -60,6 +60,27 @@ final class VoiceGuidance: NSObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - 読み直し
+
+    /// いまの指示をもう一度読む。
+    ///
+    /// **前に読んだ文をなぞらない**。聞き逃したときに知りたいのは「いまどれだけ手前か」で、
+    /// 30 秒前に読んだ「500メートル先」をもう一度言われても役に立たない。
+    /// いまの残り距離で作り直す。
+    ///
+    /// `VoicePromptScheduler` は通さない。あちらは「1 回だけ読む」ための記録を持っており、
+    /// 通すと読み直しが済みとして記録されて**本来の予告が消える**。
+    func repeatCurrentGuidance() {
+        guard case let .navigating(route) = navigation.phase,
+              let progress = navigation.progress,
+              route.steps.indices.contains(progress.stepIndex) else { return }
+
+        let instruction = route.steps[progress.stepIndex].instruction
+        let remaining = progress.distanceToNextManeuver
+        speak(.maneuver(instruction: instruction,
+                        distance: remaining <= VoicePromptScheduler.imminentThreshold ? nil : remaining))
+    }
+
     // MARK: - 音声入力への譲り
 
     /// 聞き取りのあいだ読み上げを止める。

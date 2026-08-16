@@ -67,8 +67,16 @@ struct ContentView: View {
     @ViewBuilder
     private var topBar: some View {
         if case let .navigating(route) = navigation.phase {
-            ManeuverBanner(route: route, progress: navigation.progress)
-                .padding(.horizontal)
+            // バナー自体を読み直しのボタンにする。運転中に押す先は大きいほどよく、
+            // ここは画面でいちばん大きい要素なので、専用のボタンを足すより当てやすい。
+            Button {
+                VoiceGuidance.shared.repeatCurrentGuidance()
+            } label: {
+                ManeuverBanner(route: route, progress: navigation.progress)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("案内をもう一度読む")
+            .padding(.horizontal)
         } else {
             Button {
                 isSearchPresented = true

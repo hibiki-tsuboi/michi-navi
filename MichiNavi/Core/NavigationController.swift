@@ -59,6 +59,11 @@ final class NavigationController: ObservableObject {
     private var routingTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
 
+    /// 最後に本物の測位を受け取った時刻。途切れの判定に使う。
+    private var lastFix: Date?
+    /// 測位が途切れているあいだ進捗を進める時計。案内中だけ動く。
+    private var deadReckoningTimer: Timer?
+
     /// リルート計算がいま走っているか。何度も計算を投げないためだけのフラグで、
     /// 公開している `isRerouting` とは寿命が違う（失敗すれば即座に下りて再試行できる）。
     private var isCalculatingReroute = false
@@ -207,8 +212,10 @@ final class NavigationController: ObservableObject {
         guidance = GuidanceEngine(route: route)
         announcedStepIndex = nil
         progress = nil
+        lastFix = nil
         phase = .navigating(route)
         location.setNavigating(true)
+        startDeadReckoning()
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
         if let current = location.location { handle(location: current) }
@@ -218,12 +225,24 @@ final class NavigationController: ObservableObject {
         isRerouting = false
     }
 
+    /// 測位が途切れているあいだの推測を回す時計。
+    /// 案内が終わったら必ず止める。止めないと `guidance` を掴んだまま回り続ける。
+    private func startDeadReckoning() {
+        deadReckoningTimer?.invalidate()
+        deadReckoningTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.advanceWhileWaitingForFix() }
+        }
+    }
+
     func cancelNavigation() {
         routingTask?.cancel()
         routingTask = nil
         guidance = nil
         announcedStepIndex = nil
         progress = nil
+        lastFix = nil
+        deadReckoningTimer?.invalidate()
+        deadReckoningTimer = nil
         isCalculatingReroute = false
         isRerouting = false
         lastRerouteFinished = nil
@@ -237,6 +256,7 @@ final class NavigationController: ObservableObject {
     private func handle(location current: CLLocation) {
         guard case let .navigating(route) = phase, let guidance else { return }
 
+        lastFix = Date()
         let updated = guidance.update(with: current)
         progress = updated
 
@@ -254,12 +274,36 @@ final class NavigationController: ObservableObject {
             return
         }
 
-        if announcedStepIndex != updated.stepIndex {
-            let previous = announcedStepIndex
-            announcedStepIndex = updated.stepIndex
-            notifyWaypointsPassed(on: route, from: previous, to: updated.stepIndex)
-            maneuverChanged.send((route: route, stepIndex: updated.stepIndex))
-        }
+        announceIfNeeded(on: route, stepIndex: updated.stepIndex)
+    }
+
+    private func announceIfNeeded(on route: NavRoute, stepIndex: Int) {
+        guard announcedStepIndex != stepIndex else { return }
+        let previous = announcedStepIndex
+        announcedStepIndex = stepIndex
+        notifyWaypointsPassed(on: route, from: previous, to: stepIndex)
+        maneuverChanged.send((route: route, stepIndex: stepIndex))
+    }
+
+    // MARK: - 測位が途切れているあいだ
+
+    /// 測位が来なくなってからこれだけ経ったら、推測で進める。
+    /// 1 秒ごとに来る更新が 2 回続けて落ちた、という程度の間合い。
+    private static let deadReckoningDelay: TimeInterval = 3
+
+    /// トンネルなどで測位が途切れているあいだ、最後の速度で経路上を進める。
+    ///
+    /// **リルートも到着もここからは起こさない**（`GuidanceEngine.extrapolate` が
+    /// どちらも判定しない）。動かしているのは表示と、次の指示を出す時刻だけ。
+    private func advanceWhileWaitingForFix() {
+        guard case let .navigating(route) = phase, let guidance, let lastFix else { return }
+
+        let elapsed = Date().timeIntervalSince(lastFix)
+        guard elapsed >= Self.deadReckoningDelay,
+              let updated = guidance.extrapolate(elapsed: elapsed) else { return }
+
+        progress = updated
+        announceIfNeeded(on: route, stepIndex: updated.stepIndex)
     }
 
     /// 区間が進んだ間にあった経由地を、通過したものとして知らせる。

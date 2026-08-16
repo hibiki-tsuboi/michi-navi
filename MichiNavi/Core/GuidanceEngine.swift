@@ -46,6 +46,12 @@ final class GuidanceEngine {
     private var lastSegmentIndex = 0
     private var offRouteStreak = 0
 
+    /// 最後の測位で経路上をどこまで進んでいたか。測位が途切れたときの推測の起点。
+    private var lastTravelled: CLLocationDistance = 0
+    /// 最後の測位での速度（m/s）。`CLLocation.speed` は取れないとき負を返すので、
+    /// そのときは経路全体の平均速度で代える。
+    private var lastSpeed: CLLocationSpeed = 0
+
     init(route: NavRoute) {
         self.route = route
         points = route.coordinates.map { MKMapPoint($0) }
@@ -75,7 +81,6 @@ final class GuidanceEngine {
         lastSegmentIndex = match.segmentIndex
 
         let travelled = cumulativeDistances[match.segmentIndex] + match.distanceIntoSegment
-        let remaining = max(totalDistance - travelled, 0)
 
         // 逸脱判定。1 回外れただけでは切り替えず、連続で外れたときだけ確定させる。
         //
@@ -89,6 +94,45 @@ final class GuidanceEngine {
             offRouteStreak += 1
         }
 
+        lastTravelled = travelled
+        lastSpeed = location.speed >= 0 ? location.speed : averageSpeed
+
+        return progress(travelled: travelled,
+                        snappedTo: match.point.coordinate,
+                        distanceFromRoute: match.lateralDistance,
+                        isOffRoute: offRouteStreak >= offRouteConfirmationCount,
+                        canArrive: true)
+    }
+
+    /// 測位が途切れているあいだ、最後の速度で経路上を進めた進捗を作る。
+    ///
+    /// トンネルの中では GPS が来ない。位置更新のたびに動く作りのままだと、入った瞬間の
+    /// 案内で止まり、出口の分岐に気づけない。実際のカーナビが必ず持っている推測航法の、
+    /// いちばん素朴な形（経路上を等速で進める）を置いてある。
+    ///
+    /// **経路の逸脱と到着はここでは判定しない。** どちらも「実際にどこにいるか」の話で、
+    /// 推測で言い切ってよいものではない。推測でリルートすれば道なりに走っているのに
+    /// 経路が入れ替わり、推測で到着すれば案内がトンネルの中で終わる。
+    ///
+    /// - Parameter elapsed: 最後の測位からの経過時間。
+    func extrapolate(elapsed: TimeInterval) -> RouteProgress? {
+        guard points.count >= 2, lastSpeed > 0, elapsed > 0 else { return nil }
+
+        let travelled = min(lastTravelled + lastSpeed * elapsed, totalDistance)
+        return progress(travelled: travelled,
+                        snappedTo: coordinate(atTravelled: travelled),
+                        distanceFromRoute: 0,
+                        isOffRoute: false,
+                        canArrive: false)
+    }
+
+    /// 経路上の進んだ距離から進捗を組み立てる。実測と推測で共通。
+    private func progress(travelled: CLLocationDistance,
+                          snappedTo coordinate: CLLocationCoordinate2D,
+                          distanceFromRoute: CLLocationDistance,
+                          isOffRoute: Bool,
+                          canArrive: Bool) -> RouteProgress {
+        let remaining = max(totalDistance - travelled, 0)
         let stepIndex = currentStepIndex(travelled: travelled)
         let stepEnd = cumulativeDistances[route.stepEndIndices[stepIndex]]
 
@@ -100,10 +144,30 @@ final class GuidanceEngine {
                              distanceToNextManeuver: max(stepEnd - travelled, 0),
                              distanceRemaining: remaining,
                              timeRemaining: route.expectedTravelTime * ratio,
-                             snappedCoordinate: match.point.coordinate,
-                             distanceFromRoute: match.lateralDistance,
-                             isOffRoute: offRouteStreak >= offRouteConfirmationCount,
-                             hasArrived: remaining <= arrivalThreshold)
+                             snappedCoordinate: coordinate,
+                             distanceFromRoute: distanceFromRoute,
+                             isOffRoute: isOffRoute,
+                             hasArrived: canArrive && remaining <= arrivalThreshold)
+    }
+
+    /// 経路の始点から `travelled` メートル進んだ地点。
+    private func coordinate(atTravelled travelled: CLLocationDistance) -> CLLocationCoordinate2D {
+        guard let index = cumulativeDistances.firstIndex(where: { $0 >= travelled }) else {
+            return points.last?.coordinate ?? route.coordinates[0]
+        }
+        guard index > 0 else { return points[0].coordinate }
+
+        let spanStart = cumulativeDistances[index - 1]
+        let span = cumulativeDistances[index] - spanStart
+        let t = span > 0 ? (travelled - spanStart) / span : 0
+        let a = points[index - 1]
+        let b = points[index]
+        return MKMapPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t).coordinate
+    }
+
+    /// 経路全体の平均速度。`CLLocation.speed` が取れないときの代わり。
+    private var averageSpeed: CLLocationSpeed {
+        route.expectedTravelTime > 0 ? route.distance / route.expectedTravelTime : 0
     }
 
     // MARK: - 経路への吸着

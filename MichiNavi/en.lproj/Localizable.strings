@@ -37,7 +37,6 @@
 "ここへ行く" = "Go here";
 "ここまで歩いて戻る" = "Walk back to your car";
 "このままでは届きません" = "You won't make it this far";
-"この先から 1 件えらぶ" = "Pick one up ahead";
 "この先には見つかりませんでした" = "Nothing found up ahead";
 "この先は気温が低く、路面が凍結する恐れがあります" = "It's cold ahead — roads may be icy";
 "この先は雨の予報です" = "Rain is forecast ahead";
@@ -59,7 +58,6 @@
 "カフェ" = "Cafes";
 "カーブが多い" = "More curves";
 "ガソリン" = "Fuel";
-"ガソリン、駐車場、食事など" = "Fuel, parking, food and more";
 "ガソリンスタンド" = "Gas stations";
 "キャンセル" = "Cancel";
 "パン屋" = "Bakeries";
@@ -94,12 +92,12 @@
 "右折が少ない" = "Fewer right turns";
 "右車線" = "Keep right";
 "合流" = "Merge";
-"周辺のカテゴリから" = "Browse nearby categories";
 "周辺をさがす" = "Search nearby";
 "圏外です。電波の届く場所で試してください" = "No signal. Try again where you have coverage";
 "圏外のため経路を引き直せません" = "No signal — can't recalculate the route";
 "場所が特定できませんでした" = "Couldn't pin down that place";
 "完了" = "Done";
+"寄り道" = "Detour";
 "寄り道してみる" = "Take a detour";
 "寄り道できそうな場所が見つかりませんでした" = "Couldn't find anywhere to stop";
 "寄る" = "Stop there";
@@ -165,7 +163,6 @@
 "距離" = "Distance";
 "距離が短い" = "Shortest";
 "車をとめた場所" = "Where you parked";
-"近くから 1 件えらぶ" = "Pick one nearby";
 "近くに見つかりませんでした" = "Nothing found nearby";
 "近くの駐車場" = "Parking nearby";
 "運転を始めて%lld時間になります。そろそろ休憩しませんか" = "You've been driving for %lld hours. Time for a break?";

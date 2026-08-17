@@ -117,10 +117,6 @@ final class CarPlayDestinationBrowser: NSObject {
                                           sectionIndexTitle: nil))
         }
 
-        sections.append(CPListSection(items: [categoriesItem, detourItem],
-                                      header: String(localized: "さがす"),
-                                      sectionIndexTitle: nil))
-
         sections.append(CPListSection(items: [avoidItem(\.avoidsTolls, title: String(localized: "有料道路を避ける")),
                                               avoidItem(\.avoidsHighways, title: String(localized: "高速道路を避ける")),
                                               avoidItem(\.prefersWinding, title: String(localized: "曲がりくねった道を優先"),
@@ -129,12 +125,40 @@ final class CarPlayDestinationBrowser: NSObject {
                                       sectionIndexTitle: nil))
 
         let template = CPListTemplate(title: String(localized: "目的地"), sections: sections)
+        template.headerGridButtons = searchGridButtons
         // キーボードが塞がれているときに検索ボタンを出すと、押しても何も起きない
         // 導線になってしまう。そのときは最初から出さない。
         if !isKeyboardLimited {
             template.trailingNavigationBarButtons = [searchButton]
         }
         return template
+    }
+
+    /// リストのいちばん上に出す「さがす」の 2 つ（iOS 26.0 の `headerGridButtons`）。
+    ///
+    /// **リストの底からヘッダへ引き上げたもの。** 行き先の並びは押される回数の多い順に
+    /// 決まっていて（ピン → この時間 → お気に入り → 履歴）、探す手段はそのさらに下に
+    /// しか置けなかった。**走行中にスクロールして辿る場所ではない**ので、行数を持たない
+    /// ヘッダへ出す。行き先の並びはそのまま動かさずに済む。
+    ///
+    /// **空配列を代入しない。** Dashboard の `shortcutButtons` が 0 件で落ちる前例が
+    /// あるので、0 件になりうる作りにしない（ここは常に 2 件）。
+    private var searchGridButtons: [CPGridButton] {
+        let buttons = [
+            CPGridButton(titleVariants: [isNavigating ? String(localized: "ルート沿いをさがす")
+                                                      : String(localized: "周辺をさがす"),
+                                         String(localized: "さがす")],
+                         image: Self.gridImage(named: "location.magnifyingglass")) { [weak self] _ in
+                self?.presentCategories()
+            },
+            // 乱数で 1 件えらぶので賽の目。ナビゲーションバーの「検索」と紛れないよう、
+            // 虫めがねはカテゴリのほうにだけ持たせる。
+            CPGridButton(titleVariants: [String(localized: "寄り道してみる"), String(localized: "寄り道")],
+                         image: Self.gridImage(named: "dice")) { [weak self] _ in
+                self?.suggestDetour()
+            },
+        ]
+        return Array(buttons.prefix(CPListTemplate.maximumHeaderGridButtonCount))
     }
 
     /// `titled` を渡すと、地点の名前ではなくその名札を主役にする（「自宅」＋ 地点名）。
@@ -190,16 +214,6 @@ final class CarPlayDestinationBrowser: NSObject {
     ///
     /// 押した先で一覧を出さず、いきなり 1 件を見せる。候補を並べると結局いつもの
     /// 選び方に戻ってしまい、乱数に任せた意味が無くなる。
-    private var detourItem: CPListItem {
-        let item = CPListItem(text: String(localized: "寄り道してみる"),
-                              detailText: isNavigating ? String(localized: "この先から 1 件えらぶ") : String(localized: "近くから 1 件えらぶ"))
-        item.handler = { [weak self] _, completion in
-            self?.suggestDetour()
-            completion()
-        }
-        return item
-    }
-
     private func suggestDetour() {
         guard let coordinate = location.location?.coordinate else {
             onError(String(localized: "現在地が取得できていません"))
@@ -243,20 +257,6 @@ final class CarPlayDestinationBrowser: NSObject {
                 },
             ])
         interfaceController.presentTemplate(sheet, animated: true, completion: nil)
-    }
-
-    private var categoriesItem: CPListItem {
-        // accessoryType で下の階層があることを示す（ガイド p.44）。
-        let item = CPListItem(text: String(localized: "周辺のカテゴリから"),
-                              detailText: String(localized: "ガソリン、駐車場、食事など"),
-                              image: nil,
-                              accessoryImage: nil,
-                              accessoryType: .disclosureIndicator)
-        item.handler = { [weak self] _, completion in
-            self?.presentCategories()
-            completion()
-        }
-        return item
     }
 
     /// 案内していなければそのまま目的地にする。

@@ -1153,9 +1153,19 @@ final class CarPlayCoordinator: NSObject {
 
     private var overviewButton: CPBarButton {
         CPBarButton(title: String(localized: "全体表示")) { [weak self] _ in
-            guard let route = self?.navigation.currentRoute else { return }
-            self?.mapViewController.showRouteOverview(route)
+            self?.showOverview()
         }
+    }
+
+    /// 全体表示に当て込む経路。**提示中は見ている候補、それ以外は走っている経路**。
+    ///
+    /// `currentRoute` だけを見ると、行き先を選んでいるあいだ（`.previewing`）は nil なので
+    /// **声で「全体表示」と言っても何も起きない**。マイクは提示中も出しているので、
+    /// 押せるのに何も起きない導線になる。候補を先に見るのは、そのとき地図に描いて
+    /// あるのが候補のほうだから（`apply(phase:)` の `.previewing`）。
+    private func showOverview() {
+        guard let route = previewedRoute ?? navigation.activeRoute else { return }
+        mapViewController.showRouteOverview(route)
     }
 
     private var panButton: CPMapButton {
@@ -1216,8 +1226,7 @@ final class CarPlayCoordinator: NSObject {
         case .repeatGuidance:
             VoiceGuidance.shared.repeatCurrentGuidance()
         case .overview:
-            guard let route = navigation.currentRoute else { return }
-            mapViewController.showRouteOverview(route)
+            showOverview()
         case .destination:
             break
         }

@@ -656,9 +656,11 @@ final class CarPlayCoordinator: NSObject {
         maneuver.trafficSide = DrivingSideLocator.shared.current.carPlaySide
         // 曲がった先の道路名。**車のメーター・HUD 側にしか出ない**（案内カードには
         // 指示文がそのまま出る）ので、拾えなければ渡さないだけでよい。
-        if let road = RoadName.first(in: step.instruction) {
-            maneuver.roadFollowingManeuverVariants = [road]
-        }
+        // 裏返すと**こちらの画面をいくら見ても当たっているか分からない**ので、
+        // 拾えた・拾えなかったの両方をログに残す。
+        let road = RoadName.first(in: step.instruction)
+        if let road { maneuver.roadFollowingManeuverVariants = [road] }
+        CarPlayVehicleLog.roadName(road, from: step.instruction)
         maneuver.initialTravelEstimates = CPTravelEstimates(
             distanceRemaining: .meters(distance),
             timeRemaining: estimatedTime(forDistance: step.distance, on: route))

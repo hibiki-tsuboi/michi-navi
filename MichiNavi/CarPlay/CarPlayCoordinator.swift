@@ -166,7 +166,7 @@ final class CarPlayCoordinator: NSObject {
         // の順に優先される。前 2 つを渡していないのに赤いので、赤は既定そのもの。
         // 曲がる指示は警告ではないので、経路の線と同じ青に揃える。
         // 渡した色は `pauseTrip` のカードにも波及するため、あちらは色を明示して切り離す
-        // （[replaceRoute] と [apply(isRerouting:)]）。
+        // （[replaceRoute] と [refreshTripPause]）。
         mapTemplate.guidanceBackgroundColor = .systemBlue
         applyIdleButtons()
         interfaceController.setRootTemplate(mapTemplate, animated: true, completion: nil)
@@ -239,9 +239,18 @@ final class CarPlayCoordinator: NSObject {
             .sink { [weak self] in self?.updateManeuvers(route: $0.route, stepIndex: $0.stepIndex) }
             .store(in: &cancellables)
 
+        // **流れてきた値をそのまま渡す。** `@Published` は `willSet` で流れるので、
+        // ここで `navigation.isRerouting` を読み直すと必ず 1 つ前の値になる
+        // （`NavigationController` が `lastRouteChange` を `phase` より先に置いて
+        // いるのと同じ話）。読み直すと、立ち上がりでも立ち下がりでも判断が
+        // 1 つずれて `pauseTrip` / `resumeTrip` が出そこねる。
         navigation.$isRerouting
             .removeDuplicates()
-            .sink { [weak self] _ in self?.refreshTripPause() }
+            .sink { [weak self] isRerouting in
+                guard let self else { return }
+                // `progress` は自分の `willSet` の外なので、こちらは読んでよい。
+                refreshTripPause(isRerouting: isRerouting, progress: navigation.progress)
+            }
             .store(in: &cancellables)
 
         navigation.arrived
@@ -290,6 +299,13 @@ final class CarPlayCoordinator: NSObject {
 
         switch phase {
         case .idle:
+            // **セッションが残っていたら畳む。** iPhone の画面と Siri は
+            // `NavigationController.cancelNavigation()` を直に呼ぶので、CarPlay 側の
+            // 案内終了ボタンと違って `cancelSession()` を通らない。畳まないと
+            // `pauseTrip` のカードが待機画面に残り、進捗も経路も流れてこないので
+            // 二度と下ろせない。次の案内も `beginSessionIfNeeded` の二重開始ガードで
+            // この古いセッションを使い回してしまう。
+            if navigationSession != nil { cancelSession() }
             previewedRoute = nil
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: nil)
@@ -333,6 +349,13 @@ final class CarPlayCoordinator: NSObject {
     private func apply(progress: RouteProgress) {
         guard let trip = currentTrip, let route = navigation.currentRoute else { return }
 
+        // **止めるかどうかを先に決める。** ここは `$progress` の sink の中なので
+        // `navigation.progress` はまだ 1 つ前の値。**受け取った `progress` を渡す**
+        // （読み直すと、経路に乗ったかの判断が毎回 1 測位ぶん遅れる）。
+        // 先に呼ぶのは、再開したときに `activeManeuver` が差し替わるため。
+        // 下の見積もりは差し替わったあとのものへ渡したい。
+        refreshTripPause(isRerouting: navigation.isRerouting, progress: progress)
+
         // 残り時間の色で、見込みからどれだけ遅れているかを示す（`TrafficCondition`）。
         // **測り直すまでは `.default`**。3 分おきの測り直しが 1 度も走っていないうちに
         // 色を出すと、根拠の無い緑を出発直後に見せることになる。
@@ -347,11 +370,15 @@ final class CarPlayCoordinator: NSObject {
                 CPTravelEstimates(distanceRemaining: .meters(progress.distanceToNextManeuver),
                                   timeRemaining: timeToManeuver),
                 for: activeManeuver)
-            navigationSession?.maneuverState = maneuverState(forDistance: progress.distanceToNextManeuver)
+            // **まだ経路に乗っていないあいだは車を急かさない。** `GuidanceEngine` は
+            // 経路へ吸着させるので、駐車場に停まったままでも「次の曲がり角まで 100m」に
+            // なりうる。そのまま送ると、カードが「経路へ進んでください」と出している
+            // 横で、メーターと HUD だけが「いま曲がれ」と言う。**画面には出ない差**
+            // なので、気づけるのは車か `CarPlayVehicleLog` だけ。
+            navigationSession?.maneuverState = pauseReason == .proceedToRoute
+                ? .continue
+                : maneuverState(forDistance: progress.distanceToNextManeuver)
         }
-
-        // 経路に乗ったか（＝「経路へ進む」を出すか）は進捗でしか分からない。
-        refreshTripPause()
     }
 
     // MARK: - ルート提示
@@ -447,7 +474,7 @@ final class CarPlayCoordinator: NSObject {
                           route: route,
                           maneuvers: routeManeuvers,
                           stepIndex: stepIndex,
-                          tripEstimates: tripEstimates(for: route))
+                          tripEstimates: tripEstimates(for: route, progress: navigation.progress))
         }
     }
 
@@ -475,13 +502,17 @@ final class CarPlayCoordinator: NSObject {
     ///
     /// 呼ぶのは進捗と `isRerouting` の両方から。**どちらが動いても desired が変わらなければ
     /// 何もしない**ので、毎秒呼ばれても `pauseTrip` は飛ばない。
-    private func refreshTripPause() {
+    ///
+    /// **判断の材料は必ず引数で受ける。** 呼び元はどちらもその `@Published` 自身の
+    /// sink の中にいて、`@Published` は `willSet` で流れる。プロパティを読み直すと
+    /// 1 つ前の値しか取れず、`pauseTrip` も `resumeTrip` も出そこねる。
+    private func refreshTripPause(isRerouting: Bool, progress: RouteProgress?) {
         guard let navigationSession else { return }
 
         let desired: TripPause?
-        if navigation.isRerouting {
+        if isRerouting {
             desired = .rerouting
-        } else if navigation.progress?.hasJoinedRoute == false {
+        } else if progress?.hasJoinedRoute == false {
             // **進捗が無いうちは止めない。** 測位が来る前に「経路へ進む」を出すと、
             // 経路の上から始めた場合でも一瞬そう見える。
             desired = .proceedToRoute
@@ -491,6 +522,24 @@ final class CarPlayCoordinator: NSObject {
         guard desired != pauseReason else { return }
 
         let previous = pauseReason
+
+        // **`.rerouting` から出るなら、止め直すだけの場合でも先に渡し直す。**
+        // 引き直しが成功していれば経路は入れ替わっているのに、`resumeTrip` を通るのは
+        // この `resume` だけ。止めたまま理由を差し替えると、新しい経路が車へ一度も
+        // 渡らず、ルート共有の区間も捨てた経路のまま固まる（`routeID` が食い違うので
+        // 以降 `updateCurrentSegment` も通らなくなる）。ガイド p.61 の「止めてから
+        // 渡し直す」は、止めっぱなしで理由だけ変わる場合にも要るということ。
+        if desired == nil || previous == .rerouting {
+            // **何から戻ってきたかで理由が変わる。** 引き直しが終わったのなら経路は
+            // 入れ替わっているが、経路に乗っただけなら**何も変わっていない**ので、
+            // 「外れたから引き直した」と車に言ってはいけない。
+            let reason: RouteChangeReason = previous == .rerouting ? .offRoute : .resumed
+            // **渡し直せなかったら記録も動かさない。** ここで `pauseReason` だけ進めると、
+            // 実際は止まったままなのに「止めていない」ことになり、以降 desired が
+            // 一致して何も起きなくなる（オレンジのカードがその案内のあいだ固着する）。
+            guard resume(navigationSession, reason: reason, progress: progress) else { return }
+        }
+
         pauseReason = desired
         switch desired {
         case .rerouting:
@@ -509,31 +558,38 @@ final class CarPlayCoordinator: NSObject {
                                         description: String(localized: "経路へ進んでください"),
                                         turnCardColor: Self.pausedCardColor)
         case nil:
-            // **何から戻ってきたかで理由が変わる。** 引き直しが終わったのなら経路は
-            // 入れ替わっているが、経路に乗っただけなら**何も変わっていない**ので、
-            // 「外れたから引き直した」と車に言ってはいけない。
-            resume(navigationSession, reason: previous == .rerouting ? .offRoute : .resumed)
+            break // 上で渡し直し済み。
         }
     }
 
     /// 案内中に経路そのものが入れ替わったことを CarPlay と車へ伝える。
     ///
-    /// 立ち寄り先が増えたときに通る。逸脱による引き直しは `apply(isRerouting:)` が
-    /// 止めるところと再開するところの両方を担うので、ここには来ない。
+    /// 立ち寄り先が増えたときに通る。逸脱による引き直しは `refreshTripPause` が
+    /// 止めるところと再開するところの両方を担うので、そちらでは呼ばない。
     ///
     /// **素通しで `resumeTrip` を投げないこと。** 経路を変えるときは一度 `pauseTrip` で
     /// 止めてから渡し直す、というのがガイド p.61 の手順で、止めずに渡すと車側が
     /// 前の経路を掴んだままになる。
     private func replaceRoute(reason: RouteChangeReason) {
         guard let navigationSession else { return }
-        navigationSession.pauseTrip(for: .rerouting,
-                                    description: String(localized: "ルートを引き直し中"),
-                                    turnCardColor: Self.pausedCardColor)
-        resume(navigationSession, reason: reason)
-        // ここは止めて即座に戻す 1 往復なので、**戻したことを記録側にも反映する**。
-        // 残すと、まだ経路に乗っていない場合に `refreshTripPause` が
-        // 「もう止めてある」と判断して「経路へ進む」を出し直せなくなる。
+
+        // **すでに止まっているなら重ねて止めない。** 理由は違っても「渡し直す前に
+        // 止まっている」という p.61 の条件は満たしている。出し直すと、止めている
+        // 理由が一瞬だけ引き直しに化けて見える（「経路へ進む」の最中に立ち寄り先を
+        // 足したときがこれにあたる）。
+        if pauseReason == nil {
+            navigationSession.pauseTrip(for: .rerouting,
+                                        description: String(localized: "ルートを引き直し中"),
+                                        turnCardColor: Self.pausedCardColor)
+            pauseReason = .rerouting
+        }
+        // ここは `maneuverChanged` の中なので `progress` は確定済み。読んでよい。
+        guard resume(navigationSession, reason: reason, progress: navigation.progress) else { return }
         pauseReason = nil
+
+        // **止める事情が残っていれば出し直す。** 渡し直しは 1 往復で終わるが、
+        // まだ経路に乗っていないという事情はそれで消えるものではない。
+        refreshTripPause(isRerouting: navigation.isRerouting, progress: navigation.progress)
     }
 
     /// 止まっているあいだのカードの色。
@@ -550,13 +606,24 @@ final class CarPlayCoordinator: NSObject {
     /// 新しい方に寄せているのは経由地の表現力のためではなく、**ルート共有が
     /// そちらでしか成立しない**ため。車へ経路を預けるには区間を積んでおく必要がある。
     /// 26.0〜26.3 では区間を作れないので、古い方をそのまま残してある。
-    private func resume(_ session: CPNavigationSession, reason: RouteChangeReason) {
-        // 経路の差し替えは maneuverChanged が先に済ませているので、ここでは
-        // 出来上がっている routeManeuvers をそのまま渡す。
-        guard let route = navigation.currentRoute, !routeManeuvers.isEmpty else { return }
-        let stepIndex = min(navigation.progress?.stepIndex ?? 0, routeManeuvers.count - 1)
+    ///
+    /// **`routeManeuvers` がいまの経路のものか照合してから渡す。** `NavigationController`
+    /// は `progress` を `maneuverChanged` より先に流すので、進捗から呼ばれるこの道には
+    /// 「経路はもう新しいのに `CPManeuver` はまだ古い」という一瞬が必ずある。そこで
+    /// 渡すと、新しい座標列に捨てた経路の指示を詰めた区間を車へ送ることになる
+    /// （`stepCount` の `min` がクラッシュは防ぐが、黙って切り詰めるだけ）。
+    ///
+    /// 渡せなかったことを呼び元が知る必要があるので `Bool` を返す。止めた記録を
+    /// 進めてよいかがこれで決まる。
+    private func resume(_ session: CPNavigationSession,
+                        reason: RouteChangeReason,
+                        progress: RouteProgress?) -> Bool {
+        guard let route = navigation.currentRoute,
+              !routeManeuvers.isEmpty,
+              maneuverRouteID == route.id else { return false }
+        let stepIndex = min(progress?.stepIndex ?? 0, routeManeuvers.count - 1)
         let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
-        let estimates = tripEstimates(for: route)
+        let estimates = tripEstimates(for: route, progress: progress)
 
         if #available(iOS 26.4, *), let routeSharing {
             routeSharing.resume(session: session,
@@ -580,13 +647,17 @@ final class CarPlayCoordinator: NSObject {
         session.currentLaneGuidance = nil
         session.upcomingManeuvers = upcoming
         activeManeuver = upcoming.first
+        return true
     }
 
     /// 目的地までの残りの見積もり。進捗が出ていなければ経路全体の値を使う。
-    private func tripEstimates(for route: NavRoute) -> CPTravelEstimates {
+    ///
+    /// **進捗は引数で受ける。** `@Published` の sink の中から呼ばれる道があり、
+    /// そこで `navigation.progress` を読むと 1 測位ぶん古い数字を車へ渡すことになる。
+    private func tripEstimates(for route: NavRoute, progress: RouteProgress?) -> CPTravelEstimates {
         CPTravelEstimates(
-            distanceRemaining: .meters(navigation.progress?.distanceRemaining ?? route.distance),
-            timeRemaining: navigation.progress?.timeRemaining ?? route.expectedTravelTime)
+            distanceRemaining: .meters(progress?.distanceRemaining ?? route.distance),
+            timeRemaining: progress?.timeRemaining ?? route.expectedTravelTime)
     }
 
     // MARK: - 案内カード
@@ -599,9 +670,10 @@ final class CarPlayCoordinator: NSObject {
             let hadRoute = maneuverRouteID != nil
             rebuildManeuvers(for: route, stepIndex: stepIndex, isNewSession: false)
 
-            // 逸脱による引き直しなら、止めたのも再開するのも `apply(isRerouting:)` の
-            // 仕事なので触らない。止まっていないのに経路が変わったということは、
-            // 立ち寄り先が増えた（＝こちらで渡し直す必要がある）ということ。
+            // 逸脱による引き直しなら、止めたのも再開するのも `refreshTripPause` の
+            // 仕事なので触らない。**見るのは「止まっているか」ではなく「引き直し中か」**。
+            // 「経路へ進む」で止めているあいだに立ち寄り先が増えることはあり、
+            // そのときは渡し直しが要る。
             if hadRoute, pauseReason != .rerouting { replaceRoute(reason: .waypointChanged) }
         }
         presentNotice(of: route, at: stepIndex)

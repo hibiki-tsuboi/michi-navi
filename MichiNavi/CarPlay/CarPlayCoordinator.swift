@@ -38,6 +38,9 @@ final class CarPlayCoordinator: NSObject {
     private var routeManeuvers: [CPManeuver] = []
     /// `routeManeuvers` がどの経路のものか。リルートで作り直す判断に使う。
     private var maneuverRouteID: UUID?
+    /// 各 step を走っているあいだの道路名。`routeManeuvers` と同じ添字で並べる。
+    /// 経路を組み立てるときに 1 度だけ作る（step が変わるたびに拾い直さない）。
+    private var routeRoadNames: [[String]] = []
     /// 背面のときのバナーへ、最後に通した指示と距離の表記。**同じ文字を出し直させない**
     /// ための記録で、画面に出ているものとは別（前面ではバナーそのものが出ない）。
     private var notifiedManeuver: ObjectIdentifier?
@@ -194,6 +197,7 @@ final class CarPlayCoordinator: NSObject {
         currentTrip = nil
         activeManeuver = nil
         routeManeuvers = []
+        routeRoadNames = []
         maneuverRouteID = nil
         routeSharingBox = nil
         isTripPaused = false
@@ -584,9 +588,28 @@ final class CarPlayCoordinator: NSObject {
                          distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
         }
         maneuverRouteID = route.id
+        routeRoadNames = Self.roadNames(on: route)
 
         if isNewSession { navigationSession?.add(routeManeuvers) }
         showManeuvers(from: stepIndex)
+    }
+
+    /// 各 step を走っているあいだの道路名を、経路 1 本ぶんまとめて拾う。
+    ///
+    /// **見るのは 1 つ前の step の指示文。** この作りでは `steps[i].instruction` が
+    /// **step i の終わりで行う操作**（「国道156号を右方向」）なので、いま走っている道は
+    /// **ひとつ前の操作で入った道**になる。`roadFollowingManeuverVariants` に渡すものを
+    /// 1 つずらして並べ直しているだけで、拾い方（`RoadName`）は同じ。
+    ///
+    /// **最初の step だけは空になる。** 出発地の道を教えてくれる指示文が無く、
+    /// `MKRoute.name` は経路全体の代表名（先の高速道路の名前が入ることがある）なので、
+    /// いま走っている道として渡すと嘘になる。
+    private static func roadNames(on route: NavRoute) -> [[String]] {
+        route.steps.indices.map { index in
+            guard index > 0,
+                  let name = RoadName.first(in: route.steps[index - 1].instruction) else { return [] }
+            return [name]
+        }
     }
 
     /// 次の指示（と、その次）を CarPlay の案内カードに載せる。
@@ -596,6 +619,12 @@ final class CarPlayCoordinator: NSObject {
 
         let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
         navigationSession?.upcomingManeuvers = upcoming
+        // いま走っている道の名前。**車のメーター・HUD にしか出ない。**
+        // 拾えなかった step では空にする（前の道の名前を残すと、曲がったあとも
+        // ひとつ前の道を走っていることになる）。
+        navigationSession?.currentRoadNameVariants = routeRoadNames.indices.contains(stepIndex)
+            ? routeRoadNames[stepIndex]
+            : []
         // 指示が切り替わった直後であることを車へ伝える。
         // 以降は距離に応じて apply(progress:) が prepare / execute へ進める。
         navigationSession?.maneuverState = .initial

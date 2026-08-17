@@ -8,6 +8,11 @@ xcuserdata/
 *.xcscmblueprint
 *.xccheckout
 
+# ── JetBrains（IntelliJ 系）のローカル状態 ──
+# ウィンドウ位置・実行構成・インデックスなどマシン固有のもの。xcuserdata と同じ扱い。
+# ビルドは xcodebuild と Xcode で完結するので、共有したい設定はここに無い。
+.idea/
+
 # ── ビルド生成物 ──
 build/
 DerivedData/

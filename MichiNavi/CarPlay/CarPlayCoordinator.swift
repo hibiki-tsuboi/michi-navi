@@ -2,6 +2,13 @@ import CarPlay
 import Combine
 import MapKit
 
+/// `Core/` の `RouteChangeReason` を指すための別名。
+///
+/// `CarPlayCoordinator` の中では同名の入れ子の enum が名前を覆うので、そのままでは
+/// あちらを書けない（同じモジュール内なので修飾子で分ける手も無い）。**ファイルの
+/// 外周では素の名前が `Core/` 側を指す**ので、ここで別名を付けておく。
+private typealias CoreRouteChangeReason = RouteChangeReason
+
 /// CarPlay 画面の司令塔。
 ///
 /// 役割は 2 つだけに絞ってある:
@@ -50,6 +57,12 @@ final class CarPlayCoordinator: NSObject {
     private var routeManeuvers: [CPManeuver] = []
     /// `routeManeuvers` がどの経路のものか。リルートで作り直す判断に使う。
     private var maneuverRouteID: UUID?
+    /// 最後に車へ渡した経路の指紋。**「道が本当に入れ替わったか」はこれで見る。**
+    ///
+    /// `maneuverRouteID` では見分けられない。`NavRoute.id` は生成のたびに変わる UUID で、
+    /// 同じ道を同じ順に曲がる経路でも別物になるため（`NavRoute.signature` と `id` の
+    /// 使い分けは `VoiceGuidance` と同じ話）。
+    private var handedOverSignature: Int?
     /// 各 step を走っているあいだの道路名。`routeManeuvers` と同じ添字で並べる。
     /// 経路を組み立てるときに 1 度だけ作る（step が変わるたびに拾い直さない）。
     private var routeRoadNames: [[String]] = []
@@ -109,19 +122,43 @@ final class CarPlayCoordinator: NSObject {
 
     /// 案内中に経路が入れ替わった理由。`CPRerouteReason`（iOS 26.4）へ変換して車へ渡す。
     /// `CPRerouteReason` をそのまま持ち回ると、26.0 でも通る場所に 26.4 の型が漏れる。
+    ///
+    /// **`Core/` の同名の enum とは別物。** あちらは読み上げの最初のひと言を決めるもので、
+    /// 「止めていたものを戻しただけ」に相当する case を持たない。読み替えは
+    /// [init(_:)] にまとめてある。
     private enum RouteChangeReason {
         /// 経路を外れたので引き直した。
         case offRoute
         /// 立ち寄り先が増減した。
         case waypointChanged
+        /// 利用者が選んで別の道へ切り替えた（渋滞の迂回）。
+        case alternate
         /// 止めていたものを戻しただけで、**経路は変わっていない**（経路に乗った）。
         case resumed
+
+        /// `Core/` 側の理由からの読み替え。
+        ///
+        /// **`.waypointChanged` で固定しないこと。** 渋滞の迂回を受け入れたときに
+        /// 「経由地が変わった」と車へ言うことになり、先進運転支援を積んだ車は
+        /// その前提で経路の変更を解釈する（経由地は 1 つも変わっていない）。
+        ///
+        /// `.started` は本来ここへ来ない（前の経路が無ければ渡し直しにならない）。
+        /// 来たとしても**何も言わない側**に倒しておく。
+        init(_ reason: CoreRouteChangeReason) {
+            switch reason {
+            case .started: self = .resumed
+            case .rerouted: self = .offRoute
+            case .waypointAdded: self = .waypointChanged
+            case .switched: self = .alternate
+            }
+        }
 
         @available(iOS 26.4, *)
         var carPlayReason: CPRerouteReason {
             switch self {
             case .offRoute: .missedTurn
             case .waypointChanged: .waypointModified
+            case .alternate: .alternateRoute
             case .resumed: .unknown
             }
         }
@@ -214,6 +251,7 @@ final class CarPlayCoordinator: NSObject {
         routeManeuvers = []
         routeRoadNames = []
         maneuverRouteID = nil
+        handedOverSignature = nil
         routeSharingBox = nil
         pauseReason = nil
         notifiedManeuver = nil
@@ -297,20 +335,35 @@ final class CarPlayCoordinator: NSObject {
         let entered = lastPhaseKind != kind
         lastPhaseKind = kind
 
+        // **案内から出たら、セッションと `CPTrip` は必ず捨てる。**
+        //
+        // iPhone の画面と Siri は `NavigationController.cancelNavigation()` を直に呼ぶので、
+        // CarPlay 側の案内終了ボタンと違って `cancelSession()` を通らない。畳まないと
+        // `pauseTrip` のカードが待機画面に残り、進捗も経路も流れてこないので二度と下ろせない。
+        //
+        // **`.idle` だけでは足りない。** 案内中に目的地を変えると
+        // `.navigating` → `.calculating` → `.previewing` → `.navigating` と回って
+        // **`.idle` を一度も通らない**（マイク・「目的地を変更」・車からの目的地の 3 経路）。
+        // `beginSessionIfNeeded` は二重開始ガードで早期に返るため、車は前の目的地の
+        // `CPTrip` を掴んだまま走り切ることになる（`CPNavigationSession.trip` と
+        // `CPTrip.destinationWaypoint` は読み取り専用なので、あとから直せない）。
+        // しかも `showTripPreview` が `currentTrip` を新しい行き先で上書きするので、
+        // 毎秒の `mapTemplate.update(_:for:with:)` はセッションを持たない `CPTrip` を
+        // 宛先にし、到着予定と色が更新されなくなる。
+        //
+        // **`navigationSession != nil` で囲わない。** 捨てたルート提示の `currentTrip` は
+        // セッションを持たないまま残り、`.previewing` を通らない次の入口
+        // （Dashboard・Siri・「ここに停める」）がそれを拾って案内を始めてしまう。
+        // `cancelSession()` は nil 安全で冪等。
+        if kind != .navigating { cancelSession() }
+
         switch phase {
         case .idle:
-            // **セッションが残っていたら畳む。** iPhone の画面と Siri は
-            // `NavigationController.cancelNavigation()` を直に呼ぶので、CarPlay 側の
-            // 案内終了ボタンと違って `cancelSession()` を通らない。畳まないと
-            // `pauseTrip` のカードが待機画面に残り、進捗も経路も流れてこないので
-            // 二度と下ろせない。次の案内も `beginSessionIfNeeded` の二重開始ガードで
-            // この古いセッションを使い回してしまう。
-            if navigationSession != nil { cancelSession() }
             previewedRoute = nil
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: nil)
             if entered { recenterMap("idle") }
-            applyIdleButtons()
+            applyButtons(for: .idle)
 
         case .calculating:
             // ルート計算中は行き先ピンだけ消しておく。テンプレートは触らない。
@@ -321,7 +374,7 @@ final class CarPlayCoordinator: NSObject {
             previewedRoute = first
             mapViewController.show(route: first)
             mapViewController.showRouteOverview(first)
-            applyPreviewingButtons()
+            applyButtons(for: .previewing)
             showTripPreview(for: routes)
 
         case let .navigating(route):
@@ -329,7 +382,7 @@ final class CarPlayCoordinator: NSObject {
             mapTemplate.hideTripPreviews()
             mapViewController.show(route: route)
             if entered { recenterMap("navigating") }
-            applyNavigatingButtons()
+            applyButtons(for: .navigating)
             beginSessionIfNeeded(for: route)
         }
     }
@@ -370,14 +423,7 @@ final class CarPlayCoordinator: NSObject {
                 CPTravelEstimates(distanceRemaining: .meters(progress.distanceToNextManeuver),
                                   timeRemaining: timeToManeuver),
                 for: activeManeuver)
-            // **まだ経路に乗っていないあいだは車を急かさない。** `GuidanceEngine` は
-            // 経路へ吸着させるので、駐車場に停まったままでも「次の曲がり角まで 100m」に
-            // なりうる。そのまま送ると、カードが「経路へ進んでください」と出している
-            // 横で、メーターと HUD だけが「いま曲がれ」と言う。**画面には出ない差**
-            // なので、気づけるのは車か `CarPlayVehicleLog` だけ。
-            navigationSession?.maneuverState = pauseReason == .proceedToRoute
-                ? .continue
-                : maneuverState(forDistance: progress.distanceToNextManeuver)
+            send(maneuverState: maneuverState(forDistance: progress.distanceToNextManeuver))
         }
     }
 
@@ -464,6 +510,7 @@ final class CarPlayCoordinator: NSObject {
         // 「できるだけ早く、できるだけ多く」渡すのが決まり（ガイド p.56）。
         let stepIndex = navigation.progress?.stepIndex ?? 0
         rebuildManeuvers(for: route, stepIndex: stepIndex, isNewSession: true)
+        handedOverSignature = route.signature
 
         // 経路の区間を積むのは maneuver を組み終えたあと。区間の中に入れる `CPManeuver` は
         // `routeManeuvers` と同じインスタンスでなければならない。
@@ -500,12 +547,16 @@ final class CarPlayCoordinator: NSObject {
     /// **理由は 1 つしか出せないので順番を決めてある。** 引き直し中は「経路へ進む」より
     /// 「再検索中」のほうが先で、引き直しが終わればまだ乗っていない側が残る。
     ///
-    /// 呼ぶのは進捗と `isRerouting` の両方から。**どちらが動いても desired が変わらなければ
-    /// 何もしない**ので、毎秒呼ばれても `pauseTrip` は飛ばない。
+    /// 呼ぶのは 3 か所。`$progress`、`$isRerouting`、それに経路を渡し直したあとの
+    /// [replaceRoute]。**どこから来ても desired が変わらなければ何もしない**ので、
+    /// 毎秒呼ばれても `pauseTrip` は飛ばない。
     ///
-    /// **判断の材料は必ず引数で受ける。** 呼び元はどちらもその `@Published` 自身の
-    /// sink の中にいて、`@Published` は `willSet` で流れる。プロパティを読み直すと
-    /// 1 つ前の値しか取れず、`pauseTrip` も `resumeTrip` も出そこねる。
+    /// **判断の材料は必ず引数で受ける。** 前の 2 つはその `@Published` 自身の sink の中に
+    /// いて、`@Published` は `willSet` で流れる。プロパティを読み直すと 1 つ前の値しか
+    /// 取れず、`pauseTrip` も `resumeTrip` も出そこねる。`replaceRoute` からの道だけは
+    /// `maneuverChanged`（`PassthroughSubject`）の中なので値が確定しているが、
+    /// **あちらは `pauseReason` を書き換えた直後に再入する**ので、引数で揃えておくほうが
+    /// 読み違えない。
     private func refreshTripPause(isRerouting: Bool, progress: RouteProgress?) {
         guard let navigationSession else { return }
 
@@ -530,14 +581,28 @@ final class CarPlayCoordinator: NSObject {
         // 以降 `updateCurrentSegment` も通らなくなる）。ガイド p.61 の「止めてから
         // 渡し直す」は、止めっぱなしで理由だけ変わる場合にも要るということ。
         if desired == nil || previous == .rerouting {
-            // **何から戻ってきたかで理由が変わる。** 引き直しが終わったのなら経路は
-            // 入れ替わっているが、経路に乗っただけなら**何も変わっていない**ので、
-            // 「外れたから引き直した」と車に言ってはいけない。
-            let reason: RouteChangeReason = previous == .rerouting ? .offRoute : .resumed
-            // **渡し直せなかったら記録も動かさない。** ここで `pauseReason` だけ進めると、
-            // 実際は止まったままなのに「止めていない」ことになり、以降 desired が
-            // 一致して何も起きなくなる（オレンジのカードがその案内のあいだ固着する）。
-            guard resume(navigationSession, reason: reason, progress: progress) else { return }
+            // **理由は「引き直し中だったか」ではなく、経路が本当に入れ替わったかで決める。**
+            // 圏外と停車では引き直しを見送りつつ `isRerouting` を下ろす（どちらも
+            // 「検索していないのに再検索中のカードが残る」を避けるため）ので、
+            // **経路をまったく計算していないのに `.rerouting` から出てくる道がある**。
+            // そこで `.missedTurn` を渡すと、経路を外れた場所で信号待ちするたびに
+            // まったく同じ経路を「外れたから引き直した」として車へ送り、26.4 では
+            // 区間ごと組み直させることになる。
+            let changed = navigation.currentRoute.map { $0.signature != handedOverSignature } ?? false
+            let reason: RouteChangeReason = changed ? .offRoute : .resumed
+            if !resume(navigationSession, reason: reason, progress: progress) {
+                // **渡し直せなかった。** 記録を進めてよいのは「止めたままで理由だけ
+                // 変わる」場合だけ。そこで諦めると、検索していないのに「再検索中」の
+                // カードが残ったうえ、`updateManeuvers` の渡し直しも
+                // `pauseReason != .rerouting` で閉じたままになり、車は新しい経路を
+                // 一度も受け取れない（`CPNavigationAlert` にも `NavigationLog` にも
+                // 何も出ないので、直したはずのバグと区別が付かなくなる）。
+                //
+                // 止めるのをやめる側（`desired == nil`）では進めてはいけない。実際は
+                // 止まったままなのに「止めていない」ことになり、以降 desired が一致して
+                // オレンジのカードがその案内のあいだ固着する。次の測位でまたここへ来る。
+                guard desired != nil else { return }
+            }
         }
 
         pauseReason = desired
@@ -564,8 +629,9 @@ final class CarPlayCoordinator: NSObject {
 
     /// 案内中に経路そのものが入れ替わったことを CarPlay と車へ伝える。
     ///
-    /// 立ち寄り先が増えたときに通る。逸脱による引き直しは `refreshTripPause` が
-    /// 止めるところと再開するところの両方を担うので、そちらでは呼ばない。
+    /// 通るのは**利用者の操作で経路が入れ替わったとき**——立ち寄り先の追加と、渋滞の
+    /// 迂回を受け入れたとき。逸脱による引き直しは `refreshTripPause` が止めるところと
+    /// 再開するところの両方を担うので、そちらでは呼ばない。
     ///
     /// **素通しで `resumeTrip` を投げないこと。** 経路を変えるときは一度 `pauseTrip` で
     /// 止めてから渡し直す、というのがガイド p.61 の手順で、止めずに渡すと車側が
@@ -647,6 +713,9 @@ final class CarPlayCoordinator: NSObject {
         session.currentLaneGuidance = nil
         session.upcomingManeuvers = upcoming
         activeManeuver = upcoming.first
+        // 車が持っている経路をここで控える。次に渡し直すときの理由（外れたのか、
+        // 止めていたものを戻すだけなのか）はこれと比べて決める。
+        handedOverSignature = route.signature
         return true
     }
 
@@ -674,7 +743,14 @@ final class CarPlayCoordinator: NSObject {
             // 仕事なので触らない。**見るのは「止まっているか」ではなく「引き直し中か」**。
             // 「経路へ進む」で止めているあいだに立ち寄り先が増えることはあり、
             // そのときは渡し直しが要る。
-            if hadRoute, pauseReason != .rerouting { replaceRoute(reason: .waypointChanged) }
+            //
+            // **理由は `NavigationController` から受け取る。** ここを通るのは立ち寄り先の
+            // 追加と、渋滞の迂回を利用者が受け入れたときの 2 つで、後者では経由地が
+            // 1 つも変わっていない。`lastRouteChange` は `phase` より先に置かれるので、
+            // `maneuverChanged` が流れる時点でもう新しい値。
+            if hadRoute, pauseReason != .rerouting {
+                replaceRoute(reason: RouteChangeReason(navigation.lastRouteChange))
+            }
         }
         presentNotice(of: route, at: stepIndex)
     }
@@ -751,7 +827,8 @@ final class CarPlayCoordinator: NSObject {
             : []
         // 指示が切り替わった直後であることを車へ伝える。
         // 以降は距離に応じて apply(progress:) が prepare / execute へ進める。
-        navigationSession?.maneuverState = .initial
+        // 止めているあいだは `send(maneuverState:)` が丸める（そこの説明を参照）。
+        send(maneuverState: .initial)
         activeManeuver = upcoming.first
 
         // 区間をまたいだかを見る。経由地を通過した瞬間がこれにあたる。
@@ -832,9 +909,15 @@ final class CarPlayCoordinator: NSObject {
         let road = RoadName.first(in: step.instruction)
         if let road { maneuver.roadFollowingManeuverVariants = [road] }
         CarPlayVehicleLog.roadName(road, from: step.instruction)
+        // **距離と時間は同じ値から出す。** `distance` は走っている区間だけ「残り」に
+        // なる（`currentDistanceToManeuver`）ので、時間のほうを step 全体で出すと組が
+        // 食い違う。首都高の 4172m の区間で出口の 200m 手前にいると「200m ＝ 5 分」に
+        // なり、それが `CPRouteSegment.maneuverTravelEstimates` と `resumeTrip` から
+        // そのまま車へ渡る（画面に出るのは `apply(progress:)` が整合させた値なので、
+        // ここの食い違いはメーター・HUD とルート共有にしか出ない）。
         maneuver.initialTravelEstimates = CPTravelEstimates(
             distanceRemaining: .meters(distance),
-            timeRemaining: estimatedTime(forDistance: step.distance, on: route))
+            timeRemaining: estimatedTime(forDistance: distance, on: route))
         return maneuver
     }
 
@@ -867,6 +950,22 @@ final class CarPlayCoordinator: NSObject {
         let normalized = degrees < 0 ? degrees + 360 : degrees
         maneuver.junctionExitAngle = Measurement(value: normalized, unit: .degrees)
         CarPlayVehicleLog.roundabout(exitAngle: normalized)
+    }
+
+    /// 車のメーター・HUD へ段階を送る。**止めているあいだは `.continue` に丸める。**
+    ///
+    /// `GuidanceEngine` は現在地を経路へ吸着させるので、駐車場に停まったままでも
+    /// 「次の曲がり角まで 100m」になりうる。そのまま送ると、カードが「経路へ進んで
+    /// ください」と出している横で、メーターと HUD だけが「いま曲がれ」と言う。
+    /// **引き直し中も同じ**で、あちらは吸着先そのものがもう捨てた経路（`NavigationController`
+    /// は `progress` を代入したあとで逸脱を見るので、止めているあいだも毎秒ここへ来る）。
+    ///
+    /// **書き込む口をここ 1 つに絞ってあるのは、片方だけ丸めても気づけないから。**
+    /// 距離から決める側（`apply(progress:)`）と、指示が入れ替わったことを伝える側
+    /// （`showManeuvers`。止めているあいだも step の添字は進む）の 2 か所があり、
+    /// **どちらも画面には出ない**ので、食い違いに気づけるのは車か `CarPlayVehicleLog` だけ。
+    private func send(maneuverState state: CPManeuverState) {
+        navigationSession?.maneuverState = pauseReason == nil ? state : .continue
     }
 
     /// 曲がる地点までの距離から、車に見せる段階を決める。
@@ -928,6 +1027,31 @@ final class CarPlayCoordinator: NSObject {
             self?.navigation.startNavigation(with: route)
         }
         interfaceController.pushTemplate(template, animated: true, completion: nil)
+    }
+
+    /// 段階に合ったボタンを貼る。**段階が動いたときの入口はここだけにする。**
+    ///
+    /// **パン UI に入っているあいだは触らない。** あの画面から抜ける導線は
+    /// `mapTemplateDidShowPanningInterface` が置く「完了」だけで
+    /// （`dismissPanningInterface` の呼び元もそこ 1 か所）、`mapButtons` は CarPlay が
+    /// 2 つに切り、`CPMapTemplate` は root テンプレートなので戻るボタンも無い。
+    /// つまり差し替えた瞬間に**運転者がパン UI から出られなくなる**。
+    /// ノブしか無い車では案内中に地図を動かす唯一の手段（ガイド p.33）なので、
+    /// そこで閉じ込めるのがいちばん困る。
+    ///
+    /// 引き直しの完了（`.navigating` の出し直し）、iPhone・Siri からの中止（`.idle`）、
+    /// 車が走り出す・止まるたびの `limitedUserInterfacesChanged` が、どれもパン中に届く。
+    /// 抜けたときは `mapTemplateDidDismissPanningInterface` が貼り直す
+    /// （**あちらは素の `apply*Buttons()` を呼ぶ**。ここを通すと、`isPanningInterfaceVisible`
+    /// がまだ下りていなかった場合に二度と戻らなくなる）。
+    private func applyButtons(for kind: PhaseKind) {
+        guard !mapTemplate.isPanningInterfaceVisible else { return }
+        switch kind {
+        case .idle: applyIdleButtons()
+        case .calculating: break // 計算中はテンプレートを触らない。
+        case .previewing: applyPreviewingButtons()
+        case .navigating: applyNavigatingButtons()
+        }
     }
 
     private func applyIdleButtons() {
@@ -1622,7 +1746,7 @@ extension CarPlayCoordinator: CPSessionConfigurationDelegate {
     func sessionConfiguration(_ sessionConfiguration: CPSessionConfiguration,
                               limitedUserInterfacesChanged limitedUserInterfaces: CPLimitableUserInterface) {
         guard case .idle = navigation.phase else { return }
-        applyIdleButtons()
+        applyButtons(for: .idle)
     }
 }
 

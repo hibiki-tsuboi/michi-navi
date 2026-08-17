@@ -274,6 +274,9 @@ Combine の使い分けにも意味がある:
   - 切り替えたときの読み上げは「ルートを再検索しました」のまま。`VoiceGuidance` は
     経路が変わったことしか見ていないので、利用者が選んだ切り替えと逸脱による引き直しを
     区別していない。**直すなら意図を渡す口が要る**ので、そこは手を付けていない。
+    **車の側へは区別して渡している**（`CPRerouteReason.alternateRoute`）。`replaceRoute` が
+    `NavigationController.lastRouteChange` を読み替えるので、経由地は 1 つも変わって
+    いないのに `.waypointModified` と言うことはない。
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
 
@@ -360,6 +363,11 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 
 1. **step ごとの所要時間を返さない** → 経路全体の平均速度で距離按分している
    （`GuidanceEngine.update` と `CarPlayCoordinator.estimatedTime` の 2 か所）。
+   **`CPTravelEstimates` に詰める距離と時間は必ず同じ値から出す。** `makeManeuver` の
+   `distance` は走っている区間だけ「残り」になるので、時間のほうを `step.distance` で
+   出すと組が食い違う（首都高の 4172m の区間で出口の 200m 手前にいると「200m ＝ 5 分」）。
+   そのまま `CPRouteSegment.maneuverTravelEstimates` と `resumeTrip` から車へ渡り、
+   **画面には出ない**（あちらは `apply(progress:)` が整合させた値を出す）。
    **按分の基準は出発時の見積もりのままにしない。** そのままだと渋滞に入っても
    到着予定が動かず、運転者がいちばん見る数字がいちばん当たらなくなる。
    `NavigationController.refreshTravelTimeIfNeeded` が 3 分おきに
@@ -699,6 +707,17 @@ CarPlay 層は触らずに済む設計。
   入ると 2 つ落ちる。`mapTemplateDidShowPanningInterface` で拡大・縮小の 2 つに差し替え、
   `mapTemplateDidDismissPanningInterface` で元へ戻している。パン中に意味があるのは
   拡大・縮小だけで、現在地へ戻すのは「完了」が担う。
+- **パン UI に入っているあいだはボタンを貼り替えない**（`CarPlayCoordinator.applyButtons(for:)`
+  が `isPanningInterfaceVisible` で弾く）。あの画面から抜ける導線は
+  `mapTemplateDidShowPanningInterface` が置く「完了」**だけ**で、`mapButtons` は 2 つに
+  切られ、`CPMapTemplate` は root テンプレートなので戻るボタンも無い。つまり
+  `trailingNavigationBarButtons` を差し替えた瞬間に**運転者がパン UI から出られなくなる**。
+  段階の反映（引き直しの完了で `.navigating` が出し直される、iPhone・Siri からの中止で
+  `.idle` が来る）と、車が走り出す・止まるたびの `limitedUserInterfacesChanged` が、
+  どれもパン中に届く。**抜けたときに貼り直すのは
+  `mapTemplateDidDismissPanningInterface` の仕事**で、あちらは素の `apply*Buttons()` を
+  呼ぶ（同じガードを通すと、`isPanningInterfaceVisible` がまだ下りていなかった場合に
+  二度と戻らなくなる）。`refreshMapButtons` が同じガードを持っているのと同じ話。
 - **ナビゲーションバーのボタンは左右 2 つずつが上限**。マイクと読み直しをここへ置いて
   いるのは、`mapButtons` が 4 つで埋まっているうえ、パン UI に入ると 2 つ落ちるため。
   どちらも走行中に消えてはいけない導線なので、落ちる可能性のある側へ置かない。
@@ -735,6 +754,17 @@ CarPlay 層は触らずに済む設計。
   `isCalculatingReroute` で防ぐ。**公開している `isRerouting` と混同しない**。前者は計算が
   走っているあいだだけ、後者は経路に戻るまで（失敗して再試行している最中も）立ち続ける。
   分けてあるのは、再試行のたびに CarPlay の「再検索中」カードが点滅するのを避けるため。
+- **`isRerouting` を下ろす順番は `phase` に対して決まっている。** CarPlay はこの立ち下がりで
+  `resumeTrip` を投げる（`refreshTripPause`）ので、**その時点の `phase` が渡す経路を決める**。
+  - 引き直しが成功したとき（`startNavigation(with:)`）は**最後に下ろす**。新しい経路と
+    最初の進捗が揃う前に下ろすと、古い情報で再開してしまう。
+  - 案内をやめる・別の目的地へ移るとき（`cancelNavigation()` と `route(to:)`）は
+    **`phase` を動かしたあとで下ろす**。まだ `.navigating` のうちに下ろすと、
+    `.idle` / `.calculating` でセッションを畳む前に `resumeTrip` が通り、**いま捨てようと
+    している経路**を「引き直しの結果」として車へ渡す（`cancelNavigation()` では `progress` が
+    もう nil なので、MapKit が出発地に置く 0m・指示文の空の step から渡し直すことになる）。
+    2026-08-18 まで両方とも先に下ろしていた。`refreshTripPause` が `isRerouting` を
+    読み直さなくなったことで、初めて実際に通るようになった経路。
 - **リルートの間隔（`minimumRerouteInterval` と失敗ごとの倍化）を外さない**。逸脱判定は
   経路に戻るまで下りず、位置更新は毎秒来る（`LocationService` に `distanceFilter` は無い）。
   「計算中か」だけで抑えると 1 回終わるそばから次を投げることになり、失敗すれば MapKit に
@@ -797,25 +827,36 @@ CarPlay 層は触らずに済む設計。
     外に居る。そこを逸脱として引き直さないのは `GuidanceEngine` の判断だが、**黙っていると
     普通の案内カードが出たまま**で「この指示はいつから有効なのか」が分からない。
   - **判断の材料は引数で受ける**（`refreshTripPause(isRerouting:progress:)`）。呼び元は
-    どちらもその `@Published` 自身の sink の中で、**`@Published` は `willSet` で流れる**
-    ので、中でプロパティを読み直すと必ず 1 つ前の値になる。2026-08-17 まで読み直して
+    3 つ（`$progress` / `$isRerouting` / 渡し直したあとの `replaceRoute`）で、**前の 2 つは
+    その `@Published` 自身の sink の中**。**`@Published` は `willSet` で流れる**ので、
+    中でプロパティを読み直すと必ず 1 つ前の値になる。2026-08-17 まで読み直して
     いて、`pauseTrip` も `resumeTrip` も判断が 1 測位ぶんずれていた。同じ理由で
     `resume` と `tripEstimates` も進捗を引数で受ける（読み直すと 1 秒古い数字が車へ行く）。
     `NavigationController` が `lastRouteChange` を `phase` より先に置いているのと同じ話。
+    `replaceRoute` からの道だけは `maneuverChanged` の中なので値は確定しているが、
+    **`pauseReason` を書き換えた直後に再入する**ので引数で揃えてある。
   - **`.rerouting` から出るときは、止め直すだけでも先に `resume` を通す。** 引き直しが
     成功していれば経路は入れ替わっているのに、**`resumeTrip` を通るのは `resume` だけ**。
     止めたまま `.proceedToRoute` へ移ると、新しい経路が車へ一度も渡らないまま案内が
     続く（ルート共有の区間も捨てた経路のままで、`routeID` が食い違うので以降
     `updateCurrentSegment` も通らない）。ガイド p.61 の「止めてから渡し直す」は、
     **止めっぱなしで理由だけ変わる場合にも要る**。2026-08-17 まで抜けていた。
-  - **戻すときの理由を取り違えない。** 引き直しから戻るなら経路は入れ替わっているので
-    `.missedTurn`、経路に乗っただけなら**何も変わっていない**ので `.unknown`
+  - **戻すときの理由は「止まっていた理由」ではなく、経路が本当に入れ替わったかで決める**
+    （`handedOverSignature` と `NavRoute.signature` の比較）。入れ替わっていれば
+    `.missedTurn`、**何も変わっていなければ** `.unknown`
     （`CarPlayCoordinator.RouteChangeReason.resumed`。**`Core/` の同名の enum とは別物**で、
-    あちらは読み上げの最初のひと言を決めるもの。`.resumed` は持たない）。乗っただけで
-    「外れたから引き直した」と車に言わない。
-  - **渡し直せなかったら記録も動かさない**（`resume` が `Bool` を返す）。`pauseReason` を
-    先に進めると、実際は止まったままなのに「止めていない」ことになり、以降は
-    desired が一致して何も起きない＝**オレンジのカードがその案内のあいだ固着する**。
+    あちらは読み上げの最初のひと言を決めるもの。`.resumed` は持たない）。
+    **「`.rerouting` から出た」を経路が変わった証拠にしないこと。** 圏外と停車では
+    引き直しを見送りつつ `isRerouting` を下ろすので、**経路をまったく計算していないのに
+    `.rerouting` から出てくる道がある**。そこで `.missedTurn` を渡すと、外れた場所で
+    信号待ちするたびに同じ経路を「外れたから引き直した」として送り、26.4 では区間ごと
+    組み直させることになる。`NavRoute.id` では見分けられない（引き直すたびに変わる UUID）。
+  - **渡し直せなかったときに記録を進めてよいのは、止めたままで理由だけ変わる場合だけ**
+    （`resume` が `Bool` を返す）。止めるのをやめる側で `pauseReason` を進めると、実際は
+    止まったままなのに「止めていない」ことになり、以降は desired が一致して何も起きない
+    ＝**オレンジのカードがその案内のあいだ固着する**。逆に、止めたままで理由だけ変わる側で
+    諦めると「再検索中」の文言が残ったうえ、`updateManeuvers` の渡し直しも
+    `pauseReason != .rerouting` で閉じたままになり、**車が新しい経路を一度も受け取れない**。
   - **`hasJoinedRoute` が下りないのはエンジン 1 つのあいだだけ。** そこから外れるのは
     逸脱であって「まだ始まっていない」ではない。ただし**引き直すと `GuidanceEngine` ごと
     作り直すので false に戻る**。引き直した経路の始点が車道へ寄せられていれば、走行中に
@@ -829,11 +870,28 @@ CarPlay 層は触らずに済む設計。
     経路へ吸着させるので、駐車場に停まったままでも「次の曲がり角まで 100m」になりうる。
     そのまま送ると、カードが「経路へ進んでください」と出している横でメーターと HUD だけが
     「いま曲がれ」と言う。**画面には出ない差**なので、気づけるのは車か `CarPlayVehicleLog` だけ。
-- **`.idle` に落ちたらセッションを畳む**（`apply(phase:)`）。iPhone の画面と Siri は
-  `NavigationController.cancelNavigation()` を直に呼ぶので、CarPlay の案内終了ボタンと違って
-  `cancelSession()` を通らない。畳まないと `pauseTrip` のカードが待機画面に残り、進捗も
-  経路も流れてこないので二度と下ろせない。次の案内も `beginSessionIfNeeded` の二重開始
-  ガードで古いセッションを使い回す。
+    引き直し中も同じで、あちらは吸着先そのものがもう捨てた経路
+    （`NavigationController.handle` は `progress` を代入したあとで逸脱を見るので、
+    止めているあいだも毎秒来る）。**書き込む口は 1 つに絞る**（`send(maneuverState:)`）。
+    距離から決める側と、指示が入れ替わったことを伝える側（`showManeuvers`。止めている
+    あいだも step の添字は進む）の 2 か所があり、片方だけ丸めても画面には出ない。
+- **案内から出たらセッションを畳む**（`apply(phase:)`。`.idle` だけではない）。iPhone の
+  画面と Siri は `NavigationController.cancelNavigation()` を直に呼ぶので、CarPlay の
+  案内終了ボタンと違って `cancelSession()` を通らない。畳まないと `pauseTrip` のカードが
+  待機画面に残り、進捗も経路も流れてこないので二度と下ろせない。次の案内も
+  `beginSessionIfNeeded` の二重開始ガードで古いセッションを使い回す。
+  - **`.idle` だけを見ると足りない。** 案内中に目的地を変えると
+    `.navigating` → `.calculating` → `.previewing` → `.navigating` と回って**`.idle` を
+    一度も通らない**（マイク・「目的地を変更」・車からの目的地の 3 経路）。**`CPTrip` は
+    あとから差し替えられない**（`CPNavigationSession.trip` と `CPTrip.destinationWaypoint` は
+    読み取り専用）ので、車のメーター・HUD と目的地共有は前の行き先を名乗り続け、指示だけが
+    新しい経路になる。しかも `showTripPreview` が `currentTrip` を上書きするため、毎秒の
+    `mapTemplate.update(_:for:with:)` はセッションを持たない `CPTrip` を宛先にして、
+    到着予定と色が更新されなくなる。
+  - **`navigationSession != nil` で囲わない。** 捨てたルート提示の `currentTrip` は
+    セッションを持たないまま残り、`.previewing` を通らない次の入口（Dashboard・Siri・
+    「ここに停める」）が `currentTrip ?? makeTrip(...)` でそれを拾ってしまう。
+    `cancelSession()` は nil 安全で冪等。
 - **リルート中も `CPNavigationSession` は張り替えず、`pauseTrip` / `resumeTrip` で繋ぐ**。
   作り直すと `CPTrip` から組み直しになり、到着予定の表示が一度途切れる。再開の渡し方は
   デプロイメントターゲットが 26.0 なので 2 系統ある（`CarPlayCoordinator.resume`）。
@@ -968,6 +1026,11 @@ CarPlay 層は触らずに済む設計。
   制約に使われ、`NSArray` の生成で例外 → CarPlayTemplateUIHost が落ちる（iOS 26.5 で確認。
   履歴が空のまま Dashboard を繋ぐと必ず再現する）。**案内中に隠すのは CarPlay の仕事**で、
   `showManeuvers:` でショートカット欄を畳み `didEndTrip:` で戻すため、こちらから消さなくてよい。
+  - **中身は `$recents` から流れてきた値で組む**（`updateShortcuts(recents:)`）。`sink` の中で
+    `store.recents` を読み直すと、**`@Published` は `willSet` で流れる**ので 1 つ前の値になる。
+    `DestinationStore.remember` は削除と挿入で 2 回書くため、最後の流れで読めるのは
+    「消したあと・入れる前」の並び＝**いま案内を始めた行き先だけが落ちる**。`clearRecents()`
+    では裏返しに、消したはずの履歴からボタンを組み直して、`isEmpty` のガードを通って残る。
 - **iOS 26.4 以降のシミュレータでは、CarPlay に地図を出した瞬間に CarPlay ホストが落ちる**
   （Apple 側のバグ）。**シミュレータで CarPlay を試すときは 26.2 以前を使う。**
   実機は 2026-08-15 に通しで動いているので、少なくともあの端末では起きていない。

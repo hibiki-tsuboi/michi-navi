@@ -33,7 +33,7 @@ final class CarPlayDashboardCoordinator {
     func start() {
         window.rootViewController = mapViewController
         observeState()
-        updateShortcuts()
+        updateShortcuts(recents: store.recents)
     }
 
     func stop() {
@@ -51,8 +51,15 @@ final class CarPlayDashboardCoordinator {
             .store(in: &cancellables)
 
         // 履歴が増えたらショートカットも入れ替える。
+        //
+        // **流れてきた値をそのまま渡す。** `@Published` は `willSet` で流れるので、
+        // `updateShortcuts` の中で `store.recents` を読み直すと必ず 1 つ前の値になる。
+        // `DestinationStore.remember` は削除と挿入で 2 回書くため、最後の流れで読めるのは
+        // 「消したあと・入れる前」の並び＝**いま案内を始めた行き先だけが落ちる**。
+        // `clearRecents()` では裏返しに、消したはずの履歴からボタンを組み直してしまう
+        // （`buttons.isEmpty` を通るので、そのまま残る）。
         store.$recents
-            .sink { [weak self] _ in self?.updateShortcuts() }
+            .sink { [weak self] in self?.updateShortcuts(recents: $0) }
             .store(in: &cancellables)
     }
 
@@ -79,8 +86,8 @@ final class CarPlayDashboardCoordinator {
     /// （履歴が空のまま Dashboard を繋ぐと必ず再現する）。
     /// 隠す必要があるとき（案内中）は CarPlay が自前でやってくれる。曲がり方を出すときに
     /// ショートカット欄を畳み、案内が終わると戻す。こちらから消しにいかなくてよい。
-    private func updateShortcuts() {
-        let buttons = store.recents
+    private func updateShortcuts(recents: [Place]) {
+        let buttons = recents
             .prefix(Self.maximumButtons)
             .map { place in
                 CPDashboardButton(titleVariants: [place.name],

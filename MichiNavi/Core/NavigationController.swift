@@ -247,12 +247,17 @@ final class NavigationController: ObservableObject {
         }
         routingTask?.cancel()
         lastError = nil
+        phase = .calculating(destination)
         // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
+        //
+        // **下ろすのは `phase` を動かしたあと。** 立ち下がりを購読している CarPlay は
+        // `resumeTrip` を投げるので、まだ `.navigating` のうちに下ろすと、**いま捨てようと
+        // している経路**を「引き直しの結果」として車へ渡してしまう。`.calculating` を
+        // 先に流しておけば、あちらはセッションを畳んでから受け取るので何も起きない。
         isRerouting = false
         lastRerouteFinished = nil
         rerouteFailures = 0
         lastRerouteOrigin = nil
-        phase = .calculating(destination)
 
         routingTask = Task {
             do {
@@ -264,7 +269,13 @@ final class NavigationController: ObservableObject {
             } catch {
                 guard !Task.isCancelled else { return }
                 lastError = error.localizedDescription
-                phase = .idle
+                // **`phase` を直に `.idle` にしない。** 案内中に別の目的地を選んで計算が
+                // 失敗すると、CarPlay は `.idle` を見てセッションを畳むのに、こちらは
+                // 案内中の持ち物を抱えたまま残る。`deadReckoningTimer` を止めるのも
+                // `location.setNavigating(false)` を呼ぶのも `cancelNavigation()` だけなので、
+                // 1 秒ごとの時計が空回りし続け、待機中の地図を出しながら背景測位の
+                // インジケータが出たままになる。
+                cancelNavigation()
             }
         }
     }
@@ -337,7 +348,6 @@ final class NavigationController: ObservableObject {
         deadReckoningTimer?.invalidate()
         deadReckoningTimer = nil
         isCalculatingReroute = false
-        isRerouting = false
         lastRerouteFinished = nil
         rerouteFailures = 0
         lastRerouteOrigin = nil
@@ -346,6 +356,11 @@ final class NavigationController: ObservableObject {
         trafficCondition = nil
         hasReportedOffline = false
         phase = .idle
+        // **下ろすのは `phase` を動かしたあと**（`route(to:)` と同じ理由）。まだ
+        // `.navigating` のうちに下ろすと、立ち下がりを見ている CarPlay が畳む寸前の
+        // セッションへ `resumeTrip` を投げる。そのとき `progress` はもう nil なので、
+        // MapKit が出発地に置く 0m・指示文の空の step から案内を渡し直すことになる。
+        isRerouting = false
         location.setNavigating(false)
     }
 

@@ -19,6 +19,12 @@ struct RouteProgress {
     let isOffRoute: Bool
     /// 目的地に到着した。
     let hasArrived: Bool
+    /// 一度でも経路の上に乗ったか。
+    ///
+    /// **外れているのに引き直しが走らない状態**（駐車場や施設の中から始めたとき）を
+    /// 外から見分けるために出している。逸脱と違って「まだ案内が始まっていない」に
+    /// 近いので、CarPlay はここを見て案内カードを「経路へ進む」に差し替える。
+    let hasJoinedRoute: Bool
 
     var arrivalDate: Date { Date(timeIntervalSinceNow: timeRemaining) }
 }
@@ -107,7 +113,10 @@ final class GuidanceEngine {
                                  snappedCoordinate: location.coordinate,
                                  distanceFromRoute: 0,
                                  isOffRoute: false,
-                                 hasArrived: true)
+                                 hasArrived: true,
+                                 // 点が足りず経路として成立していない。案内する先が無いので
+                                 // 「経路へ進む」を出しても行き場が無い。乗った扱いにする。
+                                 hasJoinedRoute: true)
         }
 
         let target = MKMapPoint(location.coordinate)
@@ -194,7 +203,8 @@ final class GuidanceEngine {
                              snappedCoordinate: coordinate,
                              distanceFromRoute: distanceFromRoute,
                              isOffRoute: isOffRoute,
-                             hasArrived: canArrive && remaining <= arrivalThreshold)
+                             hasArrived: canArrive && remaining <= arrivalThreshold,
+                             hasJoinedRoute: hasJoinedRoute)
     }
 
     /// 残り時間。**測り直した基準点があればそこから、無ければ出発時の見積もりを按分する。**

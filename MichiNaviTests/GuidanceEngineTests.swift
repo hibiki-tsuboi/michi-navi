@@ -108,6 +108,19 @@ struct GuidanceEngineTests {
         #expect(engine.update(with: SyntheticRoute.fix(at: away)).isOffRoute)
     }
 
+    @Test("経路に乗ったかを外へ出す（乗るまでは案内カードを「経路へ進む」にする）")
+    func reportsWhetherJoinedRoute() {
+        let (engine, _) = makeEngine()
+        let parking = SyntheticRoute.coordinate(north: 0, east: 300)
+        #expect(engine.update(with: SyntheticRoute.fix(at: parking, speed: 0)).hasJoinedRoute == false)
+        #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 100))).hasJoinedRoute)
+
+        // **一度乗ったら false には戻らない。** そこから外れるのは逸脱であって
+        // 「まだ案内が始まっていない」ではない。戻すと、走行中に「経路へ進む」が
+        // 引き直しのカードと入れ替わりに出ることになる。
+        #expect(engine.update(with: SyntheticRoute.fix(at: parking)).hasJoinedRoute)
+    }
+
     // MARK: - 到着
 
     @Test("到着は残り 30m")

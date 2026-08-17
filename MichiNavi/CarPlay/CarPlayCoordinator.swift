@@ -296,10 +296,13 @@ final class CarPlayCoordinator: NSObject {
     private func apply(progress: RouteProgress) {
         guard let trip = currentTrip, let route = navigation.currentRoute else { return }
 
+        // 残り時間の色で、見込みからどれだけ遅れているかを示す（`TrafficCondition`）。
+        // **測り直すまでは `.default`**。3 分おきの測り直しが 1 度も走っていないうちに
+        // 色を出すと、根拠の無い緑を出発直後に見せることになる。
         mapTemplate.update(CPTravelEstimates(distanceRemaining: .meters(progress.distanceRemaining),
                                              timeRemaining: progress.timeRemaining),
                            for: trip,
-                           with: .default)
+                           with: navigation.trafficCondition?.timeRemainingColor ?? .default)
 
         if let activeManeuver {
             let timeToManeuver = estimatedTime(forDistance: progress.distanceToNextManeuver, on: route)
@@ -1387,6 +1390,21 @@ private extension DrivingSide {
         switch self {
         case .left: .left
         case .right: .right
+        }
+    }
+}
+
+private extension TrafficCondition {
+    /// 見立てそのものは案内の状態なので `Core/` に置き、色への読み替えだけをこちら側に
+    /// 持つ（`DrivingSide.carPlaySide` と同じ分け方）。
+    ///
+    /// **`.default` に相当する case は作っていない。** 「まだ測っていない」は
+    /// `TrafficCondition?` の nil で表しているので、呼ぶ側が `?? .default` で受ける。
+    var timeRemainingColor: CPTimeRemainingColor {
+        switch self {
+        case .flowing: .green
+        case .slow: .orange
+        case .congested: .red
         }
     }
 }

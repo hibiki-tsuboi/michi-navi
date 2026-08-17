@@ -35,6 +35,12 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// 到着予定がどれだけ遅れているか。CarPlay が到着予定の色に使う。
+    ///
+    /// **測り直すまでは nil。** 材料が無い状態と「見込みどおり」を混ぜない。混ぜると、
+    /// 案内を始めた瞬間から「順調」と言い切ることになる（まだ 1 度も測っていない）。
+    @Published private(set) var trafficCondition: TrafficCondition?
+
     /// 経路を外れて引き直している最中。
     ///
     /// 「いまの状態」なので `@Published`。CarPlay はこれを見て案内カードを
@@ -299,6 +305,9 @@ final class NavigationController: ObservableObject {
         startDeadReckoning()
         // 引いたばかりの経路には出発時の見積もりが入っているので、すぐには測り直さない。
         lastTravelTimeRefresh = Date()
+        // **見立ても一緒に捨てる。** 比べる相手（`route.expectedTravelTime`）が
+        // 入れ替わったので、前の経路で見た遅れをそのまま持ち越すと根拠を失った色が残る。
+        trafficCondition = nil
         NavigationLog.navigationStarted(steps: route.steps.count, distance: route.distance)
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
@@ -334,6 +343,7 @@ final class NavigationController: ObservableObject {
         lastRerouteOrigin = nil
         isRefreshingTravelTime = false
         lastTravelTimeRefresh = nil
+        trafficCondition = nil
         hasReportedOffline = false
         phase = .idle
         location.setNavigating(false)
@@ -406,6 +416,7 @@ final class NavigationController: ObservableObject {
             // 見込みは測った値そのものになるので、渋滞かどうかを見る差が消える。
             let projected = progress?.timeRemaining
             let stepIndex = progress?.stepIndex
+            updateTrafficCondition(measured: candidate.expectedTravelTime, on: route)
             guidance?.applyMeasuredTimeRemaining(candidate.expectedTravelTime)
 
             guard let projected, let stepIndex else { return }
@@ -414,6 +425,23 @@ final class NavigationController: ObservableObject {
                                                           projectedTimeRemaining: projected,
                                                           stepIndex: stepIndex))
         }
+    }
+
+    /// 測った残り時間を、経路を引いたときの見込みと比べて見立てを置き直す。
+    ///
+    /// **比べる相手は `progress.timeRemaining` ではない。** あちらは前回の測り直しを
+    /// 起点にした按分なので、測るたびに自分自身と比べることになって差が出ない。
+    /// 経路が持っている出発時（引き直し時）の見積もりを残距離で按分し直したものと比べる。
+    ///
+    /// 測った値は**いま引き直した場合の**所要時間なので、こちらが走っている道より
+    /// 早い道が見つかればその時間になる。数字だけを差し替える
+    /// （`applyMeasuredTimeRemaining`）のと同じ値なので、**運転者が見ている到着予定と
+    /// 色の根拠は必ず一致する**。走る道が本当に早いかどうかは `TrafficAdvisor` の話。
+    private func updateTrafficCondition(measured: TimeInterval, on route: NavRoute) {
+        guard let remaining = progress?.distanceRemaining, route.distance > 0 else { return }
+        trafficCondition = TrafficCondition(
+            measured: measured,
+            expected: route.expectedTravelTime * (remaining / route.distance))
     }
 
     /// 測り直す間隔。

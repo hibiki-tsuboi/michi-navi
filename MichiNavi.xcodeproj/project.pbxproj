@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		B6859ED23032EBC10083BBB3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B60F740B302EA48200FEF5CD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B60F7412302EA48200FEF5CD;
+			remoteInfo = MichiNavi;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		B60F7413302EA48200FEF5CD /* MichiNavi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MichiNavi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B6859ECE3032EBC10083BBB3 /* MichiNaviTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MichiNaviTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -29,10 +40,22 @@
 			path = MichiNavi;
 			sourceTree = "<group>";
 		};
+		B6859ECF3032EBC10083BBB3 /* MichiNaviTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MichiNaviTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		B60F7410302EA48200FEF5CD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6859ECB3032EBC10083BBB3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				B60F7415302EA48200FEF5CD /* MichiNavi */,
+				B6859ECF3032EBC10083BBB3 /* MichiNaviTests */,
 				B60F7414302EA48200FEF5CD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +78,7 @@
 			isa = PBXGroup;
 			children = (
 				B60F7413302EA48200FEF5CD /* MichiNavi.app */,
+				B6859ECE3032EBC10083BBB3 /* MichiNaviTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +108,29 @@
 			productReference = B60F7413302EA48200FEF5CD /* MichiNavi.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B6859ECD3032EBC10083BBB3 /* MichiNaviTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B6859ED63032EBC10083BBB3 /* Build configuration list for PBXNativeTarget "MichiNaviTests" */;
+			buildPhases = (
+				B6859ECA3032EBC10083BBB3 /* Sources */,
+				B6859ECB3032EBC10083BBB3 /* Frameworks */,
+				B6859ECC3032EBC10083BBB3 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B6859ED33032EBC10083BBB3 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B6859ECF3032EBC10083BBB3 /* MichiNaviTests */,
+			);
+			name = MichiNaviTests;
+			packageProductDependencies = (
+			);
+			productName = MichiNaviTests;
+			productReference = B6859ECE3032EBC10083BBB3 /* MichiNaviTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -95,6 +143,10 @@
 				TargetAttributes = {
 					B60F7412302EA48200FEF5CD = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					B6859ECD3032EBC10083BBB3 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = B60F7412302EA48200FEF5CD;
 					};
 				};
 			};
@@ -114,12 +166,20 @@
 			projectRoot = "";
 			targets = (
 				B60F7412302EA48200FEF5CD /* MichiNavi */,
+				B6859ECD3032EBC10083BBB3 /* MichiNaviTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		B60F7411302EA48200FEF5CD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6859ECC3032EBC10083BBB3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -136,7 +196,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B6859ECA3032EBC10083BBB3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B6859ED33032EBC10083BBB3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B60F7412302EA48200FEF5CD /* MichiNavi */;
+			targetProxy = B6859ED23032EBC10083BBB3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		B60F741C302EA48300FEF5CD /* Debug */ = {
@@ -336,6 +411,50 @@
 			};
 			name = Release;
 		};
+		B6859ED43032EBC10083BBB3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AK92W9FN2D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jp.hibiki.MichiNaviTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MichiNavi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MichiNavi";
+			};
+			name = Debug;
+		};
+		B6859ED53032EBC10083BBB3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AK92W9FN2D;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = jp.hibiki.MichiNaviTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MichiNavi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/MichiNavi";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -353,6 +472,15 @@
 			buildConfigurations = (
 				B60F741F302EA48300FEF5CD /* Debug */,
 				B60F7420302EA48300FEF5CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B6859ED63032EBC10083BBB3 /* Build configuration list for PBXNativeTarget "MichiNaviTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B6859ED43032EBC10083BBB3 /* Debug */,
+				B6859ED53032EBC10083BBB3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

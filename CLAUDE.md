@@ -21,7 +21,11 @@ xed .
 - **`IPHONEOS_DEPLOYMENT_TARGET = 26.0`**。iOS 26 のランタイムを持つ機種しか destination に指定できない。
   `iPhone 16 Pro` などは古いランタイムにしか存在せず "destination is not valid" で落ちる。
   迷ったら `xcodebuild -scheme MichiNavi -showdestinations` で候補を出す。
-- **テストターゲットは存在しない**。追加するまで `xcodebuild test` は使えない。
+- **テストは `MichiNaviTests`**（Swift Testing）。→ 「テスト」の節。
+
+  ```bash
+  xcodebuild -scheme MichiNavi -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+  ```
 - **CarPlay 画面の確認**: シミュレータ起動後、メニューの I/O → External Displays → CarPlay。
   `com.apple.developer.carplay-maps` は 2026-08-15 に Apple の承認が下りたので、実機の
   CarPlay でも動かせる。
@@ -967,6 +971,39 @@ CarPlay 層は触らずに済む設計。
   `VoiceCommand`（話し言葉）がこれにあたる。どちらも**端末の言語で入力が変わる**ので、
   「いまの言語の表」を選ぶのではなく両方を持って両方を見る。
 
+## テスト
+
+`MichiNaviTests`（Swift Testing）。2026-08-17 に追加。**ファイルは `MichiNaviTests/` に
+置くだけ**——アプリ側と同じく同期グループなのでターゲットへの登録は要らない。
+
+守っているのは**しきい値の数字ではなく、しきい値の効かせ方**。「3 回連続で外れたときだけ」
+「精度が悪い測位は数えない」「経路に乗るまでは数えない」はどれも実車で症状が出てから
+足された条件で、外すと**走行中にしか気づけない壊れ方**をする。
+
+- **経路は合成する**（`SyntheticRoute`）。`MKRoute` は MapKit が返すものしか作れないので、
+  `NavRoute` のメンバーワイズ初期化で組み立てる。**北へまっすぐ**にしてあるのは、緯度 1 度
+  あたりの距離が地球上どこでも同じで、メートルと座標の対応が読んで分かるため。
+  **先頭に 0m の step を置く**こと（MapKit の実データがそうなっている）。
+- **通ることではなく、壊したときに落ちることを確かめる。** 2026-08-17 に 8 か所を
+  実際に壊して確認した（`GuidanceEngine` の逸脱の連続回数 3→1・`currentStepIndex` の
+  `>` を `>=`・精度のゲートを外す・`hasJoinedRoute` を最初から true、`RouteCharacter` の
+  同点の除外を外す・カーブを距離で割らない、`VoiceCommand` に「終わり」を足す、
+  `DrivingSide` の表から JP を落とす、`DestinationStore` の時計の一周を畳まない・
+  引き上げに要る回数 2→1、`RoadNumber` の桁数）。**新しいテストを足したときも
+  同じことをすること。** 通るだけのテストは、壊れたコードでも通る。
+  - **実際に 1 件、通ってしまった。** 「カーブは距離で割る」のテストが、割るのをやめても
+    通った。合計でも 1km あたりでも同じ経路が勝つ組み合わせを選んでいたため。
+    **比べる 2 つは、直したい間違いをしたときに順位が入れ替わるように作ること**
+    （いまは合計では長いほうが勝ち、1km あたりでは短いほうが勝つ形にしてある）。
+- **`IPHONEOS_DEPLOYMENT_TARGET` はアプリと揃えて 26.0**。Xcode が作った直後は 26.5 に
+  なっていて、そのままだと**テストが 26.4 以降のシミュレータでしか動かない**。
+  CarPlay の確認は 26.2 以前でないと落ちる（→「未実装」）ので、**揃えないと
+  テストと CarPlay を同じ端末で回せなくなる**。26.0 / 26.2 / 26.5 で通ることを確認済み。
+- **テストターゲットに `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` が付いていない**
+  （アプリ側には付いている）。`GuidanceEngine` のように既定で MainActor になっている型を
+  触る suite には `@MainActor` を書く。無いと「main actor-isolated ... nonisolated context」の
+  警告が出て、**Swift 6 モードではエラー**になる。
+
 ## 未実装
 
 CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承認され、当面の
@@ -982,13 +1019,20 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   ケイパビリティが無いので問い合わせが失敗し、黙って何もしない状態。entitlements に
   先に書くと App ID 側で有効化されるまで実機ビルドが通らなくなるので、順序に注意
   （CarPlay entitlement で踏んだのと同じ罠）。
-- **テストターゲットと Widget Extension が無い**。どちらもターゲット追加が要り、
-  `project.pbxproj` を手で編集しない方針なので Xcode 上での作業になる。
-  純ロジック（`RouteCharacter` の比較、`ManeuverDirection` の文言マッチ、`VoiceCommand` の
-  fallback、`DrivingSide` の表、`CarPlayRouteSharing` の区間の切り出し）が増えたので、
-  テストの置き場が無いのは実際に効いてきている。ウィジェットと Live Activity は
-  iOS 26 の CarPlay で使えることが確認済み（`WidgetLocation.carPlay` / 
-  `.supplementalActivityFamilies([.small])`）。
+- **テストがまだ届いていない純ロジックが 2 つ残っている**（→「テスト」の節）。
+  - `CarPlayRouteSharing` の区間の切り出し（`legs(of:stepCount:)`）。中身は純粋な計算だが、
+    **`private` かつ 26.4 で囲われたクラスの中**にある。テスト側も
+    `@available(iOS 26.4, *)` にすると 26.0〜26.2 のシミュレータで**黙って飛ばされる**
+    ので、確かめたつもりで何も確かめていない状態になる。届かせるなら、
+    先に計算だけをクラスの外へ出すこと。
+  - `JunctionGeometry` の角度。値そのものは経路の形から出るので確かめられるが、
+    **正しさの基準がこちらに無い**（`junctionExitAngle` の 0 度の取り方は推測）。
+    絵と数字が同じ測定から出ていることは構造で保証してあるので、まず実車で向きを見る。
+- **Widget Extension が無い**。ターゲット追加が要り、`project.pbxproj` を手で編集しない
+  方針なので Xcode 上での作業になる。ウィジェットと Live Activity は iOS 26 の CarPlay で
+  使えることが確認済み（`WidgetLocation.carPlay` / `.supplementalActivityFamilies([.small])`）
+  だが、**2026-08-17 に「不要」と判断した**。CarPlay 側は `CPMapTemplate` と Dashboard が
+  すでに案内カードを描いているので、同じ内容が増えるだけになる。
 - **2026-08-15 に足したぶんの実走確認**。ビルドは通っているが、実際に走らせて
   見た目や挙動を確かめたものは 1 つも無い。とくに次の 3 つは**実機かつ対応した車でないと
   確認しようがない**: メーター・HUD への案内メタデータ、メーター内の地図、

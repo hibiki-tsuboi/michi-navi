@@ -363,11 +363,18 @@ final class NavigationController: ObservableObject {
         }
     }
 
-    func cancelNavigation() {
-        routingTask?.cancel()
-        routingTask = nil
+    /// 走っている案内を終わらせる。**段階は動かさない。**
+    ///
+    /// `cancelNavigation()` から分けてあるのは、**次の行き先を選んでいるあいだに元の
+    /// 目的地へ着くことがある**ため。そこで `.idle` まで落とすと、利用者が見ている候補が
+    /// 消える。いっぽう trip の後始末（駐車位置を残す・時計を止める・背景測位を降りる）は
+    /// どちらの道でも要る。
+    ///
+    /// **`routingTask` は取り消さない。** 選んでいる最中に着いたのなら、それは利用者が
+    /// 待っている目的地の計算そのもの。取り消すのは `.idle` へ落とすときだけ。
+    private func finishTrip() {
         guidance = nil
-        // 案内が本当に終わるのはここと到着だけ。読み上げもこの立ち下がりで止まる。
+        // 案内が本当に終わるのはここだけ。読み上げもこの立ち下がりで止まる。
         activeRoute = nil
         announcedStepIndex = nil
         progress = nil
@@ -382,13 +389,19 @@ final class NavigationController: ObservableObject {
         lastTravelTimeRefresh = nil
         trafficCondition = nil
         hasReportedOffline = false
+        location.setNavigating(false)
+    }
+
+    func cancelNavigation() {
+        routingTask?.cancel()
+        routingTask = nil
+        finishTrip()
         phase = .idle
         // **下ろすのは `phase` を動かしたあと**（`route(to:)` と同じ理由）。まだ
         // `.navigating` のうちに下ろすと、立ち下がりを見ている CarPlay が畳む寸前の
         // セッションへ `resumeTrip` を投げる。そのとき `progress` はもう nil なので、
         // MapKit が出発地に置く 0m・指示文の空の step から案内を渡し直すことになる。
         isRerouting = false
-        location.setNavigating(false)
     }
 
     // MARK: - 位置更新
@@ -410,16 +423,19 @@ final class NavigationController: ObservableObject {
         progress = updated
 
         if updated.hasArrived {
-            // **到着は案内の段階でだけ受ける。** 次の行き先を選んでいる最中に元の目的地へ
-            // 着くことはありうるが、`cancelNavigation()` は後始末と `.idle` への落とし込みを
-            // 兼ねているので、ここで呼ぶと**利用者が見ている候補ごと消える**。見送ると
-            // 駐車位置の記録を 1 回落とすが、そのまま次の案内で上書きされる。
-            guard isNavigatingPhase else { return }
             // 着いた地点を車の置き場所として残す。目的地の座標ではなく**実際に
             // 着いた座標**を使う（施設が目的地なら、車は入口ではなく駐車場にある）。
             DestinationStore.shared.rememberParking(at: current.coordinate, near: route.destination)
             arrived.send(route)
-            cancelNavigation()
+            // **段階を落とすのは案内の段階にいるときだけ。** 次の行き先を選んでいる最中に
+            // 元の目的地へ着くことはありうるが、そこで `.idle` へ落とすと**利用者が見ている
+            // 候補が消える**（`cancelNavigation()` は待っている経路計算も取り消す）。
+            // 着いたこと自体は同じに扱う——駐車位置は残るし、読み上げも走る。
+            if isNavigatingPhase {
+                cancelNavigation()
+            } else {
+                finishTrip()
+            }
             return
         }
 

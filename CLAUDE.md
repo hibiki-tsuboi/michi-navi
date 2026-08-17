@@ -74,10 +74,11 @@ idle ──requestRoutes──> calculating ──> previewing ──startNaviga
   `routingTask` は 1 本しかないので、投げると**利用者が待っている目的地の計算を取り消す**
   うえ、成功すれば `startNavigation(with:)` が `phase` を `.navigating` へ戻して
   **候補の一覧ごと消える**。逸脱そのものは記録される（`off-route` の行は出る）。
-- **到着も `phase` 側**。選んでいる最中に元の目的地へ着いても受けない。`cancelNavigation()` は
-  後始末と `.idle` への落とし込みを兼ねているので、そこで呼ぶと候補が消える。**駐車位置の
-  記録を 1 回落とす**のが代償で、そこまで正確にしたいなら `cancelNavigation()` を
-  「trip を終わらせる」と「`.idle` へ落とす」に割ること。
+- **到着は「着いたこと」と「段階を落とすこと」に分けてある**（`finishTrip()` と
+  `cancelNavigation()`）。選んでいる最中に元の目的地へ着いても、駐車位置は残り読み上げも
+  走るが、**`.idle` へは落とさない**（落とすと利用者が見ている候補が消える）。
+  `finishTrip()` は **`routingTask` を取り消さない**——選んでいる最中に着いたのなら、それは
+  利用者が待っている経路計算そのもの。取り消すのは `.idle` へ落とすときだけ。
 
 Combine の使い分けにも意味がある:
 

@@ -1,5 +1,3 @@
-import CoreLocation
-import MapKit
 import UIKit
 
 /// 曲がる地点の前後だけを切り出して、交差点の拡大図を描く。
@@ -12,21 +10,13 @@ import UIKit
 ///
 /// 逆に**描けないもの**もはっきりしている。交わる側の道、信号、車線、標識。
 /// それらしく描くとかえって「そこに道がある」と誤解させるので、線 1 本に留める。
+///
+/// **形を測るのは `JunctionGeometry`（`Core/`）**。同じ測定から車へ送る角度
+/// （`CPManeuver.junctionExitAngle`）も作るので、絵と数字が食い違わない。
 enum JunctionImage {
     /// CarPlay に渡せる上限（`CPManeuver.junctionImage` のヘッダに明記）。
     /// 超えると縮小されるので、最初からこの寸法で描く。
     static let size = CGSize(width: 140, height: 100)
-
-    /// 曲がる地点の手前と先を、それぞれどれだけ入れるか。
-    ///
-    /// 広げるほど縮尺が小さくなり、肝心の曲がり角が潰れる。**曲がる直前に見て分かる
-    /// 範囲**に絞る。
-    private static let approachDistance: CLLocationDistance = 100
-    private static let departureDistance: CLLocationDistance = 100
-
-    /// 進行方向を決めるために遡る距離。直前の 1 点だけで決めると、経路の座標が
-    /// 細かいところで向きが跳ねる。
-    private static let headingSample: CLLocationDistance = 25
 
     /// 描画範囲の最小の広がり（メートル）。
     ///
@@ -45,121 +35,17 @@ enum JunctionImage {
     private static let departureLineWidth: CGFloat = 5
     private static let approachLineWidth: CGFloat = 3.5
 
-    /// `stepIndex` の区間の終わり（＝曲がる地点）の拡大図。描けなければ nil。
+    /// 曲がる地点の拡大図。描けなければ nil。
     ///
     /// **曲がらない指示では描かない。** 直進・到着・出発で道の形だけ出しても読む理由が
     /// 無いうえ、案内カードの場所を取る。
-    static func make(for route: NavRoute, stepIndex: Int, direction: ManeuverDirection) -> UIImage? {
+    static func make(for geometry: JunctionGeometry, direction: ManeuverDirection) -> UIImage? {
         switch direction {
         case .straight, .depart, .arrive, .unknown: return nil
         default: break
         }
-
-        guard route.stepEndIndices.indices.contains(stepIndex) else { return nil }
-        let junctionIndex = route.stepEndIndices[stepIndex]
-        let coordinates = route.coordinates
-        guard coordinates.indices.contains(junctionIndex) else { return nil }
-
-        let junction = coordinates[junctionIndex]
-        let metersPerPoint = MKMetersPerMapPointAtLatitude(junction.latitude)
-        let origin = MKMapPoint(junction)
-
-        // 曲がる地点を原点、北を +y としたメートル座標へ移す。
-        // `MKMapPoint` の y は南へ向かって増えるので符号を返す。
-        func local(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
-            let point = MKMapPoint(coordinate)
-            return CGPoint(x: (point.x - origin.x) * metersPerPoint,
-                           y: -(point.y - origin.y) * metersPerPoint)
-        }
-
-        let approach = trail(in: coordinates, from: junctionIndex, step: -1,
-                            limit: approachDistance, map: local).reversed().map { $0 }
-        let departure = trail(in: coordinates, from: junctionIndex, step: 1,
-                              limit: departureDistance, map: local)
-        guard approach.count >= 2, departure.count >= 2 else { return nil }
-
-        // 進行方向が上を向くように回す。北上げのままだと、同じ右折でも走っている
-        // 向きによって絵が変わり、見比べられない。
-        guard let heading = heading(of: approach) else { return nil }
-        let angle = atan2(heading.x, heading.y)
-        let rotatedApproach = approach.map { rotate($0, by: angle) }
-        let rotatedDeparture = departure.map { rotate($0, by: angle) }
-
-        guard let turn = turnAngle(departure: rotatedDeparture), abs(turn) >= minimumTurn else {
-            return nil
-        }
-        return render(approach: rotatedApproach, departure: rotatedDeparture)
-    }
-
-    // MARK: - 座標の切り出し
-
-    /// `from` から `step` 方向へ、累計 `limit` メートルぶんの点を集める。
-    /// 先頭は必ず `from` 自身（＝曲がる地点）。
-    private static func trail(in coordinates: [CLLocationCoordinate2D],
-                              from index: Int,
-                              step: Int,
-                              limit: CLLocationDistance,
-                              map: (CLLocationCoordinate2D) -> CGPoint) -> [CGPoint] {
-        var points = [map(coordinates[index])]
-        var travelled: Double = 0
-        var current = index
-
-        while true {
-            let next = current + step
-            guard coordinates.indices.contains(next) else { break }
-            let point = map(coordinates[next])
-            travelled += hypot(point.x - points[points.count - 1].x,
-                               point.y - points[points.count - 1].y)
-            points.append(point)
-            current = next
-            if travelled >= limit { break }
-        }
-        return points
-    }
-
-    /// 曲がる地点に入ってくる向き。`approach` は進行順（最後が曲がる地点）。
-    private static func heading(of approach: [CGPoint]) -> CGPoint? {
-        guard let junction = approach.last else { return nil }
-
-        // 手前へ `headingSample` メートル遡った点を基準にする。
-        var reference = approach[0]
-        var travelled: Double = 0
-        for index in stride(from: approach.count - 1, to: 0, by: -1) {
-            travelled += hypot(approach[index].x - approach[index - 1].x,
-                               approach[index].y - approach[index - 1].y)
-            if travelled >= headingSample {
-                reference = approach[index - 1]
-                break
-            }
-        }
-
-        let vector = CGPoint(x: junction.x - reference.x, y: junction.y - reference.y)
-        guard hypot(vector.x, vector.y) > 0 else { return nil }
-        return vector
-    }
-
-    /// 出ていく向きが、入ってくる向きからどれだけ振れているか（ラジアン）。
-    ///
-    /// **回したあとの座標で見る。** 入ってくる向きが +y に揃っているので、出ていく点の
-    /// 角度がそのまま曲がる角になる。曲がった直後の 1 点ではなく `headingSample` メートル
-    /// 先を見るのは、交差点の中の細かい点で向きが跳ねるため。
-    private static func turnAngle(departure: [CGPoint]) -> CGFloat? {
-        var travelled: Double = 0
-        for index in 1 ..< departure.count {
-            travelled += hypot(departure[index].x - departure[index - 1].x,
-                               departure[index].y - departure[index - 1].y)
-            guard travelled >= headingSample else { continue }
-            return atan2(departure[index].x, departure[index].y)
-        }
-        // 出ていく側が短いまま終わる（＝すぐ次の指示が来る）場合は、末端で見る。
-        guard let last = departure.last, hypot(last.x, last.y) > 0 else { return nil }
-        return atan2(last.x, last.y)
-    }
-
-    /// 反時計回りに `angle` だけ回す。`angle = atan2(v.x, v.y)` を渡すと `v` が +y を向く。
-    private static func rotate(_ point: CGPoint, by angle: CGFloat) -> CGPoint {
-        CGPoint(x: point.x * cos(angle) - point.y * sin(angle),
-                y: point.x * sin(angle) + point.y * cos(angle))
+        guard abs(geometry.turn) >= minimumTurn else { return nil }
+        return render(approach: geometry.approach, departure: geometry.departure)
     }
 
     // MARK: - 描画

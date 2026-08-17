@@ -42,6 +42,9 @@ final class CarPlayVoiceControl {
     /// 二重に走らせない。ボタンの連打と、CarPlay 側の再入の両方を止める。
     private var isRunning = false
 
+    /// 聞き取りから検索までの一続き。**閉じるボタンから取り消すために持つ。**
+    private var task: Task<Void, Never>?
+
     init(interfaceController: CPInterfaceController,
          onSelect: @escaping (CarPlayDestinationBrowser.Choice) -> Void,
          onCommand: @escaping (VoiceCommand) -> Void,
@@ -62,6 +65,19 @@ final class CarPlayVoiceControl {
             makeState(.listening, title: String(localized: "行き先をどうぞ"), symbol: "waveform"),
             makeState(.searching, title: String(localized: "探しています"), symbol: "magnifyingglass"),
         ])
+        // **iOS 26.4 から、この画面にもボタンを置ける。** それ以前は閉じる手がひとつも
+        // 無く、黙って自動で切り上がる（無音 1.4 秒／上限 15 秒）のを待つほかなかった。
+        // **自動で切り上げる仕組みは残す。** 26.0〜26.3 ではそれが唯一の出口だし、
+        // 26.4 以降でも話し終わりを押させるためのボタンではない。
+        //
+        // 置き場所は**ナビゲーションバー**。`actionButtons` は名前が近いが
+        // `CPVoiceControlState`（状態ごとの操作）のもので、画面そのものを畳む役ではない。
+        // なお `CPBarButtonProviding` 準拠のほうは **`__IPHONE_OS_VERSION_MIN_REQUIRED`
+        // で切られている**（＝下限が 26.0 のうちは protocol として見えない）が、
+        // プロパティ自体はクラスに生えているので `#available` で足りる。
+        if #available(iOS 26.4, *) {
+            template.trailingNavigationBarButtons = [closeButton]
+        }
 
         // **状態を切り替えられるのは、出したあとだけ**（ヘッダの警告）。
         // 先に切り替えても黙って無視されるので、提示の完了を待ってから走らせる。
@@ -75,15 +91,19 @@ final class CarPlayVoiceControl {
         }
     }
 
+    /// **取り消されたら、そこから先は何もしない。** 画面は `cancel()` が畳み終えているので
+    /// `dismiss()` も呼ばず、聞き取った語も捨てる。閉じたのに案内が始まるのがいちばん困る。
     private func run(on template: CPVoiceControlTemplate) {
-        Task {
+        task = Task {
             defer { isRunning = false }
 
             do {
                 let text = try await SpeechInput.shared.listen(hints: hints)
+                guard !Task.isCancelled else { return }
                 template.activateVoiceControlState(withIdentifier: Step.searching.rawValue)
 
                 let command = await VoiceCommand.parse(text, isNavigating: NavigationController.shared.currentRoute != nil)
+                guard !Task.isCancelled else { return }
 
                 // 行き先だけは検索が要るので、画面を出したまま探す。
                 // それ以外は待たせる意味が無いので、先に畳んでから実行する。
@@ -94,14 +114,29 @@ final class CarPlayVoiceControl {
                 }
 
                 let place = try await resolve(query)
+                guard !Task.isCancelled else { return }
                 await dismiss()
                 onSelect(asWaypoint ? .waypoint(place) : .destination(place))
             } catch {
+                guard !Task.isCancelled else { return }
                 // 先に畳む。音声画面を出したままアラートを重ねられない。
                 await dismiss()
                 onError(error.localizedDescription)
             }
         }
+    }
+
+    /// 閉じるボタン（iOS 26.4 以降）。**押した時点で画面を畳む。**
+    ///
+    /// マイクを閉じるのは `SpeechInput` に任せる。あちらはオーディオセッションの
+    /// 受け渡し（読み上げを止める・戻す）を決まった順序で畳む作りになっていて、
+    /// 途中から手を出すとその順序を壊す。取り消しを受けて自分で戻るので、待てばよい。
+    /// **そのぶん、閉じた直後にもう一度マイクを押しても反応しないことがある**
+    /// （`isRunning` が下りるのは畳み終わったとき）。
+    private func cancel() {
+        task?.cancel()
+        task = nil
+        Task { await dismiss() }
     }
 
     // MARK: - 検索
@@ -130,6 +165,13 @@ final class CarPlayVoiceControl {
     }
 
     // MARK: - 画面
+
+    /// 題で置く。**絵にしない。** 地図側の「完了」「案内終了」と同じ形にしておけば、
+    /// 押す前に何が起きるか読める。
+    @available(iOS 26.4, *)
+    private var closeButton: CPBarButton {
+        CPBarButton(title: String(localized: "閉じる")) { [weak self] _ in self?.cancel() }
+    }
 
     private func makeState(_ step: Step, title: String, symbol: String) -> CPVoiceControlState {
         CPVoiceControlState(identifier: step.rawValue,

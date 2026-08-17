@@ -175,9 +175,20 @@ Combine の使い分けにも意味がある:
   止める。`prompt(for:on:)` は返した時点でそのしきい値を読み上げ済みとして記録するので、
   受け取ってから捨てるとその予告は二度と出てこない。いっぽう到着・経由地通過は
   `PassthroughSubject` の 1 回きりの出来事なので、捨てずに抱えて `resume()` で読む。
-- **話し終わりは自分で決める**。1.4 秒黙ったら終わり、上限 15 秒。CarPlay の音声画面には
-  閉じるボタンを置けない（`CPBarButtonProviding` 準拠も `actionButtons` も iOS 26.4 以降）ので、
-  自動で切り上げる以外に終わる道が無い。
+- **話し終わりは自分で決める**。1.4 秒黙ったら終わり、上限 15 秒。**下限が 26.0 のうちは
+  これが唯一の出口になりうる**ので、閉じるボタンを足しても外さないこと。
+  - **閉じるボタンは 26.4 以降だけ**（`trailingNavigationBarButtons`、`#available` で分ける）。
+    `actionButtons` は名前が近いが **`CPVoiceControlState` のプロパティ**で、状態ごとの
+    操作を並べるもの。画面そのものを畳む役ではない。
+  - `CPVoiceControlTemplate` の `CPBarButtonProviding` 準拠は
+    **`__IPHONE_OS_VERSION_MIN_REQUIRED` で切られている**（SDK ではなく**下限**で決まる）ので、
+    26.0 が下限のうちは protocol として見えない。プロパティ自体はクラスに生えているため、
+    `template.trailingNavigationBarButtons` を直接触るぶんには `#available` で足りる。
+  - **押されたら聞き取った語は捨てる**（`Task` を取り消し、以降の `guard !Task.isCancelled`
+    で全部落とす）。**閉じたのに案内が始まるのがいちばん困る。**
+  - **マイクは `SpeechInput` に閉じさせる。** あちらは読み上げを止める・戻すの順序を
+    決めて畳む作りなので、途中から手を出すとその順序が壊れる。そのぶん閉じた直後に
+    もう一度マイクを押しても反応しないことがある（`isRunning` が下りるのは畳み終わったとき）。
 - **お気に入りと履歴の地名を認識のヒントに渡す**（`AnalysisContext.contextualStrings`）。
   固有名詞は一般の言語モデルが落としやすく、地名は落とされるといちばん困る。
 - **言語モデルが使えなくても止めない**。`DestinationIntent.parse` は Foundation Models で

@@ -484,6 +484,23 @@ CarPlay 層は触らずに済む設計。
   `LocationService.setNavigating` がガード済み。「常に許可」は Apple の推奨順序に従い、
   案内を開始してから初めて求める。
 - **CarPlay の `upcomingManeuvers` は 2 件までしか表示されない**ので 2 件で切っている。
+- **自アプリが前面でないあいだ、指示と助言はバナーとして出る**。出すかどうかは
+  `CPMapTemplateDelegate` の 3 つの callback で決められるが、**実装しているのは
+  更新の可否だけ**（`shouldUpdateNotificationFor`）。
+  - **距離の表記が変わるときだけ通す。** `updateEstimates` は毎秒呼んでいるので、
+    素通しにすると 1 分に 60 回バナーを描き直させる。`Formatters` に通した文字が
+    同じなら画面は 1 ドットも変わらないので、通す意味が無い。指示そのものが
+    入れ替わったときは同じ表記でも通す（別の曲がり角の距離なので）。
+  - **出す・出さないは既定に任せる**（`shouldShowNotificationFor` は実装しない）。
+    曲がる指示も助言も、前面にいないときこそ見せたいもので、止める理由が無い。
+  - **バナーを押されたら地図を自車へ戻す**（`templateApplicationScene(_:didSelect:)`、
+    指示と助言で同じ扱い）。「追従へ勝手に戻さない」の例外にあたるが、こちらの都合では
+    なく**利用者が押した結果**なので現在地ボタンと同じ。押した人は「いまの案内を見せろ」と
+    言っているのに、前に指で動かしたままだと別の場所を映した地図に着地する。
+  - **この 3 つは任意メソッドなので、名前を 1 文字間違えても素通りする**。追加したときは
+    `d.mapTemplate?(t, shouldUpdateNotificationFor: m, with: e)` のように optional 呼び出しを
+    書いた捨てファイルを `swiftc -typecheck` に通して確かめる（`#selector` は
+    同名オーバーロードで曖昧になる）。
 - **案内の内容は車のメーター・HUD にも送っている**（ガイド p.56）。
   `mapTemplateShouldProvideNavigationMetadata` が true を返すことで有効になり、
   `CPManeuver.maneuverType` と `CPNavigationSession.maneuverState` が車へ渡る。

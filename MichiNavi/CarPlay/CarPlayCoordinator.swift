@@ -38,6 +38,11 @@ final class CarPlayCoordinator: NSObject {
     private var routeManeuvers: [CPManeuver] = []
     /// `routeManeuvers` がどの経路のものか。リルートで作り直す判断に使う。
     private var maneuverRouteID: UUID?
+    /// 背面のときのバナーへ、最後に通した指示と距離の表記。**同じ文字を出し直させない**
+    /// ための記録で、画面に出ているものとは別（前面ではバナーそのものが出ない）。
+    private var notifiedManeuver: ObjectIdentifier?
+    private var notifiedDistanceText: String?
+
     /// 車へ経路を渡す係（iOS 26.4 以降）。
     ///
     /// 型が 26.4 でしか存在せず、**格納プロパティには `@available` を付けられない**ので、
@@ -153,6 +158,17 @@ final class CarPlayCoordinator: NSObject {
         observeState()
     }
 
+    /// 背面のときに出たバナーを押して、この画面へ戻ってきた。
+    ///
+    /// **地図を自車へ戻す。** 押した人は「いまの案内を見せろ」と言っているのに、
+    /// 前に指で動かしたままだと別の場所を映した地図に着地する。
+    ///
+    /// **「追従へ勝手に戻さない」の例外**（`recenter()` の説明）にあたるが、これは
+    /// こちらの都合で戻すのではなく、現在地ボタンと同じ**利用者が押した結果**。
+    func bannerSelected() {
+        recenterMap("banner")
+    }
+
     /// 車から渡される昼夜の指定を地図へ流す（ガイド p.35）。
     /// テンプレート側は CarPlay が自前で切り替えるので、こちらは地図だけでよい。
     func apply(contentStyle: UIUserInterfaceStyle) {
@@ -181,6 +197,8 @@ final class CarPlayCoordinator: NSObject {
         maneuverRouteID = nil
         routeSharingBox = nil
         isTripPaused = false
+        notifiedManeuver = nil
+        notifiedDistanceText = nil
     }
 
     private func observeState() {
@@ -1140,6 +1158,31 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
     func mapTemplate(_ mapTemplate: CPMapTemplate, didFailToShareDestinationFor trip: CPTrip, error: any Error) {
         CarPlayVehicleLog.destinationShared(succeeded: false)
         presentAlert(message: String(localized: "目的地を車に送れませんでした"))
+    }
+
+    // MARK: 背面のときのバナー
+
+    /// 自アプリが前面でないあいだ、次の指示はバナーとして出る。その距離の更新を
+    /// 通してよいかを毎回聞かれるので、**読める文字が変わるときだけ通す**。
+    ///
+    /// `updateEstimates` は位置更新のたび（毎秒）呼んでいるので、素通しにすると
+    /// 1 分に 60 回バナーを描き直させることになる。距離の表記（`Formatters`）が同じなら
+    /// 画面は 1 ドットも変わらないので、通す意味が無い。
+    ///
+    /// **抑えるのは更新だけ。** バナーを出すかどうか（`shouldShowNotificationFor`）は
+    /// 実装せず既定に任せている。曲がる指示も助言のアラートも、**前面にいないときこそ
+    /// 見せたいもの**で、こちらから止める理由が無い。
+    func mapTemplate(_ mapTemplate: CPMapTemplate,
+                     shouldUpdateNotificationFor maneuver: CPManeuver,
+                     with travelEstimates: CPTravelEstimates) -> Bool {
+        let text = Formatters.distanceText(travelEstimates.distanceRemaining.converted(to: .meters).value)
+        let maneuverKey = ObjectIdentifier(maneuver)
+        // 指示そのものが入れ替わったときは、同じ表記でも通す（別の曲がり角の距離なので）。
+        guard notifiedManeuver != maneuverKey || notifiedDistanceText != text else { return false }
+
+        notifiedManeuver = maneuverKey
+        notifiedDistanceText = text
+        return true
     }
 
     // MARK: 案内の開始と終了

@@ -21,6 +21,20 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         coordinator?.apply(contentStyle: contentStyle)
     }
 
+    /// 背面のときに出た曲がる指示のバナーを押された。CarPlay がこの画面を前面へ戻すので、
+    /// こちらは中身を合わせるだけ。**押されたのがどれかは見ていない**（バナーに出るのは
+    /// 常に次の指示で、選ぶ余地が無い）。
+    func templateApplicationScene(_ scene: CPTemplateApplicationScene, didSelect maneuver: CPManeuver) {
+        coordinator?.bannerSelected()
+    }
+
+    /// 助言のバナー（駐車場・迂回・休憩など）を押された。**どの助言かで動きを変えない。**
+    /// 受けるかどうかはバナーのボタンで決まっていて、本文を押すのは
+    /// 「画面で見たい」以上の意味を持たない。
+    func templateApplicationScene(_ scene: CPTemplateApplicationScene, didSelect navigationAlert: CPNavigationAlert) {
+        coordinator?.bannerSelected()
+    }
+
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene,
                                   didDisconnectInterfaceController interfaceController: CPInterfaceController,
                                   from window: CPWindow) {

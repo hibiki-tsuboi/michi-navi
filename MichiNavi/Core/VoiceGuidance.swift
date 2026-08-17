@@ -41,8 +41,12 @@ final class VoiceGuidance: NSObject {
     }
 
     func start() {
-        navigation.$phase
-            .sink { [weak self] in self?.apply(phase: $0) }
+        // **見るのは `phase` ではなく「いま走っている経路」**。走行中に次の行き先を
+        // 探すと `phase` は `.calculating` → `.previewing` と動くが、車はまだ元の経路の
+        // 上にいる。`phase` で見ると押した瞬間にスケジューラを捨てて黙り、決めるまで
+        // 予告が出ない（`NavigationController.activeRoute` の説明）。
+        navigation.$activeRoute
+            .sink { [weak self] in self?.apply(route: $0) }
             .store(in: &cancellables)
 
         navigation.$progress
@@ -78,7 +82,9 @@ final class VoiceGuidance: NSObject {
     /// `VoicePromptScheduler` は通さない。あちらは「1 回だけ読む」ための記録を持っており、
     /// 通すと読み直しが済みとして記録されて**本来の予告が消える**。
     func repeatCurrentGuidance() {
-        guard case let .navigating(route) = navigation.phase,
+        // ここも `activeRoute`。声で「読み直して」と言えるのは行き先を選んでいる最中も
+        // 同じなので、`phase` で見ると押した（言った）のに何も起きない場面ができる。
+        guard let route = navigation.activeRoute,
               let progress = navigation.progress,
               route.steps.indices.contains(progress.stepIndex) else { return }
 
@@ -112,8 +118,8 @@ final class VoiceGuidance: NSObject {
 
     // MARK: - 状態の追従
 
-    private func apply(phase: NavigationController.Phase) {
-        guard case let .navigating(route) = phase else {
+    private func apply(route: NavRoute?) {
+        guard let route else {
             scheduler = nil
             currentRouteSignature = nil
             // 到着のひと言だけは最後まで言わせる。
@@ -129,7 +135,7 @@ final class VoiceGuidance: NSObject {
         // フラグが立ったまま次の案内へ持ち越さないよう、ここで必ず倒す。
         isAnnouncingArrival = false
         // 最初のひと言は、**なぜ経路が入れ替わったか**で変わる。理由は
-        // `NavigationController` が `phase` を動かす前に置いているので、ここで読める。
+        // `NavigationController` が `activeRoute` を動かす前に置いているので、ここで読める。
         scheduler = VoicePromptScheduler(opening: navigation.lastRouteChange)
         currentRouteSignature = signature
     }
@@ -141,7 +147,7 @@ final class VoiceGuidance: NSObject {
         guard !isSuspended else { return }
 
         guard let scheduler,
-              let route = navigation.currentRoute,
+              let route = navigation.activeRoute,
               let prompt = scheduler.prompt(for: progress, on: route) else { return }
         speak(prompt)
     }

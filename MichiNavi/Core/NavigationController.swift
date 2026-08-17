@@ -35,6 +35,19 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// いま案内している経路。**`phase` とは寿命が違う。**
+    ///
+    /// 走行中に次の行き先を探すと `phase` は `.calculating` → `.previewing` と動くが、
+    /// **車はまだこの経路の上を走っている**。nil になるのは案内が本当に終わったとき
+    /// （到着・中止）だけ。
+    ///
+    /// **「案内が生きているか」を見たい購読側はこちらを見る**（`phase` ではなく）。
+    /// `phase` で見ると、走行中にキーボードが使えないぶんいちばんよく通る導線——声と
+    /// 「目的地を変更」——を押した瞬間に案内が黙る。逆に**「いまどの画面か」で決まる
+    /// ものは `phase` のまま**にしておくこと（CarPlay の案内カードは選んでいるあいだ
+    /// 畳んであるので、そこへ指示を送っても行き先が無い）。
+    @Published private(set) var activeRoute: NavRoute?
+
     /// 到着予定がどれだけ遅れているか。CarPlay が到着予定の色に使う。
     ///
     /// **測り直すまでは nil。** 材料が無い状態と「見込みどおり」を混ぜない。混ぜると、
@@ -144,9 +157,18 @@ final class NavigationController: ObservableObject {
         hasReportedOffline = false
     }
 
+    /// **いま案内の段階にある**経路。案内カードのように「その画面が出ているあいだだけ
+    /// 意味を持つ」ものはこちらを見る。走っている経路そのものは [activeRoute]。
     var currentRoute: NavRoute? {
         if case let .navigating(route) = phase { return route }
         return nil
+    }
+
+    /// いま案内の段階にいるか。**「案内が生きているか」とは別**（あちらは [activeRoute]）。
+    /// 次の行き先を選んでいるあいだは、案内が生きたままこちらだけ false になる。
+    private var isNavigatingPhase: Bool {
+        if case .navigating = phase { return true }
+        return false
     }
 
     var previewedRoutes: [NavRoute] {
@@ -308,6 +330,9 @@ final class NavigationController: ObservableObject {
         // 実際に案内を始めた地点だけを履歴に残す。ルートを見ただけでは残さない。
         DestinationStore.shared.remember(route.destination)
         guidance = GuidanceEngine(route: route)
+        // **`phase` より先に置く。** 案内が生きているかを見ている側（`VoiceGuidance`）は
+        // こちらを購読しているので、経路と読み上げの段取りをここで揃える。
+        activeRoute = route
         announcedStepIndex = nil
         progress = nil
         lastFix = nil
@@ -342,6 +367,8 @@ final class NavigationController: ObservableObject {
         routingTask?.cancel()
         routingTask = nil
         guidance = nil
+        // 案内が本当に終わるのはここと到着だけ。読み上げもこの立ち下がりで止まる。
+        activeRoute = nil
         announcedStepIndex = nil
         progress = nil
         lastFix = nil
@@ -366,14 +393,28 @@ final class NavigationController: ObservableObject {
 
     // MARK: - 位置更新
 
+    /// **案内が生きているかは `activeRoute` で見る。`phase` ではない。**
+    ///
+    /// 走行中に次の行き先を探すと `phase` は `.calculating` → `.previewing` と動くが、
+    /// 車はまだ元の経路の上を走っている。`phase` で判定すると、押した瞬間から `progress`
+    /// が流れなくなり、**決めるまで案内が黙る**。走行中はキーボードが塞がれるので、
+    /// 声と「目的地を変更」がその状態に入る唯一の道で、いちばんよく通る道でもある。
+    ///
+    /// そのうえで、**画面が出ているあいだだけ意味を持つものは `phase` で切る**
+    /// （下の 2 か所）。
     private func handle(location current: CLLocation) {
-        guard case let .navigating(route) = phase, let guidance else { return }
+        guard let guidance, let route = activeRoute else { return }
 
         lastFix = Date()
         let updated = guidance.update(with: current)
         progress = updated
 
         if updated.hasArrived {
+            // **到着は案内の段階でだけ受ける。** 次の行き先を選んでいる最中に元の目的地へ
+            // 着くことはありうるが、`cancelNavigation()` は後始末と `.idle` への落とし込みを
+            // 兼ねているので、ここで呼ぶと**利用者が見ている候補ごと消える**。見送ると
+            // 駐車位置の記録を 1 回落とすが、そのまま次の案内で上書きされる。
+            guard isNavigatingPhase else { return }
             // 着いた地点を車の置き場所として残す。目的地の座標ではなく**実際に
             // 着いた座標**を使う（施設が目的地なら、車は入口ではなく駐車場にある）。
             DestinationStore.shared.rememberParking(at: current.coordinate, near: route.destination)
@@ -390,6 +431,10 @@ final class NavigationController: ObservableObject {
             return
         }
 
+        // **ここから下は案内の段階でだけ。** 指示の差し替えは CarPlay の案内カード
+        // （選んでいるあいだは畳んである）を宛先にしており、到着予定の測り直しは結果を
+        // `.navigating` でしか受け取らない（`MKDirections` を投げるだけ無駄になる）。
+        guard isNavigatingPhase else { return }
         announceIfNeeded(on: route, stepIndex: updated.stepIndex)
         refreshTravelTimeIfNeeded(on: route)
     }
@@ -486,13 +531,16 @@ final class NavigationController: ObservableObject {
     /// **リルートも到着もここからは起こさない**（`GuidanceEngine.extrapolate` が
     /// どちらも判定しない）。動かしているのは表示と、次の指示を出す時刻だけ。
     private func advanceWhileWaitingForFix() {
-        guard case let .navigating(route) = phase, let guidance, let lastFix else { return }
+        guard let guidance, let route = activeRoute, let lastFix else { return }
 
         let elapsed = Date().timeIntervalSince(lastFix)
         guard elapsed >= Self.deadReckoningDelay,
               let updated = guidance.extrapolate(elapsed: elapsed) else { return }
 
         progress = updated
+        // `handle(location:)` と同じ切り分け。表示と読み上げは進めるが、案内カードへの
+        // 差し替えは画面が出ているあいだだけ。
+        guard isNavigatingPhase else { return }
         announceIfNeeded(on: route, stepIndex: updated.stepIndex)
     }
 
@@ -521,6 +569,19 @@ final class NavigationController: ObservableObject {
     /// という形で確実に破綻する。**間隔だけでは足りない**ので、停まっているあいだは
     /// そもそも投げない（[canReroute(from:)]）。
     private func reroute(to destination: Place, via waypoints: [Place], from current: CLLocation) {
+        // **次の行き先を選んでいるあいだは引き直さない。** `routingTask` は 1 本しかないので、
+        // ここで投げると**利用者が待っている目的地の計算を取り消す**。しかも成功すれば
+        // `startNavigation(with:)` が `phase` を `.navigating` へ戻すので、**候補の一覧が
+        // 消えて元の経路の案内に引き戻される**。走り出す道が変わらない停車中と同じで、
+        // 決まるまで待って損はない。
+        //
+        // `isRerouting` はここでは触らない。`route(to:)` がもう下ろしているうえ、
+        // 案内から出た時点で CarPlay のセッションごと畳んであるので、
+        // 「検索していないのに再検索中のカードが残る」形にならない。
+        guard isNavigatingPhase else {
+            NavigationLog.rerouteSkipped("choosing")
+            return
+        }
         // **圏外なら投げない。** MapKit の経路計算はネットワーク越しなので必ず失敗する。
         // 投げれば失敗が数えられて間隔が伸び、電波が戻ってからも待たされる。
         // 停車のときと同じく、**何も検索していないのだから「再検索中」は下ろす**。

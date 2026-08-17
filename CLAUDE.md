@@ -55,6 +55,30 @@ idle ──requestRoutes──> calculating ──> previewing ──startNaviga
 利用者が選ぶ。`startNavigation(to:)` は計算からそのまま navigating へ入る（先頭のルートを使う）。
 後者は CarPlay Dashboard のショートカットのように、**提示画面を見てもらえない場所**からの入口。
 
+**`phase` は「いまどの画面か」で、「案内が生きているか」ではない**（2026-08-18 に分けた）。
+図のとおり**案内中に次の行き先を探すと `.calculating` → `.previewing` へ戻る**が、そのあいだも
+車は元の経路の上を走っている。走行中はキーボードが塞がれるので、**声と「目的地を変更」が
+その状態に入る唯一の道で、いちばんよく通る道でもある**。両者を `phase` で兼ねていたころは、
+押した瞬間に `handle(location:)` が `guard case let .navigating` で落ちて `progress` が止まり、
+音声予告も逸脱判定も**決めるまで黙っていた**（凍った案内カードが生きているように見えた）。
+
+- **走っている経路は `activeRoute`**（`@Published`）。nil になるのは到着と中止だけ。
+  「案内が生きているか」で決まるものはこちらを見る。**`VoiceGuidance` はこちらを購読する**
+  （あちらは `phase` が `.navigating` を外れた時点でスケジューラを捨てるので、`progress` を
+  流すだけでは声が戻らない）。
+- **`phase` / `currentRoute` を見るのは、その画面が出ているあいだだけ意味を持つもの**。
+  CarPlay の案内カード（`maneuverChanged` → `updateManeuvers`）と到着予定の測り直しがそれで、
+  **選んでいるあいだは CarPlay のセッションごと畳んである**（→「踏み抜きやすい前提」）。
+  助言を出す 5 つの層も全部 `phase` 側で、選んでいるあいだは黙る。
+- **選んでいるあいだは引き直さない**（`reroute` の先頭。ログは `rerouteSkipped("choosing")`）。
+  `routingTask` は 1 本しかないので、投げると**利用者が待っている目的地の計算を取り消す**
+  うえ、成功すれば `startNavigation(with:)` が `phase` を `.navigating` へ戻して
+  **候補の一覧ごと消える**。逸脱そのものは記録される（`off-route` の行は出る）。
+- **到着も `phase` 側**。選んでいる最中に元の目的地へ着いても受けない。`cancelNavigation()` は
+  後始末と `.idle` への落とし込みを兼ねているので、そこで呼ぶと候補が消える。**駐車位置の
+  記録を 1 回落とす**のが代償で、そこまで正確にしたいなら `cancelNavigation()` を
+  「trip を終わらせる」と「`.idle` へ落とす」に割ること。
+
 Combine の使い分けにも意味がある:
 
 - `@Published`（`phase` / `progress` / `lastError` / `isRerouting`）= **いまの状態**。

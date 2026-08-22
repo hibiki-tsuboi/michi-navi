@@ -115,6 +115,8 @@ final class NavigationController: ObservableObject {
     private var lastFix: Date?
     /// 測位が途切れているあいだ進捗を進める時計。案内中だけ動く。
     private var deadReckoningTimer: Timer?
+    /// いまの途切れについて「推測でも進めない」を記録したか。実測が 1 回来たら倒す。
+    private var hasReportedDeadReckoningStall = false
 
     /// リルート計算がいま走っているか。何度も計算を投げないためだけのフラグで、
     /// 公開している `isRerouting` とは寿命が違う（失敗すれば即座に下りて再試行できる）。
@@ -379,6 +381,7 @@ final class NavigationController: ObservableObject {
         announcedStepIndex = nil
         progress = nil
         lastFix = nil
+        hasReportedDeadReckoningStall = false
         deadReckoningTimer?.invalidate()
         deadReckoningTimer = nil
         isCalculatingReroute = false
@@ -419,10 +422,16 @@ final class NavigationController: ObservableObject {
         guard let guidance, let route = activeRoute else { return }
 
         lastFix = Date()
+        hasReportedDeadReckoningStall = false
         let updated = guidance.update(with: current)
         progress = updated
 
         if updated.hasArrived {
+            // **到着を残す。** 出ていなければ「まだ着いたと思っていない」と分かる。
+            // 画面には「案内が終わらない」という形でしか出ないので、これが無いと
+            // 判定が成立しなかったのか、成立したのに後始末が動かなかったのかを
+            // 切り分けられない。
+            NavigationLog.arrived(remaining: updated.distanceRemaining)
             // 着いた地点を車の置き場所として残す。目的地の座標ではなく**実際に
             // 着いた座標**を使う（施設が目的地なら、車は入口ではなく駐車場にある）。
             DestinationStore.shared.rememberParking(at: current.coordinate, near: route.destination)
@@ -550,8 +559,19 @@ final class NavigationController: ObservableObject {
         guard let guidance, let route = activeRoute, let lastFix else { return }
 
         let elapsed = Date().timeIntervalSince(lastFix)
-        guard elapsed >= Self.deadReckoningDelay,
-              let updated = guidance.extrapolate(elapsed: elapsed) else { return }
+        guard elapsed >= Self.deadReckoningDelay else { return }
+        guard let updated = guidance.extrapolate(elapsed: elapsed) else {
+            // **推測でも進めなくなった。ここから先は測位が戻るまで到着しない**
+            // （推測では到着を判定しないので）。画面は最後に測れた値で止まるだけなので、
+            // これを残さないと「案内が凍った」以上のことが後から分からない。
+            // 1 回の途切れにつき 1 行だけ出す（毎秒来るので素通しにすると埋まる）。
+            if !hasReportedDeadReckoningStall {
+                hasReportedDeadReckoningStall = true
+                NavigationLog.deadReckoningStalled(elapsed: elapsed,
+                                                   remaining: progress?.distanceRemaining)
+            }
+            return
+        }
 
         progress = updated
         // `handle(location:)` と同じ切り分け。表示と読み上げは進めるが、案内カードへの

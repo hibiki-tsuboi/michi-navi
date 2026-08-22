@@ -143,14 +143,31 @@ struct GuidanceEngineTests {
     }
 
     @Test("推測では到着も逸脱も判定しない（トンネルの中で案内を終わらせない）")
-    func extrapolationNeverArrivesOrLeavesRoute() {
+    func extrapolationNeverArrivesOrLeavesRoute() throws {
         let (engine, _) = makeEngine()
+        _ = engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 500), speed: 20))
+
+        let guessed = try #require(engine.extrapolate(elapsed: 5))
+        #expect(guessed.hasArrived == false)
+        #expect(guessed.isOffRoute == false)
+    }
+
+    /// **到着圏に入る手前で推測をやめる。** 経路の端に張り付かせていたころは、測位が
+    /// 戻らないと**「残り 0m」を出したまま永遠に到着しない**状態になった（推測では到着を
+    /// 判定しないため）。0m と言いながら着かないのが症状で、進めるのをやめれば
+    /// 表示は最後に測れた値で止まる。
+    @Test("推測は到着圏の手前で止まる")
+    func extrapolationStopsBeforeArrivalZone() {
+        let (engine, _) = makeEngine()
+        // 全長 1000m。到着のしきい値は 30m なので、推測で行けるのは 970m まで。
         _ = engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 900), speed: 20))
 
-        // 経路の終わりを通り越すだけ進めても、着いたことにはしない。
-        let guessed = engine.extrapolate(elapsed: 60)
-        #expect(guessed?.hasArrived == false)
-        #expect(guessed?.isOffRoute == false)
+        // 20 m/s で 3 秒＝960m。まだ手前なので進める。
+        #expect(engine.extrapolate(elapsed: 3) != nil)
+        // 4 秒＝980m。到着圏に入るので返さない。
+        #expect(engine.extrapolate(elapsed: 4) == nil)
+        // どれだけ経っても端に張り付かない。
+        #expect(engine.extrapolate(elapsed: 600) == nil)
     }
 
     @Test("速度が取れていなければ推測しない")

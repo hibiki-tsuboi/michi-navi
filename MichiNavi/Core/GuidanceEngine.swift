@@ -174,11 +174,19 @@ final class GuidanceEngine {
     /// 推測で言い切ってよいものではない。推測でリルートすれば道なりに走っているのに
     /// 経路が入れ替わり、推測で到着すれば案内がトンネルの中で終わる。
     ///
+    /// **到着圏に入る手前で推測をやめる**（`nil` を返す）。推測で到着を言わないのなら、
+    /// 到着と同じ距離まで推測で詰めてもいけない。以前は `min(..., totalDistance)` で
+    /// 経路の端に張り付かせていたので、測位が戻らないときに**「残り 0m」を出したまま
+    /// 永遠に到着しない**状態になった。0m と言いながら着かないのは、案内としていちばん
+    /// 読めない形——**分かっているところまでしか言わない**ほうがよい。進めるのをやめれば
+    /// 表示は最後に測れた値で止まる。
+    ///
     /// - Parameter elapsed: 最後の測位からの経過時間。
     func extrapolate(elapsed: TimeInterval) -> RouteProgress? {
         guard points.count >= 2, lastSpeed > 0, elapsed > 0 else { return nil }
 
-        let travelled = min(lastTravelled + lastSpeed * elapsed, totalDistance)
+        let travelled = lastTravelled + lastSpeed * elapsed
+        guard travelled < totalDistance - arrivalThreshold else { return nil }
         return progress(travelled: travelled,
                         snappedTo: coordinate(atTravelled: travelled),
                         distanceFromRoute: 0,

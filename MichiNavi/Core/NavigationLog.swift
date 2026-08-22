@@ -53,6 +53,23 @@ enum NavigationLog {
         emit("reroute \(succeeded ? "succeeded" : "failed") changed=\(changed)")
     }
 
+    /// 到着と判定した。**「到着にならない」を調べるときに最初に見る行。**
+    /// これが出ていなければ、`GuidanceEngine` はまだ着いたと思っていない。
+    static func arrived(remaining: CLLocationDistance) {
+        emit("arrived remaining=\(Int(remaining))m")
+    }
+
+    /// 測位が途切れたまま、推測でも進めなくなった。**ここから先は測位が戻るまで
+    /// 到着しない**（推測では到着を判定しないので）。1 回の途切れにつき 1 行だけ出す。
+    ///
+    /// 出る理由は 3 つ。止まっていて速度が 0（＝進めようがない）、推測が到着圏に
+    /// 届いた、経路の点が足りない。**どれでも「待つしかない」のは同じ**なので分けていない。
+    /// 見るべきは `remaining`——ここで止まった残り距離が、着いたはずの場所との差になる。
+    static func deadReckoningStalled(elapsed: TimeInterval, remaining: CLLocationDistance?) {
+        let last = remaining.map { "\(Int($0))m" } ?? "—"
+        emit("dead-reckoning stalled elapsed=\(Int(elapsed))s remaining=\(last)")
+    }
+
     // MARK: -
 
     private static func emit(_ message: @autoclosure () -> String) {

@@ -1,5 +1,6 @@
 import MapKit
 import SwiftUI
+import UIKit
 
 /// iPhone 側の画面。CarPlay と同じ `NavigationController` を見ているので、
 /// どちらで目的地を決めても両方の画面がついてくる。
@@ -197,21 +198,61 @@ struct ContentView: View {
             }
 
         case .navigating:
-            HStack {
-                if let progress = navigation.progress {
-                    VStack(alignment: .leading) {
-                        Text(Formatters.durationText(progress.timeRemaining)).font(.title3.bold())
-                        Text(String(localized: "\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(spacing: 8) {
+                backgroundLocationNotice
+                navigatingPanel
+            }
+        }
+    }
+
+    private var navigatingPanel: some View {
+        HStack {
+            if let progress = navigation.progress {
+                VStack(alignment: .leading) {
+                    Text(Formatters.durationText(progress.timeRemaining)).font(.title3.bold())
+                    Text(String(localized: "\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button(String(localized: "案内終了"), role: .destructive) { navigation.cancelNavigation() }
+                .buttonStyle(.bordered)
+        }
+        .panel()
+    }
+
+    /// 「使用中のみ」で案内しているあいだ、出しっぱなしにする注意。
+    ///
+    /// **一度きりの表示にしない。** 直すには設定アプリへ行く必要があり、戻ってきたときに
+    /// 消えていると何を直しに行ったのか分からなくなる。許可が変われば自然に消える。
+    ///
+    /// **設定を開くボタンはこちらにしか無い。** CarPlay 側は起きることを伝えるだけで、
+    /// 押させる操作を作っていない（運転中に iPhone を触らせないため）。
+    @ViewBuilder
+    private var backgroundLocationNotice: some View {
+        if location.authorizationStatus == .authorizedWhenInUse {
+            HStack(spacing: 12) {
+                Image(systemName: "location.slash")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "位置情報が「使用中のみ」です"))
+                        .font(.footnote.bold())
+                    Text(String(localized: "ほかのアプリに切り替えると案内が止まります"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(String(localized: "案内終了"), role: .destructive) { navigation.cancelNavigation() }
+                Button(String(localized: "設定")) { openLocationSettings() }
                     .buttonStyle(.bordered)
             }
             .panel()
         }
+    }
+
+    private func openLocationSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     private func notice(_ text: String) -> some View {

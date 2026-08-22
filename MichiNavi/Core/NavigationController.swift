@@ -96,6 +96,20 @@ final class NavigationController: ObservableObject {
         let stepIndex: Int
     }
 
+    /// 「使用中のみ」のまま案内している。**案内 1 回につき 1 度だけ流れる。**
+    ///
+    /// あの状態では `allowsBackgroundLocationUpdates` を立てられない（`authorizedAlways`
+    /// でないと例外）ので、**アプリのシーンが 1 つも前面でなくなった時点で測位が止まる**。
+    /// CarPlay の画面が出ているあいだは前面だが、運転者が音楽など**別の CarPlay アプリへ
+    /// 切り替えた瞬間**にそこから外れる。止まっているあいだ動くのは推測航法だけで、
+    /// 推測では到着を判定しないので**そのまま目的地に着いても到着にならない**。
+    /// 音声予告も逸脱判定も引き直しも同時に止まる。
+    ///
+    /// **iOS は一度断られると二度と聞かない。** `requestAlwaysAuthorization` は案内の
+    /// 開始時に出るだけなので、断られたあとは設定を開いてもらうほかに直す道が無い。
+    /// 黙っていると、症状（案内が凍る）と原因（許可）が結び付かない。
+    let backgroundLocationUnavailable = PassthroughSubject<Void, Never>()
+
     /// 圏外で経路を引き直せなかったときに流れる。**圏外が続くあいだは 1 回だけ。**
     ///
     /// 引き直しを見送ると「再検索中」のカードは下りるので、何も出さないと**経路を
@@ -129,6 +143,8 @@ final class NavigationController: ObservableObject {
     private var lastRerouteOrigin: CLLocation?
     /// いまの圏外について、もう知らせたか。電波が戻ったら倒す。
     private var hasReportedOffline = false
+    /// この案内について、背景で測位が止まることをもう知らせたか。案内が終わったら倒す。
+    private var hasReportedBackgroundLocation = false
 
     /// 到着予定を最後に測り直した時刻。
     private var lastTravelTimeRefresh: Date?
@@ -144,6 +160,29 @@ final class NavigationController: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] in self?.apply(isOnline: $0) }
             .store(in: &cancellables)
+
+        // **開始時に見るだけでは足りない。** 案内を始めた直後は `.notDetermined` の
+        // ことがあり（そこで `requestAlwaysAuthorization` を出している）、答えが返るのは
+        // このあと。返ってきたところで判断する。
+        location.$authorizationStatus
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.reportBackgroundLocationIfNeeded() }
+            .store(in: &cancellables)
+    }
+
+    /// 「使用中のみ」のまま案内していることを 1 度だけ知らせる。
+    ///
+    /// **`.notDetermined` では黙る。** いま聞いている最中なので、答えが出てから決める
+    /// （`$authorizationStatus` の購読がもう一度ここへ連れてくる）。**`.denied` でも黙る**。
+    /// あちらは測位そのものが動かず、案内を始めることすらできないので、
+    /// 「背景で止まる」という話にならない。
+    private func reportBackgroundLocationIfNeeded() {
+        guard activeRoute != nil,
+              !hasReportedBackgroundLocation,
+              location.authorizationStatus == .authorizedWhenInUse else { return }
+
+        hasReportedBackgroundLocation = true
+        backgroundLocationUnavailable.send()
     }
 
     /// 電波が戻ったら、圏外のあいだに溜めた我慢を捨てる。
@@ -350,6 +389,9 @@ final class NavigationController: ObservableObject {
 
         // 開始直後に 1 回流し、位置更新を待たずに最初の指示を出す。
         if let current = location.location { handle(location: current) }
+        // すでに「使用中のみ」で決まっているなら、ここで知らせる（`.notDetermined` なら
+        // 上の `setNavigating(true)` が聞いている最中なので、答えを待って購読側が拾う）。
+        reportBackgroundLocationIfNeeded()
 
         // 下ろすのは最後。CarPlay はこの立ち下がりで `resumeTrip` するので、
         // 新しい経路と最初の進捗が揃う前に下ろすと古い情報で再開してしまう。
@@ -392,6 +434,7 @@ final class NavigationController: ObservableObject {
         lastTravelTimeRefresh = nil
         trafficCondition = nil
         hasReportedOffline = false
+        hasReportedBackgroundLocation = false
         location.setNavigating(false)
     }
 

@@ -333,6 +333,10 @@ final class CarPlayCoordinator: NSObject {
         navigation.rerouteBlockedOffline
             .sink { [weak self] in self?.presentOfflineNotice() }
             .store(in: &cancellables)
+
+        navigation.backgroundLocationUnavailable
+            .sink { [weak self] in self?.presentBackgroundLocationNotice() }
+            .store(in: &cancellables)
     }
 
     // MARK: - 状態の反映
@@ -1328,6 +1332,23 @@ final class CarPlayCoordinator: NSObject {
     /// 何も出さないと**経路を外れたまま無反応**に見える（「再検索中が出っぱなし」を
     /// 直したつもりが「何も起きない」に変わるだけになる）。
     /// 押させることは何も無いので `CPNavigationAlert` で、放っておけば消える形にする。
+    /// 「使用中のみ」のまま案内している。**別の CarPlay アプリへ切り替えると案内が止まる。**
+    ///
+    /// ここでは直せない（設定は iPhone にしか無い）ので、**何が起きるかだけを伝える**。
+    /// 押させる操作を作らないのは、運転中に iPhone を触らせないため。iPhone 側は
+    /// 設定を開くボタンを出している（`ContentView`）。
+    private func presentBackgroundLocationNotice() {
+        let alert = CPNavigationAlert(
+            titleVariants: [String(localized: "位置情報を「常に許可」にしてください"),
+                            String(localized: "位置情報の許可")],
+            subtitleVariants: [String(localized: "ほかのアプリに切り替えると案内が止まります")],
+            image: UIImage(systemName: "location.slash"),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 10)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
     private func presentOfflineNotice() {
         let alert = CPNavigationAlert(
             titleVariants: [String(localized: "圏外のため経路を引き直せません")],

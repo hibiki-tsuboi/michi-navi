@@ -946,6 +946,31 @@ CarPlay 層は触らずに済む設計。
   それ以前は 17.4 からの `resumeTrip(updatedRouteInformation:)`。**新しい方に寄せている
   のは経由地の表現力のためではなく、ルート共有がそちらでしか成立しないから**（後述）。
   古い方は 26.4 で非推奨になったが、26.0 が下限のうちは警告も出ないので残してある。
+  - **`resumeTrip` は `.rerouting` で止めたときしか受け付けない。** `CPNavigationSession` は
+    `pauseReason` が `CPTripPauseReasonRerouting` でなければ **`NSException` を投げる**
+    （`Attempted to resume trip without pausing first.`）。**新旧どちらの `resumeTrip` も
+    同じ判定**で、`pauseReason` を見て違えば即座に投げる。**26.1 まで遡っても同じ**
+    （26.1 / 26.2 / 26.3.1 / 26.4.2 / 26.6 / 26.6.1 の実機バイナリで確認）ので、
+    **OS の更新で始まったものではない**。
+    しかも**止めたものを戻す API はこれしか無い**ので、`.proceedToRoute` で止めたら
+    戻すには**一度 `.rerouting` へ付け替えるしかない**（`CarPlayCoordinator.resume` の
+    先頭でやっている）。ガイド p.61 の pause / resume は引き直しの話だけを書いていて、
+    ほかの理由で止めた場合に戻せないことには触れていない。
+  - これを踏むと**駐車場や施設の中から案内を始めるたびに落ちる**。MapKit が経路の始点を
+    最寄りの車道へ寄せるので出発時は必ず「経路へ進んでください」で止まり、車道へ出た
+    瞬間に `refreshTripPause` が `.proceedToRoute` → nil の付け替えでここへ来る。
+    **`.proceedToRoute` を足した 2026-08-18 から 2026-08-22 まで実際に落ちていた**
+    （判定は 26.1 からあるので、落ち始めた原因はこちらの変更のほう）。
+    落ちるのはアプリのプロセスだが、**iPhone は背面にいるので「CarPlay の画面だけが
+    消えて CarPlay のホームに戻った」ように見える**。切り分けは端末の
+    設定 → プライバシーとセキュリティ → 解析および改善 → 解析データ にある
+    `MichiNavi-*.ips`（`Xcode → Window → Devices and Simulators → View Device Logs` でも同じ）。
+  - **付け替えのときの文言は変えない**（`CarPlayCoordinator.pauseDescription(for:)`）。
+    理由だけ差し替えて同じ往復の中で戻すので、文字まで変えると一瞬だけ別のカードが見える。
+  - **`pauseReason` の写しがずれない前提に乗っている。** `CPNavigationSession` の
+    `pauseReason` を動かすのは `pauseTrip` / `resumeTrip` / `finishTrip` / `cancelTrip` の
+    4 つだけで、CarPlay が勝手に止めることはない（26.6 の逆アセンブルで確認）。
+    だから `pauseTrip` を呼ぶところで必ず `CarPlayCoordinator.pauseReason` も動かすこと。
 - **経路が入れ替わったときは、必ず `pauseTrip` してから `resumeTrip` で渡し直す**
   （ガイド p.61）。止めずに渡すと車側が前の経路を掴んだままになる。逸脱による引き直しは
   `refreshTripPause` が止めるところと再開するところの両方を持っているが、
@@ -1080,19 +1105,27 @@ CarPlay 層は触らずに済む設計。
     では裏返しに、消したはずの履歴からボタンを組み直して、`isEmpty` のガードを通って残る。
 - **iOS 26.4 以降のシミュレータでは、CarPlay に地図を出した瞬間に CarPlay ホストが落ちる**
   （Apple 側のバグ）。**シミュレータで CarPlay を試すときは 26.2 以前を使う。**
-  実機は 2026-08-15 に通しで動いているので、少なくともあの端末では起きていない。
-  ただし確かめたのはシミュレータ用の CarPlaySupport だけで、実機側の実装は見ていない。
+  **これはシミュレータ限定で、実機には無い**（2026-08-22 に確認。下の 1 つ目の項目）。
   26.0 が下限なので 26.0 / 26.1 / 26.2 が選べる。ジェスチャ関連の API は 26.0 から揃って
   いるので、これで確認できないものは無い。
   - `CPSMapTemplateViewController._updateShareButtonVisibility` が
     `destinationSharingDelegate`（実体は `CPSTemplateInstance`）へ
     `vehicleSupportsDestinationSharing` を `respondsToSelector:` も見ずに送る。
-    このセレクタは CarPlaySupport のどこにも実装が無く、送っている箇所も
+    このセレクタは**シミュレータの** CarPlaySupport には実装が無く、送っている箇所も
     ここ 1 つだけ（26.5 の逆アセンブルで確認）。受け手が nil でなく実装だけ無いので、
     `doesNotRecognizeSelector:` で必ず落ちる。
-  - 経路は `_viewDidLoad` → `_configureNavigationBarShareButton` →
+  - **実機の CarPlaySupport には実装がある**（`-[CPSTemplateInstance
+    vehicleSupportsDestinationSharing]`。26.6 / 23G71 と 26.6.1 / 23G83 の arm64e で
+    `nm` して確認）。
+    つまりシミュレータのランタイムだけが欠けている。**実機で 26.4 以降を避ける理由は無い。**
+    確かめ方は `~/Library/Developer/Xcode/iOS DeviceSupport/<機種> <OS>/Symbols/` の下に
+    実機のフレームワークが落ちてくるので、そこを `nm` する（端末を繋ぐ必要も無い）。
+  - シミュレータでの経路は `_viewDidLoad` → `_configureNavigationBarShareButton` →
     `_updateShareButtonVisibility` で、**分岐が無い**。つまりアプリ側で避けようがなく、
     `CPMapTemplate` を push した全アプリが落ちる。共有ボタン自体に公開 API も無い。
+    呼び元は `_viewDidLoad` のほかに 4 つあり（`_tripDidBegin:withEstimates:forIdentifier:` /
+    `navigator:didEndTrip:` / `tripView:selectedTrip:routeChoice:` /
+    `setHostTripPreviews:...`）、**案内の開始・終了・ルート提示の出し入れでも通る**。
   - `_updateShareButtonVisibility` は **26.4 で追加された**。26.2 以前のランタイムには
     メソッドごと存在しない（`nm` で全ランタイムを確認）。
   - **「アプリを再ビルドしたから道連れになった」ではない。** 2026-08-16 まではそう書いて
@@ -1314,12 +1347,11 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   なお **26.4 未満のシミュレータでは新しい経路がまるごと動かない**。既定で起動している
   端末が 26.2 などだと「実装したのに何も起きない」に見えるので、先に OS を確かめること。
 
-  **ここで「未実装」の 2 項目が噛み合っていない。** ルート共有は 26.4 以降でしか動かないが、
-  すぐ上の項目は「26.4 以降のシミュレータは CarPlay に地図を出した瞬間にホストが落ちる、
-  アプリ側で避けようがない」と書いている。両方本当なら**ルート共有はシミュレータで
-  確かめようがない**。どちらも 2026-08-16 に別々に書いたもので、突き合わせていない。
-  **26.4 で本当に落ちるかを見るのが先**で、落ちなければルート共有と目的地名まで一気に
-  確認できる。
+  **ルート共有はシミュレータでは確かめようがない**（2026-08-22 に決着）。あちらは 26.4
+  以降でしか動かないのに、26.4 以降のシミュレータは CarPlay に地図を出した瞬間に
+  ホストが落ちる（→「踏み抜きやすい前提」）。**落ちるのはシミュレータのランタイムだけ**
+  なので、**ルート共有と目的地名の確認は実機でやる**。それまでは 26.2 以前で
+  ジェスチャとパンだけを見る。
 
   以下は 2026-08-18 に **`CarPlay Simulator.app` の中身を読んで**分かったこと
   （プリセットの yaml と車両データの JSON。**動かして確かめたわけではない**）。

@@ -37,8 +37,10 @@ final class CarPlayCoordinator: NSObject {
     private var activeManeuver: CPManeuver?
     /// いま `pauseTrip` で止めている理由。止めていなければ nil。
     ///
-    /// **自分で止めたときだけ再開する**（止めていないのに `resumeTrip` を投げると
-    /// CarPlay 側の状態と食い違う）。理由まで持っているのは、止める事情が 2 つあるのに
+    /// **自分で止めたときだけ再開する。** 止めていないのに `resumeTrip` を投げると
+    /// `NSException` で落ちる（`Attempted to resume trip without pausing first.`）。
+    /// **しかも `.rerouting` で止めたときしか受け付けない**ので、`.proceedToRoute` から
+    /// 戻すには付け替えが要る（[resume]）。理由まで持っているのは、止める事情が 2 つあるのに
     /// **カードに出せる理由は 1 つだけ**だから（[refreshTripPause]）。
     private var pauseReason: TripPause?
 
@@ -611,7 +613,7 @@ final class CarPlayCoordinator: NSObject {
             // description に nil を渡すと CarPlay 側の既定文言（英語環境なら英語）になる。
             // 他の画面の文言に合わせて日本語で出す。
             navigationSession.pauseTrip(for: .rerouting,
-                                        description: String(localized: "ルートを再検索中"),
+                                        description: Self.pauseDescription(for: .rerouting),
                                         turnCardColor: Self.pausedCardColor)
         case .proceedToRoute:
             // **駐車場や施設の中から案内を始めたとき。** MapKit は経路の始点を最寄りの
@@ -620,7 +622,7 @@ final class CarPlayCoordinator: NSObject {
             // 寄るので何も変わらない）だが、**黙っていると普通の案内カードが出たまま**で、
             // 「この指示はいつから有効なのか」が分からない。
             navigationSession.pauseTrip(for: .proceedToRoute,
-                                        description: String(localized: "経路へ進んでください"),
+                                        description: Self.pauseDescription(for: .proceedToRoute),
                                         turnCardColor: Self.pausedCardColor)
         case nil:
             break // 上で渡し直し済み。
@@ -639,10 +641,13 @@ final class CarPlayCoordinator: NSObject {
     private func replaceRoute(reason: RouteChangeReason) {
         guard let navigationSession else { return }
 
-        // **すでに止まっているなら重ねて止めない。** 理由は違っても「渡し直す前に
-        // 止まっている」という p.61 の条件は満たしている。出し直すと、止めている
-        // 理由が一瞬だけ引き直しに化けて見える（「経路へ進む」の最中に立ち寄り先を
-        // 足したときがこれにあたる）。
+        // **すでに止まっているなら重ねて止めない。** 出し直すと、止めている理由が
+        // 一瞬だけ引き直しに化けて見える（「経路へ進む」の最中に立ち寄り先を足した
+        // ときがこれにあたる）。
+        //
+        // ただし**「止まっていれば渡し直せる」ではない**。`resumeTrip` は
+        // `.rerouting` で止めたときしか受け付けないので、`.proceedToRoute` で
+        // 止まっているぶんの付け替えは [resume] が引き受ける（あちらの説明を参照）。
         if pauseReason == nil {
             navigationSession.pauseTrip(for: .rerouting,
                                         description: String(localized: "ルートを引き直し中"),
@@ -664,6 +669,22 @@ final class CarPlayCoordinator: NSObject {
     /// 案内カードと同じ青になり、「いま案内が止まっている」ことが文言でしか分からなくなる。
     /// 赤にはしない。引き直しは危険でも失敗でもなく、待てば戻るものなので。
     private static let pausedCardColor = UIColor.systemOrange
+
+    /// 止めているあいだカードに出す文言。
+    ///
+    /// **`refreshTripPause` と [resume] の 2 か所から引く。** あちらは止めるとき、
+    /// こちらは `.proceedToRoute` を `.rerouting` へ付け替えるときで、**同じ理由には
+    /// 同じ文字が出ないと、付け替えの一瞬だけカードの文言が入れ替わって見える**。
+    ///
+    /// `replaceRoute` の「ルートを引き直し中」はここに入れない。あちらは**利用者の操作**で
+    /// 経路が入れ替わったときの文言で、逸脱による引き直し（「ルートを再検索中」）と
+    /// 読み分けられるように、わざと別の言葉にしてある。
+    private static func pauseDescription(for pause: TripPause) -> String {
+        switch pause {
+        case .rerouting: String(localized: "ルートを再検索中")
+        case .proceedToRoute: String(localized: "経路へ進んでください")
+        }
+    }
 
     /// 引き直した経路で案内を再開する。
     ///
@@ -691,13 +712,39 @@ final class CarPlayCoordinator: NSObject {
         let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
         let estimates = tripEstimates(for: route, progress: progress)
 
+        // **`resumeTrip` は `.rerouting` で止めたときしか受け付けない。**
+        //
+        // `CPNavigationSession` は `pauseReason` が `CPTripPauseReasonRerouting`
+        // でなければ **`NSException` を投げる**（`Attempted to resume trip without
+        // pausing first.`）。26.4 の `resumeTrip(updatedRouteSegments:)` も 17.4 の
+        // `resumeTrip(updatedRouteInformation:)` も判定は同じで、しかも**止めたものを
+        // 戻す API はこれしか無い**。つまり `.proceedToRoute` で止めたら、戻すには
+        // 一度 `.rerouting` へ付け替えるしかない。
+        //
+        // ここを抜くと**駐車場や施設の中から案内を始めるたびに落ちる**。MapKit が
+        // 経路の始点を最寄りの車道へ寄せるので出発時は必ず「経路へ進んでください」で
+        // 止まり、車道へ出た瞬間に `refreshTripPause` がここへ来る（`replaceRoute` から
+        // 来る道もあり、そちらは「経路へ進む」で止めている最中に立ち寄り先が増えたとき）。
+        //
+        // **文言は付け替える前のものを渡す。** 理由だけ差し替えて同じ往復の中で戻すので、
+        // ここで文字まで変えると一瞬だけ別のカードが見える。
+        if let pauseReason, pauseReason != .rerouting {
+            session.pauseTrip(for: .rerouting,
+                              description: Self.pauseDescription(for: pauseReason),
+                              turnCardColor: Self.pausedCardColor)
+            self.pauseReason = .rerouting
+        }
+
         if #available(iOS 26.4, *), let routeSharing {
-            routeSharing.resume(session: session,
-                                route: route,
-                                maneuvers: routeManeuvers,
-                                stepIndex: stepIndex,
-                                tripEstimates: estimates,
-                                reason: reason.carPlayReason)
+            // 区間を見失うと `resumeTrip` を呼べない。**呼べなかったことは呼び元へ返す**
+            // （止めた記録だけ進めると、実際は止まったままなのに「止めていない」ことになり、
+            // オレンジのカードがその案内のあいだ固着する）。
+            guard routeSharing.resume(session: session,
+                                      route: route,
+                                      maneuvers: routeManeuvers,
+                                      stepIndex: stepIndex,
+                                      tripEstimates: estimates,
+                                      reason: reason.carPlayReason) else { return false }
         } else {
             session.resumeTrip(updatedRouteInformation: CPRouteInformation(
                 maneuvers: routeManeuvers,

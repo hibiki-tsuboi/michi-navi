@@ -48,20 +48,29 @@ final class CarPlayRouteSharing {
     }
 
     /// 引き直した経路で区間を作り直し、案内を再開する。
-    /// 呼ぶ前に `pauseTrip` で止まっていること（ガイド p.61 の手順）。
+    ///
+    /// 呼ぶ前に **`.rerouting` で** 止まっていること。`resumeTrip` は
+    /// `pauseReason` が `CPTripPauseReasonRerouting` でなければ `NSException` を
+    /// 投げる（`CarPlayCoordinator.resume` が付け替えてから呼んでいる）。
+    ///
+    /// **渡せなかったら false を返す。** 区間を見失ったときは `resumeTrip` を呼べず、
+    /// つまり車は新しい経路を受け取っていない。呼び元は止めた記録をそのままにして
+    /// 次の測位でやり直す必要がある（進めると、実際は止まったままなのに
+    /// 「止めていない」ことになってカードが固着する）。
     func resume(session: CPNavigationSession,
                 route: NavRoute,
                 maneuvers: [CPManeuver],
                 stepIndex: Int,
                 tripEstimates: CPTravelEstimates,
-                reason: CPRerouteReason) {
+                reason: CPRerouteReason) -> Bool {
         rebuild(route: route, maneuvers: maneuvers, stepIndex: stepIndex, tripEstimates: tripEstimates)
-        guard let index = indexOfSegment(containing: stepIndex) else { return }
+        guard let index = indexOfSegment(containing: stepIndex) else { return false }
 
         currentIndex = index
         session.resumeTrip(updatedRouteSegments: segments,
                            currentSegment: segments[index],
                            rerouteReason: reason)
+        return true
     }
 
     /// 区間をまたいだら車へ伝える。経由地を通過した瞬間がこれにあたる。

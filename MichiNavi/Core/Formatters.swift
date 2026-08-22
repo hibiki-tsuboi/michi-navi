@@ -19,12 +19,26 @@ enum Formatters {
         return formatter
     }()
 
-    private static let arrivalTime: DateFormatter = {
+    private static let arrivalTime = arrivalFormatter(for: .current)
+
+    /// 到着時刻の書式。
+    ///
+    /// **地域を固定しないこと。** 2026-08-23 まで `ja_JP` と `H:mm` を直に入れていたので、
+    /// **英語の端末でも 24 時間表記になり、利用者の 12／24 時間の設定も無視していた**
+    /// （実測: en_US は本来 `3:30 PM`）。ここは両画面で表記を揃えるための場所なのに、
+    /// 距離（`MKDistanceFormatter`）と所要（`DateComponentsFormatter`）が地域に従う中で
+    /// ここだけ日本に寄っていた。`timeStyle = .short` なら日本語での見え方
+    /// （`15:30`）は変わらない。
+    ///
+    /// 地域を引数で受けるのは**テストから触るため**。固定に戻したときに落ちるように
+    /// しておかないと、英語の端末でしか症状が出ないので気づけない。
+    static func arrivalFormatter(for locale: Locale) -> DateFormatter {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "H:mm"
+        formatter.locale = locale
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
         return formatter
-    }()
+    }
 
     static func distanceText(_ meters: CLLocationDistance) -> String {
         distance.string(fromDistance: meters)

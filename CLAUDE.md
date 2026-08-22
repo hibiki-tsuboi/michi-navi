@@ -1223,6 +1223,14 @@ CarPlay 層は触らずに済む設計。
 
 - **コメント・コミットメッセージは日本語**。コメントは「何を」ではなく「なぜ」を書く。
 - 距離・時間・到着時刻の表示は `Formatters` に集約。両画面で表記がずれないよう、直に文字列を組まない。
+  - **書式に地域を固定しない。** 2026-08-23 まで到着時刻だけ `ja_JP` と `H:mm` を直に
+    入れていたので、**英語の端末でも 24 時間表記になり、利用者の 12／24 時間の設定も
+    無視していた**（実測: en_US は本来 `3:30 PM`、en_GB は `15:30`。**言語ではなく地域で
+    決まる**）。距離（`MKDistanceFormatter`）と所要（`DateComponentsFormatter`）は
+    もともと地域に従うので、ここだけ日本に寄っていたことになる。`timeStyle = .short` なら
+    日本語での見え方は変わらない。
+  - **日本語で見ているかぎり症状が出ない**ので、`arrivalFormatter(for:)` に地域を渡せる
+    ようにしてテストから触っている（`FormattersTests`）。固定に戻すと落ちる。
 - **UI 文言は必ず `String(localized:)` で包む**。キーは日本語そのもの。
   - 訳は `MichiNavi/en.lproj/Localizable.strings` と `ja.lproj/Localizable.strings`。
     **ja も必ず要る**。プロジェクトの `developmentRegion` が `en` なので、`ja.lproj` を

@@ -67,7 +67,13 @@ final class SearchService: NSObject {
         let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: radius)
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: pointsOfInterest)
 
-        let response = try await MKLocalSearch(request: request).start()
+        let response: MKLocalSearch.Response
+        do {
+            response = try await MKLocalSearch(request: request).start()
+        } catch {
+            guard Self.isPlacemarkNotFound(error) else { throw error }
+            return []
+        }
         let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
 
         // 運転中は近い順が唯一まともな並び。MapKit は距離順を保証しない。
@@ -96,25 +102,67 @@ final class SearchService: NSObject {
         let samples = Self.samplePoints(along: coordinates, every: radius * 2)
         guard !samples.isEmpty else { return [] }
 
+        // **点ごとに失敗を受け取る。** 1 つでも投げると全体が落ちる作りにしないため
+        // （[merge] の説明）。
         var found: [(index: Int, places: [Place])] = []
-        try await withThrowingTaskGroup(of: (Int, [Place]).self) { group in
+        var failures: [Error] = []
+        await withTaskGroup(of: (Int, Result<[Place], Error>).self) { group in
             for (index, coordinate) in samples.enumerated() {
                 group.addTask { [self] in
-                    (index, try await nearby(pointsOfInterest: pointsOfInterest,
-                                             around: coordinate,
-                                             radius: radius))
+                    do {
+                        return (index, .success(try await nearby(pointsOfInterest: pointsOfInterest,
+                                                                 around: coordinate,
+                                                                 radius: radius)))
+                    } catch {
+                        return (index, .failure(error))
+                    }
                 }
             }
-            for try await result in group { found.append(result) }
+            for await (index, result) in group {
+                switch result {
+                case let .success(places): found.append((index, places))
+                case let .failure(error): failures.append(error)
+                }
+            }
         }
+        return try Self.merge(found, failures: failures)
+    }
 
-        // 手前の検索点で見つかったものを先に出す。同じ店が隣り合う検索点の
-        // 両方に入るので、先に見つかった側を残して重複を落とす。
+    /// 検索点ごとの結果を 1 本に束ねる。
+    ///
+    /// **手前の検索点で見つかったものを先に出す。** 同じ店が隣り合う検索点の両方に入るので、
+    /// 先に見つかった側を残して重複を落とす。
+    ///
+    /// **失敗した点は飲む。ただし 1 件も拾えていないときだけ投げ直す。** 点のどれか 1 つが
+    /// 落ちただけで全体を捨てると、4 点で見つかっていても結果がゼロになる
+    /// （2026-08-22 まではそうなっていた。`withThrowingTaskGroup` の `for try await` が
+    /// 最初の失敗でグループごと畳んでいた）。逆に全部飲むと、圏外で 5 点とも落ちたときに
+    /// 「この先には見つかりませんでした」と言うことになる——**通信できていないことと、
+    /// 探したが無かったことは別**なので、そこは区別して伝える。
+    static func merge(_ results: [(index: Int, places: [Place])],
+                      failures: [Error]) throws -> [Place] {
         var seen = Set<Place>()
-        return found
+        let places = results
             .sorted { $0.index < $1.index }
             .flatMap(\.places)
             .filter { seen.insert($0).inserted }
+
+        if places.isEmpty, let failure = failures.first { throw failure }
+        return places
+    }
+
+    /// 「探したが無かった」を表すエラーか。
+    ///
+    /// **MapKit は 0 件を空配列ではなく失敗として返す**（`MKErrorDomain` code 4
+    /// ＝`MKError.placemarkNotFound`。2026-08-22 に太平洋の真ん中で `.winery` を
+    /// 探して実測）。見つからないのは検索としては正常な結果なので、ここだけ
+    /// 空配列に読み替える。
+    ///
+    /// **ほかのエラーは通すこと。** 圏外・レート制限まで空配列にすると、通信できて
+    /// いないのに「近くに見つかりませんでした」と言うことになり、利用者は電波を
+    /// 疑えなくなる。
+    static func isPlacemarkNotFound(_ error: Error) -> Bool {
+        (error as? MKError)?.code == .placemarkNotFound
     }
 
     /// 経路沿いに置く検索点の上限。
@@ -142,9 +190,18 @@ final class SearchService: NSObject {
         return samples
     }
 
+    /// **0 件は空配列で返す**（[isPlacemarkNotFound]）。呼び元はどこも「見つからなかった」
+    /// ときの文言を持っているのに、MapKit の失敗が先に届くせいで一度も出ていなかった
+    /// （`CarPlayVoiceControl.Failure.notFound` と `SearchSheet` の
+    /// 「場所が特定できませんでした」）。
     private func places(for request: MKLocalSearch.Request) async throws -> [Place] {
-        let response = try await MKLocalSearch(request: request).start()
-        return response.mapItems.map { Place(mapItem: $0) }
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            return response.mapItems.map { Place(mapItem: $0) }
+        } catch {
+            guard Self.isPlacemarkNotFound(error) else { throw error }
+            return []
+        }
     }
 }
 

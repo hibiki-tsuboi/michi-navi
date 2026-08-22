@@ -667,6 +667,22 @@ CarPlay 層は触らずに済む設計。
     `viewSafeAreaInsetsDidChange` しかない（`CPMapTemplateDelegate` に提示の合図は無い）
     ので、そこで合わせ直している。**利用者が地図を動かしたら追随をやめる**こと
     （`abandonOverview`）。残すと、動かした先からテンプレートの出入りだけで引き戻される。
+  - **当て込みをアニメーションさせてよいのは自車から引くときだけ**（`showRouteOverview` の
+    `wasFollowingUser`）。`setVisibleMapRect(animated: true)` は**いまのカメラから**新しい
+    経路まで飛ぶので、**前の全体表示が残っていると、その縮尺から始まる**。前の行き先が
+    遠ければ数百 km になっている（実測: 東京→大阪 500km の経路を当て込むと 997km、
+    120km で 239km、市内 5km で 10km）ので、次に近所を選ぶと**日本全体から数秒かけて
+    寄ってくる**。**その飛行は何も伝えていない**——前の枠と新しい経路に関係が無いため。
+    2026-08-23 まで常にアニメーションさせていた。
+    - 直後に `viewSafeAreaInsetsDidChange` がアニメーション無しで当て直すことが多いので、
+      飛んでいる途中で snap することにもなっていた。
+    - **`.previewing` は `.idle` を通らずに来ることがある**（案内中に行き先を変える）ので、
+      「そのうち `recenter()` が戻すから平気」は成り立たない。
+  - **カメラの基準に `altitude` を使わない。** 入れる先は `centerCoordinateDistance`
+    （`MKMapCamera(lookingAtCenter:fromDistance:)` が受けるのはこちら）。傾いた地図では
+    2 つが `cos(pitch)` ぶんずれる（実測: 距離 499m に対し pitch 45 で altitude 353m、
+    pitch 60 で 249m）。混ぜると、平らにした拍子に縮尺が跳ねる。`setCameraDistance` は
+    元から正しかったが、`showRouteOverview` だけ `altitude` を渡していた（2026-08-23 に直した）。
 - **地図のベースビューにタッチは届かない**（ガイド p.36「Your app won't receive direct tap or
   drag events in the base view」）。`MKMapView` に自前のジェスチャを付ける手は使えず、入力は
   すべて `CPMapTemplateDelegate` 経由。指のドラッグは `didUpdatePanGestureWithTranslation`

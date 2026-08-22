@@ -245,17 +245,32 @@ final class CarPlayMapViewController: UIViewController {
     }
 
     /// ルート全体が入るように引く。
+    ///
+    /// **動かしてよいのは自車から引くときだけ。** 前の全体表示が残っている状態から
+    /// 当て込むと、`setVisibleMapRect` は**そこから**新しい経路まで飛ぶ。前の行き先が
+    /// 遠ければ縮尺は数百 km になっているので（実測: 500km の経路で 997km）、次に
+    /// 近所を選んだときに**日本全体から数秒かけて寄ってくる**ことになる。**その飛行は
+    /// 何も伝えていない**——前の枠と新しい経路に関係が無いため。自車から引くぶんには
+    /// 「いまここ」から「経路はこれ」への繋がりが見えるので残す。
+    ///
+    /// なお直後に `viewSafeAreaInsetsDidChange` がアニメーション無しで当て直すことが多い
+    /// （ルート提示の一覧が出て使える幅が変わるため）。飛んでいる途中で snap するくらいなら、
+    /// 初めから動かさないほうが揃う。
     func showRouteOverview(_ route: NavRoute) {
+        let wasFollowingUser = isFollowingUser
         isFollowingUser = false
         overviewRoute = route
         // 引いた先の高度は MapKit が決めるので、保存値はここで当てにならなくなる。
         cameraDistanceIsStale = true
+        // **`altitude` ではなく `centerCoordinateDistance`。** 傾いた地図では 2 つが
+        // `cos(pitch)` ぶんずれる（実測: 距離 499m・pitch 45 で altitude 353m、
+        // pitch 60 で 249m）。混ぜると、平らにした拍子に縮尺が跳ねる。
         let camera = MKMapCamera(lookingAtCenter: mapView.camera.centerCoordinate,
-                                 fromDistance: mapView.camera.altitude,
+                                 fromDistance: mapView.camera.centerCoordinateDistance,
                                  pitch: 0,
                                  heading: 0)
         mapView.setCamera(camera, animated: false)
-        fitOverview(route, animated: true)
+        fitOverview(route, animated: wasFollowingUser)
     }
 
     private func fitOverview(_ route: NavRoute, animated: Bool) {

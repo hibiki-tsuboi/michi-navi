@@ -87,11 +87,19 @@ enum CarPlayGestureLog {
 
     /// `isTap` はダブルタップ・2 本指タップと判定したかどうか。取り違えると
     /// ピンチが 1 段ズームになる（またはタップが無反応になる）ので、必ず残す。
+    ///
+    /// **`isZoomingIn` は実際に動かした向き**（ピンチでは nil）。`velocity` の符号と
+    /// 食い違うことがある。拡大・縮小ボタンの 2 回目の押下がダブルタップとして届くので、
+    /// そのときは符号ではなく直前のボタンの向きへ倒している
+    /// （`CarPlayCoordinator.zoomDirectionForTap`）。**符号だけ残すと、倒したのか
+    /// 倒しそこねたのかがログから読めない。**
     static func zoom(center: CGPoint, scale: CGFloat, velocity: CGFloat, isTap: Bool,
-                     outcome: GestureOutcome, camera: @autoclosure () -> CameraState) {
+                     isZoomingIn: Bool?, outcome: GestureOutcome,
+                     camera: @autoclosure () -> CameraState) {
         emit("""
         zoom \(isTap ? "tap" : "pinch") center=\(point(center)) scale=\(number(scale)) \
-        velocity=\(number(velocity)) \(outcome.rawValue) → \(text(camera()))
+        velocity=\(number(velocity))\(isZoomingIn.map { $0 ? " in" : " out" } ?? "") \
+        \(outcome.rawValue) → \(text(camera()))
         """)
     }
 

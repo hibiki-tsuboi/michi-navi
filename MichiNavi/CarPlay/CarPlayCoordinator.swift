@@ -98,6 +98,14 @@ final class CarPlayCoordinator: NSObject {
     /// これを下回ったら止める（pt/秒）。
     private static let glideCutoff: CGFloat = 24
 
+    /// 直前に 1 段ぶんズームした向きと時刻。**拡大・縮小ボタンの 2 回目の押下と、
+    /// 本物の 1 本指ダブルタップを見分けるために要る**（[zoomDirectionForTap]）。
+    private var lastZoomStep: (isZoomingIn: Bool, at: Date)?
+    /// ボタンの押下が乗っ取られたと見なす猶予。UIKit がダブルタップと認める間隔
+    /// （0.3 秒ほど）より少し広く取る。**狭めると乗っ取りを取りこぼす**（そのときは
+    /// 縮小ボタンの 2 回目が拡大に戻る）。
+    static let zoomTapTakeoverWindow: TimeInterval = 0.5
+
     /// 直前に反映した段階。**同じ段階が出し直されたときに中心へ戻さない**ための記録。
     /// リルートが成功すると `NavigationController.startNavigation(with:)` を通って
     /// `phase` は `.navigating` のまま経路だけ入れ替わる。見分けないと、地図を動かして
@@ -1240,23 +1248,29 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var zoomInButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in
-            guard let self else { return }
-            mapViewController.zoomIn()
-            CarPlayGestureLog.camera("zoom in(button)", camera: mapViewController.cameraState())
-        }
+        let button = CPMapButton { [weak self] _ in self?.zoomByButton(isZoomingIn: true) }
         button.image = UIImage(systemName: "plus.magnifyingglass")
         return button
     }
 
     private var zoomOutButton: CPMapButton {
-        let button = CPMapButton { [weak self] _ in
-            guard let self else { return }
-            mapViewController.zoomOut()
-            CarPlayGestureLog.camera("zoom out(button)", camera: mapViewController.cameraState())
-        }
+        let button = CPMapButton { [weak self] _ in self?.zoomByButton(isZoomingIn: false) }
         button.image = UIImage(systemName: "minus.magnifyingglass")
         return button
+    }
+
+    private func zoomByButton(isZoomingIn: Bool) {
+        applyZoomStep(isZoomingIn: isZoomingIn)
+        CarPlayGestureLog.camera("zoom \(isZoomingIn ? "in" : "out")(button)",
+                                 camera: mapViewController.cameraState())
+    }
+
+    /// 1 段ぶんのズーム。**ボタンとタップの入口をここ 1 つに絞ってある。** 向きと時刻を
+    /// 残さないと、次に届くタップがボタンの 2 回目なのか本物のダブルタップなのかを
+    /// 決められない（[zoomDirectionForTap]）。
+    private func applyZoomStep(isZoomingIn: Bool) {
+        if isZoomingIn { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
+        lastZoomStep = (isZoomingIn: isZoomingIn, at: Date())
     }
 
     // MARK: - 通知
@@ -1685,15 +1699,55 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         let matchesTapConstants = abs(scale - 1) < 0.001 && abs(abs(velocity) - 1) < 0.001
         let isTap = matchesTapConstants || !mapViewController.hasZoomBase
         let outcome: GestureOutcome
+        var isZoomingIn: Bool?
         if isTap {
             // タップ。拡大・縮小ボタンと同じ 1 段ぶんだけ動かす。
-            if velocity > 0 { mapViewController.zoomIn() } else { mapViewController.zoomOut() }
+            let direction = zoomDirectionForTap(velocity: velocity)
+            applyZoomStep(isZoomingIn: direction)
+            isZoomingIn = direction
             outcome = .applied
         } else {
             outcome = mapViewController.zoom(toScale: scale)
         }
-        CarPlayGestureLog.zoom(center: center, scale: scale, velocity: velocity,
-                               isTap: isTap, outcome: outcome, camera: mapViewController.cameraState())
+        CarPlayGestureLog.zoom(center: center, scale: scale, velocity: velocity, isTap: isTap,
+                               isZoomingIn: isZoomingIn, outcome: outcome,
+                               camera: mapViewController.cameraState())
+    }
+
+    /// タップで動かす向き。原則は `velocity` の符号（正が 1 本指のダブルタップ＝拡大、
+    /// 負が 2 本指のタップ＝縮小）。
+    ///
+    /// **ただし拡大・縮小ボタンを連続で押したときの 2 回目が、ここへダブルタップとして
+    /// 届く。** CarPlay ホストは 1 本指ダブルタップの認識器を
+    /// `CPSMapTemplateViewController` の **root view** に付けている
+    /// （`numberOfTapsRequired = 2` / `numberOfTouchesRequired = 1`。26.6 の `_viewDidLoad`
+    /// で確認）。`mapButtons` はその view の子なので、同じ場所を続けて叩くとダブルタップが
+    /// 成立し、`cancelsTouchesInView` の既定でボタンの 2 回目の押下は取り消される。
+    /// **つまり素直に符号へ従うと、縮小ボタンを連打したとき 2 回目だけ拡大になる。**
+    ///
+    /// **タップ位置では見分けられない。** ホストが渡してくる中心は指の位置ではなく
+    /// `safeAreaCenterPoint`（`_handleOneFingerDoubleTapGesture:` で確認）なので、
+    /// ボタンの上を叩いたのかどうかを知る手段がそもそも無い。時間で見るしかない。
+    ///
+    /// **疑うのは拡大（`velocity > 0`）のときだけ。** 2 本指のタップは指の本数が違うので
+    /// ボタンの押下にはなりえない（認識器の `numberOfTouchesRequired` が 2）。
+    /// 直前の 1 段が縮小なら縮小を繰り返す——連打している利用者が求めているのはそれで、
+    /// 見送って何も起きないより、押した向きへ動くほうが手触りが合う。
+    private func zoomDirectionForTap(velocity: CGFloat) -> Bool {
+        Self.zoomDirection(velocity: velocity, lastStep: lastZoomStep, now: Date())
+    }
+
+    /// 上の判断そのもの。**純粋な計算に切り出してあるのはテストから触るため。**
+    /// 症状が出るのは実車（か CarPlay Simulator）で連打したときだけなので、
+    /// 条件を外したら落ちるようにしておかないと、静かに元へ戻る。
+    static func zoomDirection(velocity: CGFloat,
+                              lastStep: (isZoomingIn: Bool, at: Date)?,
+                              now: Date,
+                              window: TimeInterval = zoomTapTakeoverWindow) -> Bool {
+        guard velocity > 0,
+              let lastStep,
+              now.timeIntervalSince(lastStep.at) < window else { return velocity > 0 }
+        return lastStep.isZoomingIn
     }
 
     func mapTemplate(_ mapTemplate: CPMapTemplate, didEndZoomGestureWithVelocity velocity: CGFloat) {

@@ -134,7 +134,7 @@ final class CarPlayDestinationBrowser: NSObject {
         return template
     }
 
-    /// リストのいちばん上に出す「さがす」の 2 つ（iOS 26.0 の `headerGridButtons`）。
+    /// リストのいちばん上に出す「さがす」（iOS 26.0 の `headerGridButtons`）。
     ///
     /// **リストの底からヘッダへ引き上げたもの。** 行き先の並びは押される回数の多い順に
     /// 決まっていて（ピン → この時間 → お気に入り → 履歴）、探す手段はそのさらに下に
@@ -142,23 +142,17 @@ final class CarPlayDestinationBrowser: NSObject {
     /// ヘッダへ出す。行き先の並びはそのまま動かさずに済む。
     ///
     /// **空配列を代入しない。** Dashboard の `shortcutButtons` が 0 件で落ちる前例が
-    /// あるので、0 件になりうる作りにしない（ここは常に 2 件）。
+    /// あるので、0 件になりうる作りにしない（ここは常に 1 件）。足すときは
+    /// `maximumHeaderGridButtonCount` が上限。
     private var searchGridButtons: [CPGridButton] {
-        let buttons = [
+        [
             CPGridButton(titleVariants: [isNavigating ? String(localized: "ルート沿いをさがす")
                                                       : String(localized: "周辺をさがす"),
                                          String(localized: "さがす")],
                          image: Self.gridImage(named: "location.magnifyingglass")) { [weak self] _ in
                 self?.presentCategories()
             },
-            // 乱数で 1 件えらぶので賽の目。ナビゲーションバーの「検索」と紛れないよう、
-            // 虫めがねはカテゴリのほうにだけ持たせる。
-            CPGridButton(titleVariants: [String(localized: "寄り道してみる"), String(localized: "寄り道")],
-                         image: Self.gridImage(named: "dice")) { [weak self] _ in
-                self?.suggestDetour()
-            },
         ]
-        return Array(buttons.prefix(CPListTemplate.maximumHeaderGridButtonCount))
     }
 
     /// `titled` を渡すと、地点の名前ではなくその名札を主役にする（「自宅」＋ 地点名）。
@@ -208,55 +202,6 @@ final class CarPlayDestinationBrowser: NSObject {
             completion()
         }
         return item
-    }
-
-    /// 寄り道をひとつ提案する。
-    ///
-    /// 押した先で一覧を出さず、いきなり 1 件を見せる。候補を並べると結局いつもの
-    /// 選び方に戻ってしまい、乱数に任せた意味が無くなる。
-    private func suggestDetour() {
-        guard let coordinate = location.location?.coordinate else {
-            onError(String(localized: "現在地が取得できていません"))
-            return
-        }
-
-        Task {
-            do {
-                let suggestion = try await DetourSuggester.suggest(
-                    near: coordinate,
-                    along: navigation.currentRoute,
-                    fromStepIndex: navigation.progress?.stepIndex ?? 0)
-
-                guard let suggestion else {
-                    onError(String(localized: "寄り道できそうな場所が見つかりませんでした"))
-                    return
-                }
-                presentDetour(suggestion)
-            } catch {
-                onError(error.localizedDescription)
-            }
-        }
-    }
-
-    private func presentDetour(_ suggestion: DetourSuggester.Suggestion) {
-        let sheet = CPActionSheetTemplate(
-            title: suggestion.place.name,
-            message: "\(suggestion.category)・\(suggestion.place.subtitle)",
-            actions: [
-                CPAlertAction(title: isNavigating ? String(localized: "経由地として追加") : String(localized: "ここへ行く"), style: .default) { [weak self] _ in
-                    self?.dismissSheet()
-                    self?.finish(with: self?.isNavigating == true ? .waypoint(suggestion.place)
-                                                                 : .destination(suggestion.place))
-                },
-                CPAlertAction(title: String(localized: "ほかをさがす"), style: .default) { [weak self] _ in
-                    self?.dismissSheet()
-                    self?.suggestDetour()
-                },
-                CPAlertAction(title: String(localized: "やめる"), style: .cancel) { [weak self] _ in
-                    self?.dismissSheet()
-                },
-            ])
-        interfaceController.presentTemplate(sheet, animated: true, completion: nil)
     }
 
     /// 案内していなければそのまま目的地にする。

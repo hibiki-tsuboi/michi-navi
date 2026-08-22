@@ -28,13 +28,11 @@
 "あとで" = "Later";
 "いいえ" = "No";
 "いまの指示をもう一度読み上げます。" = "Repeats the current instruction.";
-"お城・史跡" = "Castles & landmarks";
 "お気に入り" = "Favorites";
 "お気に入りから外す" = "Remove from favorites";
 "お気に入りに追加" = "Add to favorites";
 "お気に入りや履歴の目的地へ案内を始めます。" = "Starts guidance to a favorite or recent destination.";
 "ここに停める" = "Park here";
-"ここへ行く" = "Go here";
 "ここまで歩いて戻る" = "Walk back to your car";
 "このままでは届きません" = "You won't make it this far";
 "この先には見つかりませんでした" = "Nothing found up ahead";
@@ -49,7 +47,6 @@
 "しない" = "No";
 "そのまま" = "Stay";
 "どこへ向かいますか" = "Where are you heading?";
-"ほかをさがす" = "Try another";
 "まもなく" = "now";
 "まもなく%@" = "Now, %@";
 "もう一度読む" = "Repeat";
@@ -60,7 +57,6 @@
 "ガソリン" = "Fuel";
 "ガソリンスタンド" = "Gas stations";
 "キャンセル" = "Cancel";
-"パン屋" = "Bakeries";
 "マイクの使用が許可されていません" = "Microphone access isn't allowed";
 "ルート" = "Route";
 "ルートが見つかりませんでした" = "No route found";
@@ -70,7 +66,6 @@
 "ルートを引き直し中" = "Updating the route";
 "ルート沿いをさがす" = "Search along the route";
 "ロータリー" = "Roundabout";
-"ワイナリー・醸造所" = "Wineries & breweries";
 "下道のみ" = "No highways";
 "中止" = "Stop";
 "他のルート" = "Other routes";
@@ -81,7 +76,6 @@
 "充電スタンド" = "Charging stations";
 "入口" = "On-ramp";
 "全体表示" = "Overview";
-"公園" = "Parks";
 "出口" = "Exit";
 "出発" = "Depart";
 "切り替える" = "Switch";
@@ -97,20 +91,15 @@
 "圏外のため経路を引き直せません" = "No signal — can't recalculate the route";
 "場所が特定できませんでした" = "Couldn't pin down that place";
 "完了" = "Done";
-"寄り道" = "Detour";
-"寄り道してみる" = "Take a detour";
-"寄り道できそうな場所が見つかりませんでした" = "Couldn't find anywhere to stop";
 "寄る" = "Stop there";
 "左折" = "Turn left";
 "左車線" = "Keep left";
-"市場" = "Markets";
 "所要" = "Duration";
 "探しています" = "Searching";
 "探しています…" = "Searching…";
 "斜め右" = "Bear right";
 "斜め左" = "Bear left";
 "新しいルートに切り替えました。%@" = "Switched to the new route. %@";
-"景色" = "Scenic spots";
 "曲がりくねった道を優先" = "Prefer winding roads";
 "最短時間" = "Fastest";
 "最近の目的地" = "Recent destinations";
@@ -125,9 +114,7 @@
 "案内終了" = "End";
 "案内開始" = "Go";
 "検索" = "Search";
-"水族館・動物園" = "Aquariums & zoos";
 "注意" = "Notice";
-"温泉・スパ" = "Hot springs & spas";
 "満タン・満充電で走れる距離を入れると、届かない経路のときに途中の%@を提案します。車から残量を読む手段が無いため、この数字で判断します。" = "Enter how far you can go on a full tank or charge, and we'll suggest %@ along routes that are too long. There's no way to read the level from your vehicle, so this number is what we go on.";
 "現在地" = "Current location";
 "現在地が取得できていません" = "Your location isn't available yet";
@@ -146,7 +133,6 @@
 "経由地の%@に到着しました。案内を続けます" = "You've reached your stop at %@. Continuing.";
 "経路の詳細" = "Route details";
 "経路へ進んでください" = "Proceed to the route";
-"美術館・博物館" = "Museums";
 "聞き取れませんでした" = "Didn't catch that";
 "職場" = "Work";
 "自宅" = "Home";

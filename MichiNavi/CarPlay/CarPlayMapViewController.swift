@@ -332,6 +332,13 @@ final class CarPlayMapViewController: UIViewController {
     /// `follow` が書き戻し、1 秒ごとにガタついたあげく回した角度も残らない。
     /// **指が触れている最中にもここへ来る**（リルートの成功・到着・案内開始で
     /// `apply(phase:)` が呼ぶ）。ズームは追従したまま効かせる操作なので触らない。
+    ///
+    /// **戻すのは一瞬で。** ここへ来る道のうちいちばん多いのは全体表示からの復帰で、
+    /// そのとき飛ぶ距離は経路の長さそのもの（実測: 500km の経路を当て込むと縮尺は
+    /// 997km）。`animated: true` のままだと、**遠い行き先を選んだときほど長く待たされる**。
+    /// 押した人は「いまの案内へ戻せ」と言っているのであって、戻る途中を見たいのではない。
+    /// `follow` の毎秒の更新は動かしたままにする（あちらは 1 秒ぶんの隙間を埋めるもので、
+    /// 止めると自車が飛び飛びに動く）。
     func recenter() {
         isFollowingUser = true
         abandonOverview()
@@ -340,7 +347,7 @@ final class CarPlayMapViewController: UIViewController {
         isPitchingByGesture = false
         lastPitchCenter = nil
         if let location = LocationService.shared.location {
-            follow(location: location)
+            follow(location: location, animated: false)
         }
     }
 

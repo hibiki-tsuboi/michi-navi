@@ -55,16 +55,6 @@ enum RouteCharacter {
     /// 同じような道どうしでは出ない程度。
     private static let curvatureRatio: Double = 1.5
 
-    /// 曲がりくねった順に並べ替える。
-    ///
-    /// **できるのは候補の並べ替えまで**。MapKit に「曲がりくねった道を引いて」と
-    /// 頼む手段は無く、返ってきた 2〜3 本から選び直すだけなので、平野では何も変わらない。
-    /// それでも山沿いでは目に見えて違う候補が返るので、選ぶ手間だけ省く価値はある。
-    static func sortedByCurvature(_ routes: [NavRoute]) -> [NavRoute] {
-        let scored = routes.map { (route: $0, curvature: Profile(route: $0).curvature) }
-        return scored.sorted { $0.curvature > $1.curvature }.map(\.route)
-    }
-
     private struct Profile {
         let rightTurns: Int
         let usesHighway: Bool

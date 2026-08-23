@@ -22,14 +22,6 @@ final class RoutePreferences: ObservableObject {
         didSet { defaults.set(avoidsHighways, forKey: Self.highwaysKey) }
     }
 
-    /// 曲がりくねった道を優先する。
-    ///
-    /// **できるのは候補の並べ替えまで**（`RouteCharacter.sortedByCurvature`）。
-    /// MapKit に「曲がりくねった道を引いて」と頼む手段は無い。
-    @Published var prefersWinding: Bool {
-        didSet { defaults.set(prefersWinding, forKey: Self.windingKey) }
-    }
-
     /// 満タン・満充電からの航続距離（メートル）。0 なら未設定で、補給の提案をしない。
     ///
     /// **残量ではなく航続距離**なのは、こちらから車の残量を読む手段が無いため。
@@ -69,14 +61,12 @@ final class RoutePreferences: ObservableObject {
     private static let refuelKey = "route.refuelKind"
     private static let tollsKey = "route.avoidsTolls"
     private static let highwaysKey = "route.avoidsHighways"
-    private static let windingKey = "route.prefersWinding"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         // 既定はどちらも「避けない」。速い順に出すのが素直で、避けたい人だけが入れる。
         avoidsTolls = defaults.bool(forKey: Self.tollsKey)
         avoidsHighways = defaults.bool(forKey: Self.highwaysKey)
-        prefersWinding = defaults.bool(forKey: Self.windingKey)
         vehicleRange = defaults.double(forKey: Self.rangeKey)
         refuelKind = RefuelKind(rawValue: defaults.string(forKey: Self.refuelKey) ?? "") ?? .gasStation
     }
@@ -90,7 +80,6 @@ final class RoutePreferences: ObservableObject {
         var parts: [String] = []
         if avoidsTolls { parts.append(String(localized: "有料道路を避ける")) }
         if avoidsHighways { parts.append(String(localized: "高速を避ける")) }
-        if prefersWinding { parts.append(String(localized: "曲がりくねった道を優先")) }
         return parts.isEmpty ? nil : parts.joined(separator: "・")
     }
 }

@@ -91,7 +91,6 @@ struct SearchSheet: View {
         Section(String(localized: "ルートの引き方")) {
             Toggle(String(localized: "有料道路を避ける"), isOn: $preferences.avoidsTolls)
             Toggle(String(localized: "高速道路を避ける"), isOn: $preferences.avoidsHighways)
-            Toggle(String(localized: "曲がりくねった道を優先"), isOn: $preferences.prefersWinding)
         }
 
         Section {

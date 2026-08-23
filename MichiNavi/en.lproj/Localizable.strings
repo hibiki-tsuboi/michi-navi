@@ -44,7 +44,6 @@
 "この経路について" = "About this route";
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";
 "さがす" = "Find one";
-"しない" = "No";
 "そのまま" = "Stay";
 "どこへ向かいますか" = "Where are you heading?";
 "まもなく" = "now";
@@ -72,7 +71,6 @@
 "休憩" = "Rest stops";
 "住所" = "Address";
 "住所・施設名で検索" = "Search by address or name";
-"優先する" = "Yes";
 "充電スタンド" = "Charging stations";
 "入口" = "On-ramp";
 "全体表示" = "Overview";
@@ -100,7 +98,6 @@
 "斜め右" = "Bear right";
 "斜め左" = "Bear left";
 "新しいルートに切り替えました。%@" = "Switched to the new route. %@";
-"曲がりくねった道を優先" = "Prefer winding roads";
 "最短時間" = "Fastest";
 "最近の目的地" = "Recent destinations";
 "有料道路を避ける" = "Avoid tolls";

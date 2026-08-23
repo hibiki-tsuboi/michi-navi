@@ -79,18 +79,4 @@ struct RouteCharacterTests {
         #expect(tags[1].contains(String(localized: "カーブが多い")))
         #expect(tags[0].contains(String(localized: "カーブが多い")) == false)
     }
-
-    @Test("曲がりくねった順に並べ替える")
-    func sortsByCurvature() {
-        let straight = SyntheticRoute.shaped((0 ... 20).map {
-            SyntheticRoute.coordinate(north: Double($0) * 100)
-        })
-        let winding = SyntheticRoute.shaped((0 ... 20).map {
-            SyntheticRoute.coordinate(north: Double($0) * 100,
-                                      east: $0.isMultiple(of: 2) ? 60 : -60)
-        })
-
-        let sorted = RouteCharacter.sortedByCurvature([straight, winding])
-        #expect(sorted.first?.id == winding.id)
-    }
 }

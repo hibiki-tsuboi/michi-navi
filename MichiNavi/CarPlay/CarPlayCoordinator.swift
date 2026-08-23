@@ -1069,7 +1069,7 @@ final class CarPlayCoordinator: NSObject {
     /// 走行中に読ませる画面ではないし、案内中は左右とも枠が埋まっている。
     /// `destinationsButton` は端に残す。1 つだけのときと押す場所を変えないため。
     private func applyPreviewingButtons() {
-        mapTemplate.mapButtons = idleMapButtons
+        mapTemplate.mapButtons = mapButtons
         mapTemplate.leadingNavigationBarButtons = [voiceButton]
         mapTemplate.trailingNavigationBarButtons = [routeInfoButton, destinationsButton]
     }
@@ -1116,30 +1116,29 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private func applyIdleButtons() {
-        mapTemplate.mapButtons = idleMapButtons
+        mapTemplate.mapButtons = mapButtons
         mapTemplate.leadingNavigationBarButtons = [voiceButton]
         mapTemplate.trailingNavigationBarButtons = [destinationsButton]
     }
 
-    /// 案内していないときは向きの切り替えを出さないぶん枠が余るので、現在地とパンを
-    /// 両方置ける。案内中だけが分け合う（[followSlotButton]）。
-    private var idleMapButtons: [CPMapButton] {
-        [recenterButton, zoomInButton, zoomOutButton, panButton]
+    /// マップボタンの並び。**どの段階でも同じ 4 つ**にしてある。押す場所が段階で
+    /// 動かないので、走行中に探し直さずに済む。変わるのは先頭の枠の中身だけ
+    /// （[followSlotButton]）。
+    ///
+    /// **向きの切り替えを案内中だけに出していた**（2026-08-23 まで）。案内していない
+    /// あいだは枠が余るからと現在地とパンを両方置いていたが、**地図を眺めるのは待機中と
+    /// ルート提示中のほう**で、そこで北上げにできないのは逆さまだった。先頭の枠を
+    /// 分け合えば、どの段階でも 4 つに収まる。
+    private var mapButtons: [CPMapButton] {
+        [followSlotButton, zoomInButton, zoomOutButton, orientationButton]
     }
 
-    /// 向きの切り替えは案内中だけ出す。押す場所を変えないよう、並びは
-    /// `applyIdleButtons` に揃えてある（先頭の枠だけは追従の状態で中身が入れ替わる。
-    /// [followSlotButton]）。
     private func applyNavigatingButtons() {
-        mapTemplate.mapButtons = navigatingMapButtons
+        mapTemplate.mapButtons = mapButtons
         // ナビゲーションバーは左右 2 つずつが上限。マップボタンは 4 つで埋まっている
         // （しかもパン UI に入ると 2 つ落ちる）ので、音声はこちらへ置く。
         mapTemplate.leadingNavigationBarButtons = [voiceButton, overviewButton]
         mapTemplate.trailingNavigationBarButtons = [repeatButton, endNavigationButton]
-    }
-
-    private var navigatingMapButtons: [CPMapButton] {
-        [followSlotButton, zoomInButton, zoomOutButton, orientationButton]
     }
 
     /// 現在地ボタンとパンボタンで分け合う枠。**追従しているあいだ現在地ボタンには
@@ -1147,26 +1146,26 @@ final class CarPlayCoordinator: NSObject {
     /// 追従が外れたら現在地ボタンへ入れ替える。押す場所は動かさないので、
     /// 走行中に探し直さずに済む。この 1 枠が「いま追従しているか」の表示も兼ねる。
     ///
-    /// 分け合っているのは案内中の 4 つが埋まっているため。**パン UI へ入るボタンは
-    /// 外せない**（ガイド p.33。ノブしか無い車には他に地図を動かす手が無く、以前は
-    /// 案内中にこれが落ちていて動かしようが無かった）ので、向きの切り替えを
-    /// 落とすか分け合うかの二択になる。
+    /// 分け合っているのは 4 つが埋まっているため。**パン UI へ入るボタンは外せない**
+    /// （ガイド p.33。ノブしか無い車には他に地図を動かす手が無く、以前は案内中に
+    /// これが落ちていて動かしようが無かった）ので、向きの切り替えを落とすか
+    /// 分け合うかの二択になる。
     private var followSlotButton: CPMapButton {
         mapViewController.isFollowingUser ? panButton : recenterButton
     }
 
     /// 追従の入り切りに合わせてマップボタンを貼り直す。
     ///
+    /// 追従の入り切りと、向きを切り替えたあとにマップボタンを貼り直す。
+    ///
     /// パン UI に入っているあいだは触らない。CarPlay が 2 つしか残さないので、
     /// その 2 つは `mapTemplateDidShowPanningInterface` が決めている。
     ///
-    /// 段階を `navigation.phase` ではなく `lastPhaseKind` から見るのは、**`@Published` が
-    /// `willSet` で流れる**ため。`apply(phase:)` の中から（`recenter()` 経由で）ここへ来た
-    /// ときの `navigation.phase` はまだ 1 つ前の値で、案内へ入った瞬間に案内用の並びを
-    /// 選べない。`lastPhaseKind` は `apply(phase:)` の先頭で更新済み。
+    /// **段階で分けない。** 4 つの並びはどの段階でも同じ（[mapButtons]）なので、
+    /// `lastPhaseKind` を見る必要が無くなった。
     private func refreshMapButtons() {
         guard !mapTemplate.isPanningInterfaceVisible else { return }
-        mapTemplate.mapButtons = lastPhaseKind == .navigating ? navigatingMapButtons : idleMapButtons
+        mapTemplate.mapButtons = mapButtons
     }
 
     private func toggleMapOrientation() {
@@ -1175,7 +1174,8 @@ final class CarPlayCoordinator: NSObject {
         CarPlayGestureLog.camera("orientation(\(MapOrientation.current.rawValue))",
                                  camera: mapViewController.cameraState())
         // アイコンを新しい向きに差し替える。ナビゲーションバー側は変わらないので触らない。
-        mapTemplate.mapButtons = navigatingMapButtons
+        // **待機中とルート提示中も通る**ので、案内用の並びを直に貼らないこと。
+        refreshMapButtons()
     }
 
     private var destinationsButton: CPBarButton {

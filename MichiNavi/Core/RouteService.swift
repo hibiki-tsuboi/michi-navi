@@ -79,6 +79,16 @@ extension NavRoute {
         return Array(coordinates[start...])
     }
 
+    /// 通ってきたところの座標列。**残り距離から出す**（進んだ距離は持っていない）。
+    ///
+    /// 塗り分けは CarPlay と iPhone の両方がやるので、切り出しはここに置いて 1 つにする
+    /// （見せ方——色・太さ・引き直す間隔——はそれぞれの画面が決める）。
+    /// 残りが全長より長いこと（吸着の具合でありうる）は下の切り出しが受ける——
+    /// 負の距離を渡すと空が返るので、こちらで 0 に丸めない。
+    func travelled(remaining: CLLocationDistance) -> [CLLocationCoordinate2D] {
+        NavRoute.coordinates(coordinates, upTo: distance - remaining)
+    }
+
     /// 先頭から `distance` メートルぶんの座標列。
     /// 「ここまでなら届く」範囲を切り出して、その中だけを探すために使う。
     static func coordinates(_ coordinates: [CLLocationCoordinate2D],

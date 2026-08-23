@@ -50,6 +50,22 @@ struct RouteMeasurementTests {
         #expect(NavRoute.coordinates(route.coordinates, upTo: 5_000).count == route.coordinates.count)
     }
 
+    /// 塗り分けの土台。**残り距離しか持っていない**ので、そこから引いて出す。
+    @Test("通ってきたところは残り距離から出す")
+    func travelledComesFromRemaining() throws {
+        // まだ 1m も走っていない。
+        #expect(route.travelled(remaining: route.distance).isEmpty)
+        // 経路へ吸着する具合で、残りが全長より長く出ることがある。
+        #expect(route.travelled(remaining: route.distance + 500).isEmpty)
+        // 着いたら全部。
+        #expect(route.travelled(remaining: 0).count == route.coordinates.count)
+
+        let last = try #require(route.travelled(remaining: route.distance / 2).last)
+        let reached = MKMapPoint(SyntheticRoute.origin).distance(to: MKMapPoint(last))
+        #expect(reached <= 500)
+        #expect(reached > 490)
+    }
+
     @Test("0m なら何も返らない")
     func zeroReturnsNothing() {
         #expect(NavRoute.coordinates(route.coordinates, upTo: 0).isEmpty)

@@ -22,6 +22,18 @@ struct ContentView: View {
             if let route = displayedRoute {
                 MapPolyline(route.polyline)
                     .stroke(.blue, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                // 通ってきたところを塗り替える（CarPlay と同じ）。**あとに書くほど上に描かれる**
+                // ので、経路の線より下に置かないこと。色は不透明でなければならない
+                // （透かしても下の青が出るだけ）。太さも同じ 6pt にする。
+                //
+                // **間引いていない。** CarPlay 側が 50m ごとにしか引き直さないのは
+                // `MKOverlay` を差し替える手間があるからで、こちらは `progress` が来るたびに
+                // body が走る以上、間引いても計算する回数は変わらない。
+                if case .navigating = navigation.phase, let progress = navigation.progress {
+                    MapPolyline(coordinates: route.travelled(remaining: progress.distanceRemaining))
+                        .stroke(Self.travelledColor,
+                                style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                }
                 // 立ち寄り先は目的地と見分けが付くよう別の印にする。
                 ForEach(route.waypoints) { waypoint in
                     Marker(waypoint.name, systemImage: "mappin.and.ellipse", coordinate: waypoint.coordinate)
@@ -69,6 +81,10 @@ struct ContentView: View {
             }
         }
     }
+
+    /// 通ってきたところの色。**`CarPlayMapViewController.travelledColor` と同じ値**
+    /// （片方だけ変えないこと）。昼夜で入れ替わる動的な色を使わない理由もあちらに書いてある。
+    private static let travelledColor = Color(white: 0.45)
 
     private var displayedRoute: NavRoute? {
         switch navigation.phase {

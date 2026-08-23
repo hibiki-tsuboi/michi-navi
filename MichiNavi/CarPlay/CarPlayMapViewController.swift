@@ -242,7 +242,7 @@ final class CarPlayMapViewController: UIViewController {
         clearTravelled()
         travelledDistance = travelled
 
-        let coordinates = NavRoute.coordinates(route.coordinates, upTo: travelled)
+        let coordinates = route.travelled(remaining: progress.distanceRemaining)
         guard coordinates.count >= 2 else { return }
 
         let line = MKPolyline(coordinates: coordinates, count: coordinates.count)

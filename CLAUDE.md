@@ -593,29 +593,25 @@ CarPlay 層は触らずに済む設計。
 - **`AppDelegate` に `configurationForConnecting` を実装しない**。CarPlay シーンは Info.plist の
   シーンマニフェストが作る。実装するとマニフェストより優先され、SwiftUI の `WindowGroup` が
   生成されなくなる。
-- **`allowsBackgroundLocationUpdates` は `authorizedAlways` でないと例外**になる。
-  `LocationService.setNavigating` がガード済み。「常に許可」は Apple の推奨順序に従い、
-  案内を開始してから初めて求める。
-  - **「使用中のみ」で断られたまま走ると、案内が凍る場面がある。** あの状態では
-    `allowsBackgroundLocationUpdates` を立てられないので、**アプリのシーンが 1 つも
-    前面でなくなった時点で測位が止まる**。CarPlay のシーンが前面なら測位は続くが、
-    運転者が音楽など**別の CarPlay アプリへ切り替えた瞬間**にそこから外れる。
-    止まっているあいだは推測航法しか動かず、推測では到着を判定しない
-    （→「`GuidanceEngine`」）ので、**そのまま目的地に着いても到着にならない**。
-    音声予告も逸脱判定も引き直しも同時に止まる。
-  - **断られたら知らせる**（`backgroundLocationUnavailable`、2026-08-23 に追加）。
-    `requestAlwaysAuthorization` は案内の開始時に 1 度出るだけで、iOS は一度断られると
-    二度と聞かない。黙っていると**症状（案内が凍る）と原因（許可）が結び付かない**。
-    - **見るのは `.authorizedWhenInUse` だけ。** `.notDetermined` はいま聞いている
-      最中なので黙り、答えが返ったところで `$authorizationStatus` の購読が連れてくる。
-      `.denied` でも黙る（あちらは測位そのものが動かず、案内を始めることすらできない
-      ので「背景で止まる」という話にならない）。
-    - **CarPlay は伝えるだけ**（`CPNavigationAlert`）。設定は iPhone にしか無いので、
-      押させる操作を作らない。運転中に iPhone を触らせないため。
-    - **iPhone は出しっぱなしにする**（`ContentView.backgroundLocationNotice`）。
-      直すには設定アプリへ行く必要があり、**戻ってきたときに消えていると何を直しに
-      行ったのか分からなくなる**。許可が変われば自然に消える。設定を開くボタンは
-      こちらにしか無い。
+- **`allowsBackgroundLocationUpdates` に「常に許可」は要らない。** 要求されるのは
+  **Info.plist の背景モード**（`UIBackgroundModes` の `location`）だけで、認可の状態は
+  見ていない。CoreLocation が持つ例外の文言も
+  `Application must support the location background mode` としか言っていない。
+  2026-08-23 に 26.6 のシミュレータで `.authorizedWhenInUse` のまま立てられることを実測した
+  （`simctl privacy <device> grant location <bundle id>` で「使用中のみ」に落として確認）。
+  - **2026-08-23 まで `.authorizedAlways` を条件にしていた。誤り。** そのせいで
+    「使用中のみ」で走ると、**アプリのシーンが 1 つも前面でなくなった瞬間に測位が止まって
+    いた**。CarPlay の画面が出ているあいだは前面だが、運転者が音楽など別の CarPlay アプリへ
+    切り替えれば外れる。そこから先は推測航法しか動かず、推測では到着を判定しないので
+    **案内が凍る**（音声予告も逸脱判定も引き直しも同時に止まる）。
+  - **「常に許可」は求めない**（`requestAuthorization` は `.notDetermined` のときに
+    「使用中のみ」を 1 度だけ）。Always が要るのは**アプリが動いていないときに位置で
+    起こされたい**場合——リージョン監視・大幅変更監視——で、このアプリはどちらも使わない。
+    要らない許可を運転中に求めない、という判断は `SpeechInput` がマイク以外を求めないのと同じ。
+  - **一般のカーナビアプリも同じ**。「使用中のみ＋背景モード＋`allowsBackgroundLocationUpdates`」
+    が普通の形で、走行中に青いインジケータが出るのが正しい姿。
+  - **背景モードを外さないこと。** 外すと `setNavigating` が例外になり、しかも落ちるのは
+    案内を始めたときなので**気づくのは走り出してから**。`BackgroundModeTests` で止めている。
 - **CarPlay の `upcomingManeuvers` は 2 件までしか表示されない**ので 2 件で切っている。
 - **自アプリが前面でないあいだ、指示と助言はバナーとして出る**。出すかどうかは
   `CPMapTemplateDelegate` の 3 つの callback で決められるが、**実装しているのは

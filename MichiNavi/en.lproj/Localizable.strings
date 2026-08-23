@@ -165,8 +165,3 @@
 "高速を使う" = "Uses highways";
 "高速を避ける" = "Avoid highways";
 "高速道路を避ける" = "Avoid highways";
-"位置情報が「使用中のみ」です" = "Location access is set to While Using";
-"ほかのアプリに切り替えると案内が止まります" = "Guidance stops when you switch apps";
-"設定" = "Settings";
-"位置情報を「常に許可」にしてください" = "Set location access to Always";
-"位置情報の許可" = "Location access";

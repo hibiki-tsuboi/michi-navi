@@ -114,45 +114,87 @@ struct ContentView: View {
     /// 自宅・職場。**設定していなくても枠を出す**。
     ///
     /// 空の枠がそのまま設定の入口になるので、「どこで設定するのか」を探さずに済む。
-    /// ここでしか設定できない（CarPlay 側は検索が使えず設定できない）ぶん、
-    /// 入口は見えているほうがよい。
+    ///
+    /// **設定し直しと解除は「…」で出す**（2026-08-23）。それまでは長押しの中だけに
+    /// 置いていて、**画面に手がかりが 1 つも無かった**——見つからないものは、無いのと
+    /// 同じ。隠した理由は「運転中に触るものではないから」だったが、**iPhone の画面は
+    /// 運転中に使わない**（そのための CarPlay）ので、隠して得るものが無かった。
+    /// 長押しのほうも残してある。
     private var pinnedDestinations: some View {
         HStack(spacing: 8) {
             ForEach(DestinationStore.Pinned.allCases, id: \.self) { kind in
-                let place = store.place(kind)
-                Button {
-                    if let place {
-                        navigation.requestRoutes(to: place)
-                    } else {
-                        assigningPin = kind
-                        isSearchPresented = true
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: kind.symbol)
+                pinnedChip(kind)
+            }
+        }
+    }
+
+    /// 枠 1 つ。**押す＝そこへ向かう**は変えない。編集は右端の「…」に分ける。
+    @ViewBuilder
+    private func pinnedChip(_ kind: DestinationStore.Pinned) -> some View {
+        let place = store.place(kind)
+        HStack(spacing: 0) {
+            Button {
+                if let place {
+                    navigation.requestRoutes(to: place)
+                } else {
+                    assign(kind)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: kind.symbol)
+                    // 設定済みなら名札を主役に、どこを指しているかは添えるだけ
+                    // （CarPlay のピンの行と同じ形）。
+                    VStack(alignment: .leading, spacing: 1) {
                         Text(place == nil ? String(localized: "\(kind.title)を設定") : kind.title)
                             .lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 12)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .foregroundStyle(place == nil ? .secondary : .primary)
-                .contextMenu {
-                    // 設定し直しと解除は運転中に触るものではないので、長押しの奥に置く。
-                    Button(String(localized: "設定し直す")) {
-                        assigningPin = kind
-                        isSearchPresented = true
-                    }
-                    if place != nil {
-                        Button(String(localized: "解除"), role: .destructive) {
-                            store.set(nil, as: kind)
+                        if let place {
+                            Text(place.name)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 10)
+                .padding(.leading, 12)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(place == nil ? .secondary : .primary)
+
+            // 未設定の枠には出さない。押す先（設定）が枠そのものと同じになるので、
+            // 選ぶものが 1 つしかないメニューになる。
+            if place != nil {
+                Menu {
+                    Button(String(localized: "設定し直す")) { assign(kind) }
+                    Button(String(localized: "解除"), role: .destructive) {
+                        store.set(nil, as: kind)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 12)
+                        .contentShape(.rect)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .contextMenu {
+            Button(String(localized: "設定し直す")) { assign(kind) }
+            if place != nil {
+                Button(String(localized: "解除"), role: .destructive) {
+                    store.set(nil, as: kind)
                 }
             }
         }
+    }
+
+    /// 検索シートを「ピン留めを設定する」ために開く。
+    private func assign(_ kind: DestinationStore.Pinned) {
+        assigningPin = kind
+        isSearchPresented = true
     }
 
     // MARK: - 下部

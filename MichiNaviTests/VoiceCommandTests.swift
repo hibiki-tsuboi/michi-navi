@@ -7,15 +7,21 @@ import Testing
 /// 判定を変えるときは誤爆の側を先に確かめること。取りこぼしても検索に落ちるだけだが、
 /// 拾いすぎると**同乗者との会話で案内が切れる**。
 struct VoiceCommandTests {
-    @Test("決まった言い回しだけを操作として拾う", arguments: [
-        ("案内を終了して", VoiceCommand.endNavigation),
+    // 型を明示しているのは、要素が増えると推論が音を上げて
+    // 「cannot infer contextual base」で落ちるため。
+    @Test("決まった言い回しだけを操作として拾う", arguments: [(String, VoiceCommand)]([
+        ("案内を終了して", .endNavigation),
         ("ナビを終了", .endNavigation),
         ("もう一度言って", .repeatGuidance),
         ("全体を表示", .overview),
         ("stop navigation", .endNavigation),
         ("say that again", .repeatGuidance),
         ("show the whole route", .overview),
-    ])
+        ("家に帰りたい", .goHome),
+        ("自宅", .goHome),
+        ("帰宅する", .goHome),
+        ("take me home", .goHome),
+    ]))
     func recognizesCommands(text: String, expected: VoiceCommand) {
         #expect(VoiceCommand.fallback(from: text, isNavigating: true) == expected)
     }
@@ -25,6 +31,9 @@ struct VoiceCommandTests {
         "そろそろ終わりにしよう",
         "もういいや",
         "ぜんぶ見せて",
+        // **「帰る」だけでは帰り道にしない。** 同乗者との会話で誤爆する。
+        "そろそろ帰るね",
+        "帰りは高速で",
     ])
     func doesNotFireOnConversation(text: String) {
         // 拾えなければ行き先として扱われる。**検索に落ちるだけなので害が小さい。**

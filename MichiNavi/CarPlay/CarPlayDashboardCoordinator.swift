@@ -67,9 +67,9 @@ final class CarPlayDashboardCoordinator {
         // sink の中で読み直すと 1 つ前の値になる（`store.recents` は削除と挿入で 2 回書くため、
         // 読み直すと「消したあと・入れる前」の並びが取れてしまう）。
         // 購読した時点で現在値が 1 回流れるので、初回の組み立てもここが兼ねる。
-        Publishers.CombineLatest(store.$recents, preferences.$refuelKind)
-            .sink { [weak self] recents, refuelKind in
-                self?.updateShortcuts(recents: recents, refuelKind: refuelKind)
+        Publishers.CombineLatest3(store.$recents, store.$home, preferences.$refuelKind)
+            .sink { [weak self] recents, home, refuelKind in
+                self?.updateShortcuts(recents: recents, home: home, refuelKind: refuelKind)
             }
             .store(in: &cancellables)
     }
@@ -91,10 +91,14 @@ final class CarPlayDashboardCoordinator {
     /// 押したらそのまま案内を始める。ダッシュボードを見ている人に
     /// センターディスプレイ側の確認画面を探させないため。
     ///
-    /// 中身は**いちばん新しい履歴 1 件と、補給先** [refuelButton]。履歴で 2 枠とも
-    /// 埋めていたのを 2026-08-23 に 1 枠ずつに分けた。**案内中は CarPlay が畳む**ので、
+    /// 中身は**自宅（無ければいちばん新しい履歴）と、補給先** [refuelButton]。
+    /// 履歴で 2 枠とも埋めていたのを 2026-08-23 に分けた。**案内中は CarPlay が畳む**ので、
     /// ここに置けるのは「走り出す前の 1 タップ」だけ。走行中に周辺を探す道は
     /// マイクと目的地リストのヘッダに残っている。
+    ///
+    /// **自宅を履歴より先に置く。** 帰り道はここからの 1 タップがいちばん短い。
+    /// 履歴の先頭はたいてい自宅と重なるが、重ならないとき（出先で寄り道した直後）が
+    /// **まさに帰りたい場面**なので、そこで自宅が消える並びにはしない。
     ///
     /// **空配列を代入しないこと**。CarPlay 側は「ちょうど 1 件」と「それ以外」で
     /// レイアウトを分けており、0 件は後者に落ちて先頭・末尾のボタンが nil のまま
@@ -102,16 +106,27 @@ final class CarPlayDashboardCoordinator {
     /// （履歴が空のまま Dashboard を繋ぐと必ず再現する）。
     /// 隠す必要があるとき（案内中）は CarPlay が自前でやってくれる。曲がり方を出すときに
     /// ショートカット欄を畳み、案内が終わると戻す。こちらから消しにいかなくてよい。
-    private func updateShortcuts(recents: [Place], refuelKind: RoutePreferences.RefuelKind) {
-        var buttons = recents
-            .prefix(Self.maximumButtons - 1)
-            .map { place in
-                CPDashboardButton(titleVariants: [place.name],
-                                  subtitleVariants: [place.subtitle],
-                                  image: Self.shortcutImage) { [weak self] _ in
-                    self?.navigation.startNavigation(to: place)
+    private func updateShortcuts(recents: [Place], home: Place?, refuelKind: RoutePreferences.RefuelKind) {
+        var buttons: [CPDashboardButton] = []
+        if let home {
+            buttons.append(CPDashboardButton(titleVariants: [DestinationStore.Pinned.home.title],
+                                             // 名札だけでは「どこへ向かうのか」が分からないので、
+                                             // 設定した地点を添える。目的地リストのピンと同じ形。
+                                             subtitleVariants: [home.name],
+                                             image: Self.pinnedImage) { [weak self] _ in
+                self?.navigation.startNavigation(to: home)
+            })
+        } else {
+            buttons += recents
+                .prefix(Self.maximumButtons - 1)
+                .map { place in
+                    CPDashboardButton(titleVariants: [place.name],
+                                      subtitleVariants: [place.subtitle],
+                                      image: Self.shortcutImage) { [weak self] _ in
+                        self?.navigation.startNavigation(to: place)
+                    }
                 }
-            }
+        }
         buttons.append(refuelButton(kind: refuelKind))
 
         dashboardController.shortcutButtons = buttons
@@ -171,6 +186,12 @@ final class CarPlayDashboardCoordinator {
             }
         }
     }
+
+    private static let pinnedImage: UIImage = {
+        let configuration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+        return UIImage(systemName: DestinationStore.Pinned.home.symbol, withConfiguration: configuration)?
+            .withRenderingMode(.alwaysTemplate) ?? UIImage()
+    }()
 
     private static func refuelImage(for kind: RoutePreferences.RefuelKind) -> UIImage {
         let configuration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)

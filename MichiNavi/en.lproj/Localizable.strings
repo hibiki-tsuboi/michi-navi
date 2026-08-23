@@ -134,6 +134,7 @@
 "聞き取れませんでした" = "Didn't catch that";
 "職場" = "Work";
 "自宅" = "Home";
+"自宅が設定されていません。iPhone で設定してください" = "Home isn't set. Set it on your iPhone.";
 "航続距離" = "Range";
 "行き先をどうぞ" = "Where to?";
 "補給" = "Refueling";

@@ -22,10 +22,14 @@ final class CarPlayVoiceControl {
 
     private enum Failure: LocalizedError {
         case notFound(String)
+        case homeNotSet
 
         var errorDescription: String? {
             switch self {
             case let .notFound(query): String(localized: "「\(query)」は見つかりませんでした")
+            // **ここで設定させようとしない。** 自宅を決めるには検索が要り、走行中は
+            // その検索が塞がれている。どこで設定できるかだけ言う。
+            case .homeNotSet: String(localized: "自宅が設定されていません。iPhone で設定してください")
             }
         }
     }
@@ -104,6 +108,16 @@ final class CarPlayVoiceControl {
 
                 let command = await VoiceCommand.parse(text, isNavigating: NavigationController.shared.currentRoute != nil)
                 guard !Task.isCancelled else { return }
+
+                // **自宅は探さない。** ピン留めした座標がそのまま行き先なので、
+                // 検索を通すと「自宅」という語で別の場所が当たる。確認は行き先を
+                // 言われたときと同じくルートの提示が兼ねる。
+                if case .goHome = command {
+                    guard let home = store.place(.home) else { throw Failure.homeNotSet }
+                    await dismiss()
+                    onSelect(.destination(home))
+                    return
+                }
 
                 // 行き先だけは検索が要るので、画面を出したまま探す。
                 // それ以外は待たせる意味が無いので、先に畳んでから実行する。

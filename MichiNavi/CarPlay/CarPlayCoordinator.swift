@@ -1294,7 +1294,8 @@ final class CarPlayCoordinator: NSObject {
             VoiceGuidance.shared.repeatCurrentGuidance()
         case .overview:
             showOverview()
-        case .destination:
+        case .destination, .goHome:
+            // どちらも `CarPlayVoiceControl` が行き先として渡してくる（`onSelect`）。
             break
         }
     }

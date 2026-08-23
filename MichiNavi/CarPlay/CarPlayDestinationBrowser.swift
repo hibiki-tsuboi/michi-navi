@@ -117,11 +117,6 @@ final class CarPlayDestinationBrowser: NSObject {
                                           sectionIndexTitle: nil))
         }
 
-        sections.append(CPListSection(items: [avoidItem(\.avoidsTolls, title: String(localized: "有料道路を避ける")),
-                                              avoidItem(\.avoidsHighways, title: String(localized: "高速道路を避ける"))],
-                                      header: String(localized: "ルートの引き方"),
-                                      sectionIndexTitle: nil))
-
         let template = CPListTemplate(title: String(localized: "目的地"), sections: sections)
         template.headerGridButtons = searchGridButtons
         // キーボードが塞がれているときに検索ボタンを出すと、押しても何も起きない
@@ -139,8 +134,14 @@ final class CarPlayDestinationBrowser: NSObject {
     /// しか置けなかった。**走行中にスクロールして辿る場所ではない**ので、行数を持たない
     /// ヘッダへ出す。行き先の並びはそのまま動かさずに済む。
     ///
+    /// **ルートの引き方も同じ理由でここへ引き上げた**（2026-08-23）。それまでは行き先の
+    /// あとの最後の節にあったが、上にはピン 2 件・この時間の行き先・お気に入り
+    /// （上限なし）・履歴（上限 20 件）が積まれるので、**30 行送った先**になりうる。
+    /// しかも**設定は目的地を選ぶ手前で効く**もの（変えても走っている案内は引き直さず、
+    /// 次の計算から効く）なのに、目的地より下にあった。行き先の並びは動かさずに済む。
+    ///
     /// **空配列を代入しない。** Dashboard の `shortcutButtons` が 0 件で落ちる前例が
-    /// あるので、0 件になりうる作りにしない（ここは常に 1 件）。足すときは
+    /// あるので、0 件になりうる作りにしない（ここは常に 2 件）。足すときは
     /// `maximumHeaderGridButtonCount` が上限。
     private var searchGridButtons: [CPGridButton] {
         [
@@ -150,7 +151,28 @@ final class CarPlayDestinationBrowser: NSObject {
                          image: Self.gridImage(named: "location.magnifyingglass")) { [weak self] _ in
                 self?.presentCategories()
             },
+            // アイコンは虫めがねと紛れないもの。分かれ道の形にしてある
+            // （歯車にすると、この 2 つ以外の設定もあると読める）。
+            CPGridButton(titleVariants: [String(localized: "ルートの引き方")],
+                         image: Self.gridImage(named: "arrow.triangle.branch")) { [weak self] _ in
+                self?.presentRoutePreferences()
+            },
         ]
+    }
+
+    // MARK: - ルートの引き方
+
+    /// 有料道路・高速の回避だけの小さなリスト。
+    ///
+    /// **切り替えても目的地リストへ戻さない**（この画面を出し直す）。2 つとも変えたい
+    /// ことがあるので、1 つ触るたびに上の階層へ落とすと入り直しになる。作り直しているのは
+    /// `CPListItem` を後から差し替えるより素直なため。ここは走行中に何度も触る場所では
+    /// ないので、作り直しの重さは問題にならない。
+    private func presentRoutePreferences() {
+        let section = CPListSection(items: [avoidItem(\.avoidsTolls, title: String(localized: "有料道路を避ける")),
+                                            avoidItem(\.avoidsHighways, title: String(localized: "高速道路を避ける"))])
+        let template = CPListTemplate(title: String(localized: "ルートの引き方"), sections: [section])
+        interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
     /// `titled` を渡すと、地点の名前ではなくその名札を主役にする（「自宅」＋ 地点名）。
@@ -191,9 +213,9 @@ final class CarPlayDestinationBrowser: NSObject {
             guard let self else { return completion() }
             preferences[keyPath: key].toggle()
             // 走っている案内は引き直さない（次に計算するときから効く）ので、
-            // ここで伝えておかないと「押したのに何も変わらない」と見える。
+            // チェックの付き外しだけが押した手応えになる。**戻す先はこの画面**。
             interfaceController.popTemplate(animated: false) { [weak self] _, _ in
-                self?.present()
+                self?.presentRoutePreferences()
             }
             completion()
         }

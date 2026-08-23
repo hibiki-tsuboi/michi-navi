@@ -703,8 +703,22 @@ CarPlay 層は触らずに済む設計。
     `viewSafeAreaInsetsDidChange` しかない（`CPMapTemplateDelegate` に提示の合図は無い）
     ので、そこで合わせ直している。**利用者が地図を動かしたら追随をやめる**こと
     （`abandonOverview`）。残すと、動かした先からテンプレートの出入りだけで引き戻される。
+  - **最初のカメラは必ず即座に置く**（`hasPlacedCamera`、2026-08-23）。`MKMapView` は
+    生成した時点では端末の地域＝**日本全体**を映していて、そこは自車位置とも経路とも
+    関係が無い。最初の測位を `animated: true` のまま当て込んでいたので、**CarPlay を
+    繋ぐたびに日本全体から現在地へ寄ってくる**動きが出ていた（すぐ下の全体表示と
+    まったく同じ間違いで、しかも**運転者が最初に見る数秒**に起きる）。一般のカーナビは
+    繋いだ瞬間から走行縮尺で描き始めるので、1 フレーム目にはもう自車の上に居るのが正しい。
+    - **`viewDidLoad` で `LocationService.shared.location` から先に置く。** GPS は共有で
+      1 本だけなので、CarPlay を繋ぐ前から iPhone 側が測位している。待つと、そのあいだ
+      日本全体が映る。
+    - **無ければ `follow` の初回が受ける**（`animated && hasPlacedCamera`）。測位が来る前に
+      `.previewing` から入る道もある（iPhone で候補を出したまま繋ぐ）ので、
+      `showRouteOverview` の側も同じ印を見る。
+    - iPhone 側は `.userLocation(fallback: .automatic)` なので**この症状は出ない**。
+      CarPlay だけの話。
   - **当て込みをアニメーションさせてよいのは自車から引くときだけ**（`showRouteOverview` の
-    `wasFollowingUser`）。`setVisibleMapRect(animated: true)` は**いまのカメラから**新しい
+    `animated`）。`setVisibleMapRect(animated: true)` は**いまのカメラから**新しい
     経路まで飛ぶので、**前の全体表示が残っていると、その縮尺から始まる**。前の行き先が
     遠ければ数百 km になっている（実測: 東京→大阪 500km の経路を当て込むと 997km、
     120km で 239km、市内 5km で 10km）ので、次に近所を選ぶと**日本全体から数秒かけて

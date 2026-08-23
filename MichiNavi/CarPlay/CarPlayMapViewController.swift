@@ -78,6 +78,16 @@ final class CarPlayMapViewController: UIViewController {
     /// `setVisibleMapRect` でカメラを引いて `cameraDistance` を更新しないので、そのあいだだけ立てる。
     private var cameraDistanceIsStale = false
 
+    /// カメラを一度でも意味のある場所へ置いたか。**起動直後の 1 回だけアニメーションを
+    /// 外すため**に要る。`MKMapView` は生成した時点では端末の地域＝日本全体を映していて、
+    /// そこは自車位置とも経路とも何の関係も無い。最初の当て込みを `animated: true` の
+    /// まま通すと、**日本全体から数秒かけて現在地へ寄ってくる**。`showRouteOverview` が
+    /// 前の全体表示から飛ぶのを止めているのとまったく同じ話で、**関係の無い枠から飛ぶ
+    /// 動きは何も伝えていない**。しかもこちらは繋いだ直後——運転者が最初に見る数秒——に
+    /// 起きる。カーナビは繋いだ瞬間から走行縮尺で描き始めるものなので、1 フレーム目には
+    /// もう自車の上に居るのが正しい。
+    private var hasPlacedCamera = false
+
     /// いま全体表示で見せている経路。テンプレート（ルート提示の一覧・案内カード）が
     /// 出入りすると使える幅が変わり、当て込みはその幅から決まるので、変わったときに
     /// 合わせ直すために覚えておく（[viewSafeAreaInsetsDidChange]）。
@@ -154,6 +164,18 @@ final class CarPlayMapViewController: UIViewController {
         view = mapView
     }
 
+    /// **1 フレーム目から走行縮尺で描く。**
+    ///
+    /// CarPlay を繋ぐ前から iPhone 側が測位している（`LocationService` は共有なので、
+    /// シーンが増えても GPS は 1 本のまま走り続けている）ので、たいていはここで自車位置が
+    /// もう分かっている。**最初の測位を待つと、そのあいだ日本全体が映る**。
+    /// 分からないときは [hasPlacedCamera] が受けて、最初の測位でアニメーション無しに置く。
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        guard let location = LocationService.shared.location else { return }
+        follow(location: location, animated: false)
+    }
+
     // MARK: - ルート表示
 
     func show(route: NavRoute?) {
@@ -196,7 +218,10 @@ final class CarPlayMapViewController: UIViewController {
                                  fromDistance: cameraDistance,
                                  pitch: orientation.pitch,
                                  heading: heading(for: location, orientation: orientation))
-        mapView.setCamera(camera, animated: animated)
+        // **初回だけは頼まれても動かさない。** 飛んでくる元は日本全体で、自車位置とは
+        // 何の関係も無い（[hasPlacedCamera]）。
+        mapView.setCamera(camera, animated: animated && hasPlacedCamera)
+        hasPlacedCamera = true
     }
 
     private func heading(for location: CLLocation, orientation: MapOrientation) -> CLLocationDirection {
@@ -257,7 +282,11 @@ final class CarPlayMapViewController: UIViewController {
     /// （ルート提示の一覧が出て使える幅が変わるため）。飛んでいる途中で snap するくらいなら、
     /// 初めから動かさないほうが揃う。
     func showRouteOverview(_ route: NavRoute) {
-        let wasFollowingUser = isFollowingUser
+        // **自車から引くときでも、まだ一度もカメラを置いていなければ動かさない。**
+        // 起動直後にここへ来る道がある（iPhone で候補を出したまま CarPlay を繋ぐと、
+        // `apply(phase:)` が購読した時点の `.previewing` をそのまま反映する）。
+        // そのとき飛んでくる元は前の全体表示ではなく日本全体だが、関係が無いことは同じ。
+        let animated = isFollowingUser && hasPlacedCamera
         isFollowingUser = false
         overviewRoute = route
         // 引いた先の高度は MapKit が決めるので、保存値はここで当てにならなくなる。
@@ -270,7 +299,8 @@ final class CarPlayMapViewController: UIViewController {
                                  pitch: 0,
                                  heading: 0)
         mapView.setCamera(camera, animated: false)
-        fitOverview(route, animated: wasFollowingUser)
+        hasPlacedCamera = true
+        fitOverview(route, animated: animated)
     }
 
     private func fitOverview(_ route: NavRoute, animated: Bool) {

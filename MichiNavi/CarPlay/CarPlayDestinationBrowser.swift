@@ -85,21 +85,10 @@ final class CarPlayDestinationBrowser: NSObject {
         let pinned = DestinationStore.Pinned.allCases.compactMap { kind in
             store.place(kind).map { makeItem(for: $0, titled: kind.title) }
         }
+        // **見出しは付けない**（2026-08-23 に外した）。中身は必ず自宅・職場の 2 行だけで、
+        // 行そのものに「自宅」「職場」と書いてある。見出しは 1 行使って何も足していなかった。
         if !pinned.isEmpty {
-            sections.append(CPListSection(items: pinned,
-                                          header: String(localized: "よく行く場所"),
-                                          sectionIndexTitle: nil))
-        }
-
-        // **ピンのすぐ下に置く。** ピンの 2 枠に入らないが決まった時間に行く場所
-        // （送り迎え・買い物）を、走行中でも届く高さへ引き上げる。
-        // 順番を入れ替えるのではなく別の節にするのは、なぜ並びが変わったのかを
-        // 見て分かるようにするため。
-        let frequent = store.frequentDestinations()
-        if !frequent.isEmpty {
-            sections.append(CPListSection(items: frequent.map(makeItem(for:)),
-                                          header: String(localized: "この時間の行き先"),
-                                          sectionIndexTitle: nil))
+            sections.append(CPListSection(items: pinned, header: nil, sectionIndexTitle: nil))
         }
 
         if !store.favorites.isEmpty {
@@ -108,11 +97,8 @@ final class CarPlayDestinationBrowser: NSObject {
                                           sectionIndexTitle: nil))
         }
 
-        // 引き上げたぶんは履歴から抜く。同じ行が 2 か所に出ると、どちらを押しても
-        // 同じだと分かるまで一瞬迷う。
-        let remaining = store.recents.filter { !frequent.contains($0) }
-        if !remaining.isEmpty {
-            sections.append(CPListSection(items: remaining.map(makeItem(for:)),
+        if !store.recents.isEmpty {
+            sections.append(CPListSection(items: store.recents.map(makeItem(for:)),
                                           header: String(localized: "最近の目的地"),
                                           sectionIndexTitle: nil))
         }
@@ -135,8 +121,8 @@ final class CarPlayDestinationBrowser: NSObject {
     /// ヘッダへ出す。行き先の並びはそのまま動かさずに済む。
     ///
     /// **ルートの引き方も同じ理由でここへ引き上げた**（2026-08-23）。それまでは行き先の
-    /// あとの最後の節にあったが、上にはピン 2 件・この時間の行き先・お気に入り
-    /// （上限なし）・履歴（上限 20 件）が積まれるので、**30 行送った先**になりうる。
+    /// あとの最後の節にあったが、上にはピン 2 件・お気に入り（上限なし）・
+    /// 履歴（上限 20 件）が積まれるので、**30 行近く送った先**になりうる。
     /// しかも**設定は目的地を選ぶ手前で効く**もの（変えても走っている案内は引き直さず、
     /// 次の計算から効く）なのに、目的地より下にあった。行き先の並びは動かさずに済む。
     ///

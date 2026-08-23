@@ -133,23 +133,15 @@ struct SearchSheet: View {
         } else {
             // CarPlay 側と同じ並び。片方だけ並べ替えると、同じ履歴なのに
             // 順序が違って見える。
-            let frequent = store.frequentDestinations()
-            if !frequent.isEmpty {
-                Section(String(localized: "この時間の行き先")) {
-                    ForEach(frequent) { place in row(for: place) }
-                }
-            }
-
             if !store.favorites.isEmpty {
                 Section(String(localized: "お気に入り")) {
                     ForEach(store.favorites) { place in row(for: place) }
                 }
             }
 
-            let remaining = store.recents.filter { !frequent.contains($0) }
-            if !remaining.isEmpty {
+            if !store.recents.isEmpty {
                 Section(String(localized: "最近の目的地")) {
-                    ForEach(remaining) { place in row(for: place) }
+                    ForEach(store.recents) { place in row(for: place) }
                 }
             }
         }

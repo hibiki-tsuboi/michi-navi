@@ -104,7 +104,13 @@ final class CarPlayCoordinator: NSObject {
     /// ボタンの押下が乗っ取られたと見なす猶予。UIKit がダブルタップと認める間隔
     /// （0.3 秒ほど）より少し広く取る。**狭めると乗っ取りを取りこぼす**（そのときは
     /// 縮小ボタンの 2 回目が拡大に戻る）。
-    static let zoomTapTakeoverWindow: TimeInterval = 0.5
+    /// **`nonisolated` にしてあるのは、既定の引数から読むため**（[zoomDirection]）。
+    /// 既定の引数は**呼び出し側ではなく宣言の文脈**で評価され、そこは隔離を持たない。
+    /// このクラスは既定で MainActor なので、付けないと「Main actor-isolated static
+    /// property can not be referenced from a nonisolated context」——`SWIFT_VERSION = 5.0`
+    /// のうちは警告だが、Swift 6 モードではエラーになる。
+    /// 中身が不変の `TimeInterval` なので、隔離を外しても危なくない。
+    nonisolated static let zoomTapTakeoverWindow: TimeInterval = 0.5
 
     /// 直前に反映した段階。**同じ段階が出し直されたときに中心へ戻さない**ための記録。
     /// リルートが成功すると `NavigationController.startNavigation(with:)` を通って

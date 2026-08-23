@@ -35,6 +35,19 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// **自分では何も出せない入口から、失敗を利用者へ伝えるための口。**
+    ///
+    /// Dashboard のショートカットがこれを使う。あちらにはテンプレートが出せないので、
+    /// 探して見つからなかった・通信が切れていたを黙って落とすと「押しても何も起きない
+    /// ボタン」になる。ここへ載せればセンターディスプレイと iPhone がアラートを出すので、
+    /// 見に行ったときに理由が残っている。
+    ///
+    /// **経路計算の失敗はここを通さない**（`requestRoutes` などが自分で載せる）。
+    /// これは案内へ入る手前の、探す段で終わってしまったぶんのため。
+    func report(error message: String) {
+        lastError = message
+    }
+
     /// いま案内している経路。**`phase` とは寿命が違う。**
     ///
     /// 走行中に次の行き先を探すと `phase` は `.calculating` → `.previewing` と動くが、

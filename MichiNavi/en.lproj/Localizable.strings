@@ -27,6 +27,7 @@
 "「%@」は見つかりませんでした" = "Couldn't find \"%@\"";
 "あとで" = "Later";
 "いいえ" = "No";
+"いちばん近い場所へ" = "Nearest one";
 "いまの指示をもう一度読み上げます。" = "Repeats the current instruction.";
 "お気に入り" = "Favorites";
 "お気に入りから外す" = "Remove from favorites";

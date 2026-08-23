@@ -3,6 +3,8 @@
    日本語の端末でも en.lproj（英語）に落ちる。両方を必ず置くこと。 */
 
 "%.1fキロ" = "%.1f km";
+"%@ ごろから正面に朝日が入ります" = "Low morning sun ahead from %@";
+"%@ ごろから正面に西日が入ります" = "Low afternoon sun ahead from %@";
 "%@ にとめました" = "Parked at %@";
 "%@ に出発" = "Leave at %@";
 "%@ に寄りますか" = "Stop at %@?";
@@ -33,6 +35,7 @@
 "お気に入りから外す" = "Remove from favorites";
 "お気に入りに追加" = "Add to favorites";
 "お気に入りや履歴の目的地へ案内を始めます。" = "Starts guidance to a favorite or recent destination.";
+"およそ %@ 続きます" = "Lasts about %@";
 "ここに停める" = "Park here";
 "ここまで歩いて戻る" = "Walk back to your car";
 "このままでは届きません" = "You won't make it this far";

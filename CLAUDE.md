@@ -99,15 +99,16 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 14 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 15 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
 `NetworkMonitor.shared` / `RestReminder.shared` / `RangeAdvisor.shared` /
-`RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared`。
+`RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared` /
+`SunGlareAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
-後ろ 5 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` /
-`TrafficAdvisor`）は**助言を出すだけの層**で、
+後ろ 6 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` /
+`TrafficAdvisor` / `SunGlareAdvisor`）は**助言を出すだけの層**で、
 `NavigationController` を購読して `PassthroughSubject` で知らせるところまでしか持たない。
 出すかどうか・どう見せるかは各 UI が決める。案内そのものには一切触らないので、
 足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ（`VoiceGuidance` と同じ理由で、
@@ -274,7 +275,7 @@ Combine の使い分けにも意味がある:
   （「終わり」だけで案内を切ると同乗者との会話でも切れる）。**Apple Intelligence が
   無い環境ではこれが唯一走る経路**なので、判定を変えるときは誤爆の側を先に確かめること。
 
-### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor`）
+### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` / `SunGlareAdvisor`）
 
 どれも「案内は変えず、知らせるだけ」。`NavigationController` を購読して
 `PassthroughSubject` を流し、出すかどうかは各 UI が決める。
@@ -331,6 +332,34 @@ Combine の使い分けにも意味がある:
     **車の側へは区別して渡している**（`CPRerouteReason.alternateRoute`）。`replaceRoute` が
     `NavigationController.lastRouteChange` を読み替えるので、経由地は 1 つも変わって
     いないのに `.waypointModified` と言うことはない。
+- **正面から低い太陽が入る区間は、出発時に 1 度だけ知らせる**（`SunGlareAdvisor`、2026-08-23）。
+  **材料は経路の形と時計だけ**で、問い合わせも許可も entitlement も要らない。天気
+  （`RouteWeather`）が WeatherKit のケイパビリティ待ちで黙っているのと違い、書いた日から動く。
+  裏返して、**曇っているかは分からない**ので言えるのは「そういう位置関係になる」まで。
+  - **太陽の位置の計算は `SolarPosition`（`Core/`）に分けてある。** 測る計算と使い方を
+    分けるのは `JunctionGeometry` ↔ `JunctionImage`、`ManeuverDirection` ↔ `ManeuverKind` と
+    同じ。**確かめる基準が教科書にある**のがこの計算の良いところで、南中高度・
+    春分の日の出の方位・経度 1 度あたり 4 分・均時差の年変化がそのままテストになる
+    （`SolarPositionTests`）。緯度・経度・時角のどれかを裏返しても**半日はもっともらしい値**が
+    出るので、走らせただけでは気づけない。
+  - 条件は 3 つ。**高度 0〜15 度**（それより高ければバイザーの仕事）、**進行方位との差
+    ±20 度**、**2 分以上続くこと**。長さを距離ではなく時間で切るのは、同じ 1km でも
+    高速では 30 秒・市街地では 2 分になるため。
+  - **「一瞬のかたまり」を捨ててから、近いものを束ねる。順番が要る。** 実際の道はまっすぐ
+    太陽へ向かわないので、正面に入る区間は細切れになる（実測: 東京駅→高尾山口 17:30 発で
+    6 分・3 分・3 分の 3 つ、あいだは 4 分と 1 分）。**束ねないと「6 分」と言うが、
+    運転者は 16 分ぶん太陽と付き合う。** かといって先に束ねると、カーブの途中で一瞬だけ
+    正面に来る 1 点ものが数珠つなぎになり、**同じ経路が「17:30 から 38 分」＝ほぼ全行程**に
+    なった（頭の 17:30 は通りすがりの 1 点）。北へ向かう経路まで出るようになる。
+  - 2026-08-23 に実経路 4 本で確かめた: 東京駅→高尾山口（西へ・夕方）＝西日 16 分、
+    その逆（東へ・夕方＝太陽は背中）＝出ない、東京駅→千葉（東へ・朝）＝朝日 10 分、
+    東京駅→大宮（北へ・夕方）＝出ない。**±30 度に広げると北へ向かう経路まで出る**ので、
+    「正面」は ±20 度に留める。
+  - **数えるのは目的地**（`ParkingAdvisor` と同じ）。`NavRoute.id` で数えると、引き直すたびに
+    同じことを言う。太陽の位置は引き直しでは変わらない。
+  - **「いま見えているものは言わない」（`RouteWeather` が先頭の標本を捨てる理由）はここでは
+    採らない。** 目の前の眩しさは窓を見れば分かるが、**それがいつまで続くか**は分からない。
+
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
 
@@ -1422,6 +1451,15 @@ CarPlay 層は触らずに済む設計。
     通った。合計でも 1km あたりでも同じ経路が勝つ組み合わせを選んでいたため。
     **比べる 2 つは、直したい間違いをしたときに順位が入れ替わるように作ること**
     （いまは合計では長いほうが勝ち、1km あたりでは短いほうが勝つ形にしてある）。
+  - 2026-08-23 に `SolarPosition` と `SunGlareAdvisor` でも 11 か所やった（緯度・経度・
+    方位・均時差をそれぞれ落とす、高さの上限・正面の条件・長さの下限・かたまりの下限・
+    束ねる猶予をそれぞれ外す、方位の y の符号、朝夕の入れ替え）。**ここでも 1 件、
+    最初は通らなかった**——「短すぎる区間は出さない」のテストが、**手前の条件
+    （かたまりの下限）で先に落ちていた**ので、その条件を消しても誰も気づかなかった。
+    **条件が重なっているところでは、確かめたい条件だけに引っかかる大きさを選ぶこと。**
+  - **force unwrap（`!`）でテストを書かない。** 経度を落として確かめたとき、探索が
+    空振りして `!` で落ち、**同じ実行にいたテストが全部 failed になった**。どれが
+    本当に落ちたのか読めなくなるので、`try #require` を使う。
 - **`IPHONEOS_DEPLOYMENT_TARGET` はアプリと揃えて 26.0**。Xcode が作った直後は 26.5 に
   なっていて、そのままだと**テストが 26.4 以降のシミュレータでしか動かない**。
   CarPlay の確認は 26.2 以前でないと落ちる（→「未実装」）ので、**揃えないと
@@ -1467,6 +1505,13 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   （`CarPlay Simulator.app` の `Standard Navigation` プリセットがメーター内ディスプレイを
   含んでいる。→「車との目的地共有・ルート共有の動作確認」）。2026-08-18 まで
   「車が要る」と書いていた。
+- **西日の予告の実走確認**（2026-08-23 追加ぶん）。**判断のほうは実経路 4 本で確かめた**
+  （→「助言を出す層」）が、**`CPNavigationAlert` として出したところは見ていない**。
+  文字数が多いので、狭い画面で切られないかは実物を見るまで分からない。
+  出す条件そのものは時刻と向きしだいなので、シミュレータで確かめるなら**西へ向かう
+  経路を日没の 1 時間ほど前に**始めること（夏の東京なら 18:00 前後）。出なかったときに
+  画面には何も出ないので、`ParkingAdvisor` と同じく切り分けはログが要る——が、
+  **`SunGlareAdvisor` はまだログを持っていない**。要るようなら足すこと。
 - **駐車場の提案の実走確認**（2026-08-16 追加ぶん）。**アプリを通して出したことは一度も無い。**
   ここだけは UI を叩く必要があり、テストターゲットが無いあいだは実走かシミュレータでの
   手動操作になる。切り分けは `ParkingLog`（category `parking`）を見る。**出なかったときに

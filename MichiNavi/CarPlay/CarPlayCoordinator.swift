@@ -328,6 +328,10 @@ final class CarPlayCoordinator: NSObject {
             .sink { [weak self] in self?.presentWeatherHazard($0) }
             .store(in: &cancellables)
 
+        SunGlareAdvisor.shared.glare
+            .sink { [weak self] in self?.presentSunGlare($0) }
+            .store(in: &cancellables)
+
         ParkingAdvisor.shared.advice
             .sink { [weak self] in self?.presentParkingAdvice($0) }
             .store(in: &cancellables)
@@ -1306,6 +1310,18 @@ final class CarPlayCoordinator: NSObject {
             titleVariants: [hazard.message],
             subtitleVariants: nil,
             image: UIImage(systemName: hazard.symbolName),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 10)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
+    /// 経路の先で正面から低い太陽が入る区間。天気と同じく、知らせるだけで押させることは無い。
+    private func presentSunGlare(_ glare: SunGlareAdvisor.Glare) {
+        let alert = CPNavigationAlert(
+            titleVariants: [glare.message],
+            subtitleVariants: [glare.detail],
+            image: UIImage(systemName: glare.symbolName),
             primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
             secondaryAction: nil,
             duration: 10)

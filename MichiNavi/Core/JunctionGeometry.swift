@@ -28,6 +28,15 @@ struct JunctionGeometry {
     /// 0 が直進、正が右。
     let turn: CGFloat
 
+    /// **曲がる地点そのもの以外で、たどる線がどれだけ曲がっているか**（ラジアン、常に正）。
+    ///
+    /// 入ってくる側と出ていく側それぞれについて、入口の向きと出口の向きの差を測り、
+    /// 大きいほうを採る。**矢印アイコンが言えないことを測っている**——「右に曲がる」は
+    /// `ManeuverDirection` がすでに出しているので、拡大図が足せるのは「曲がった先で
+    /// もう一度曲がる」「入りながら曲がっている」といった**線そのものの形**だけ。
+    /// 使うかどうかは見せ方の判断なので、しきい値は `JunctionImage` が持つ。
+    let bend: CGFloat
+
     /// 曲がる地点の手前と先を、それぞれどれだけ入れるか。
     ///
     /// 広げるほど拡大図の縮尺が小さくなり、肝心の曲がり角が潰れる。**曲がる直前に見て
@@ -70,7 +79,42 @@ struct JunctionGeometry {
         let rotatedDeparture = departure.map { rotate($0, by: angle) }
 
         guard let turn = turnAngle(departure: rotatedDeparture) else { return nil }
-        return JunctionGeometry(approach: rotatedApproach, departure: rotatedDeparture, turn: turn)
+        return JunctionGeometry(approach: rotatedApproach,
+                                departure: rotatedDeparture,
+                                turn: turn,
+                                bend: max(bend(of: rotatedApproach), bend(of: rotatedDeparture)))
+    }
+
+    /// 線の入口と出口の向きの差（ラジアン、常に正）。
+    ///
+    /// **両端とも `headingSample` メートルぶんで測る。** 前後 1 点だけで見ると、交差点の
+    /// 中の細かい点で向きが跳ねて、まっすぐな道が曲がっていることになる。
+    static func bend(of points: [CGPoint]) -> CGFloat {
+        guard let entry = leadingVector(of: points), let exit = heading(of: points) else { return 0 }
+
+        let cross = entry.x * exit.y - entry.y * exit.x
+        let dot = entry.x * exit.x + entry.y * exit.y
+        return abs(atan2(cross, dot))
+    }
+
+    /// 先頭から `headingSample` メートルぶんの向き。`heading(of:)` の裏返し。
+    private static func leadingVector(of points: [CGPoint]) -> CGPoint? {
+        guard let start = points.first else { return nil }
+
+        var reference = points[points.count - 1]
+        var travelled: Double = 0
+        for index in 1 ..< points.count {
+            travelled += hypot(points[index].x - points[index - 1].x,
+                               points[index].y - points[index - 1].y)
+            if travelled >= headingSample {
+                reference = points[index]
+                break
+            }
+        }
+
+        let vector = CGPoint(x: reference.x - start.x, y: reference.y - start.y)
+        guard hypot(vector.x, vector.y) > 0 else { return nil }
+        return vector
     }
 
     // MARK: - 座標の切り出し

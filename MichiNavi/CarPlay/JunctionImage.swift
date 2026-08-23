@@ -32,9 +32,35 @@ enum JunctionImage {
     /// 落ちるが、分岐が実際に開いていれば残る（実路 28 か所で確認）。
     private static let minimumTurn: CGFloat = 20 * .pi / 180
 
-    private static let padding: CGFloat = 10
+    /// 線そのものがこれだけ曲がっていなければ描かない（ラジアン、`JunctionGeometry.bend`）。
+    ///
+    /// **矢印アイコンが言えないことだけを描く。** 「右に曲がる」は `ManeuverDirection` が
+    /// 出していて、しかも slight / 通常 / sharp まで分けている。そこへ L 字の絵を足しても
+    /// 読む理由が無い（2026-08-23 に描き出して確かめた。直角の右折の図は矢印以上のことを
+    /// 何も言っていない）。拡大図が足せるのは**曲がった先でもう一度曲がる・入りながら
+    /// 曲がっている**といった線の形だけなので、そこだけ残す。
+    ///
+    /// **出る回数はこれで大きく減る。** それでよい——出たときに読む理由がある、という
+    /// ほうが、毎回出て毎回読み飛ばされるより役に立つ。
+    private static let minimumBend: CGFloat = 25 * .pi / 180
+
+    /// 図の中の余白。**2026-08-23 まで 10 だった。** 地を画像いっぱいに敷くように
+    /// したので、内側の枠に合わせて空ける必要が無くなったぶん詰めてある。
+    private static let padding: CGFloat = 6
     private static let departureLineWidth: CGFloat = 5
     private static let approachLineWidth: CGFloat = 3.5
+
+    /// 図の地。**画像いっぱいに敷く。**
+    ///
+    /// 2026-08-23 まで角丸を内側に描いていたので、CarPlay が `junctionImage` の裏に敷く
+    /// 下地（`_carSystemQuaternaryColor`）と合わせて**箱の中の箱**になっていた。
+    /// 端まで塗れば向こうの枠と重なるので、箱は 1 つに見える。
+    ///
+    /// **地をやめて線に縁を付ける手は駄目だった**（実際に描いて確かめた）。白い線は
+    /// 明るい地の上では消えるので、縁だけが残って**中空の管**に見える。固定の絵で
+    /// どちらの明るさにも耐えるには、図が自分の地を持つしかない。
+    private static let groundAlpha: CGFloat = 0.5
+    private static let groundCornerRadius: CGFloat = 8
 
     /// 矢じりの長さと、中心から片側への張り出し。**線の幅よりはっきり大きくする。**
     /// 2026-08-23 まで長さ 9・張り出し 5 で、線の幅 5 とほとんど変わらなかった。
@@ -71,16 +97,23 @@ enum JunctionImage {
         case .straight, .depart, .arrive, .unknown: return nil
         default: break
         }
-        guard abs(geometry.turn) >= minimumTurn else { return nil }
+        guard abs(geometry.turn) >= minimumTurn, geometry.bend >= minimumBend else { return nil }
         return render(approach: geometry.approach, departure: geometry.departure)
     }
 
     // MARK: - 描画
 
-    /// **自前の背景を敷く。** 案内カードの色はこちらが `guidanceBackgroundColor` で
-    /// `systemBlue` にしているので、経路と同じ青で線を引くと見えない。Dashboard の
-    /// カードは CarPlay が昼夜で塗り分けるうえ、こちらから色を渡す口が無い。
-    /// 図の中で明暗を完結させておけば、どの背景の上でも読める。
+    /// **図の中で明暗を完結させる。**
+    ///
+    /// 案内カードの色はこちらが `guidanceBackgroundColor` で `systemBlue` にしていて、
+    /// Dashboard のカードは CarPlay が昼夜で塗り分ける（こちらから色を渡す口は無い）。
+    /// どちらでも読める必要がある。
+    ///
+    /// **2026-08-23 まで半透明の黒い角丸を敷いていた。** ところが CarPlay は
+    /// `junctionImage` の裏に自前の下地を敷いている（`CPSPrimaryManeuverView` の
+    /// `_junctionImageBackgroundView` に `_carSystemQuaternaryColor`。Dashboard 側も同じ）。
+    /// つまり**箱の中の箱**になっていたうえ、自前の余白ぶん絵が小さくなっていた。
+    /// **端まで塗れば向こうの枠と重なる**ので、箱は 1 つに見える。余白もそのぶん詰められる。
     private static func render(approach: [CGPoint], departure: [CGPoint]) -> UIImage? {
         // **縮尺を決めるのは出ていく道だけ**（[approachStubLength]）。
         guard let bounds = fittingTransform(for: departure) else { return nil }
@@ -94,8 +127,9 @@ enum JunctionImage {
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             let cg = context.cgContext
 
-            UIColor.black.withAlphaComponent(0.28).setFill()
-            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 10).fill()
+            UIColor.black.withAlphaComponent(groundAlpha).setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size),
+                         cornerRadius: groundCornerRadius).fill()
 
             cg.setLineCap(.round)
             cg.setLineJoin(.round)

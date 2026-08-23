@@ -76,6 +76,15 @@ final class CarPlayDestinationBrowser: NSObject {
 
     // MARK: - 目的地リスト
 
+    /// **どの節にも見出しを付けない**（2026-08-23）。CarPlay は一覧を送ると見出しを上へ
+    /// 貼り付けるが、**貼り付いた見出しに行の文字が重なって読めなくなる**（実車で確認）。
+    /// 貼り付け方はあちらの描画なので、こちらから止める手が無い。**見出しを持たなければ
+    /// 起きない。**
+    ///
+    /// 代わりに**行の頭の絵で見分ける**。自宅は家、職場は鞄、お気に入りは星、履歴は時計。
+    /// 見出しは 1 行まるごと使うのに、そこに出るのは区分の名前だけで**行き先は 1 つも
+    /// 増えない**。走行中に読める行数は限られるので、区分を絵に畳んで行数を空けるほうが
+    /// 割に合う。
     private func makeRootTemplate() -> CPListTemplate {
         var sections: [CPListSection] = []
 
@@ -83,23 +92,21 @@ final class CarPlayDestinationBrowser: NSObject {
         // 多い順に並べる。設定していないものは出さない（CarPlay からは設定できず、
         // 押しても何も起きない行になるため。理由は `DestinationStore.set(_:as:)`）。
         let pinned = DestinationStore.Pinned.allCases.compactMap { kind in
-            store.place(kind).map { makeItem(for: $0, titled: kind.title) }
+            store.place(kind).map { makeItem(for: $0, symbol: kind.symbol, titled: kind.title) }
         }
-        // **見出しは付けない**（2026-08-23 に外した）。中身は必ず自宅・職場の 2 行だけで、
-        // 行そのものに「自宅」「職場」と書いてある。見出しは 1 行使って何も足していなかった。
         if !pinned.isEmpty {
             sections.append(CPListSection(items: pinned, header: nil, sectionIndexTitle: nil))
         }
 
         if !store.favorites.isEmpty {
-            sections.append(CPListSection(items: store.favorites.map(makeItem(for:)),
-                                          header: String(localized: "お気に入り"),
+            sections.append(CPListSection(items: store.favorites.map { makeItem(for: $0, symbol: "star.fill") },
+                                          header: nil,
                                           sectionIndexTitle: nil))
         }
 
         if !store.recents.isEmpty {
-            sections.append(CPListSection(items: store.recents.map(makeItem(for:)),
-                                          header: String(localized: "最近の目的地"),
+            sections.append(CPListSection(items: store.recents.map { makeItem(for: $0, symbol: "clock") },
+                                          header: nil,
                                           sectionIndexTitle: nil))
         }
 
@@ -163,18 +170,13 @@ final class CarPlayDestinationBrowser: NSObject {
 
     /// `titled` を渡すと、地点の名前ではなくその名札を主役にする（「自宅」＋ 地点名）。
     /// 走行中に読むのは名札のほうで、どこを指しているかは確認のために添えるだけ。
-    private func makeItem(for place: Place, titled title: String? = nil) -> CPListItem {
-        guard let title else { return makeItem(for: place) }
-        let item = CPListItem(text: title, detailText: place.name)
-        item.handler = { [weak self] _, completion in
-            self?.choose(place)
-            completion()
-        }
-        return item
-    }
-
-    private func makeItem(for place: Place) -> CPListItem {
-        let item = CPListItem(text: place.name, detailText: place.subtitle)
+    ///
+    /// `symbol` は**その行がどの区分か**を示す（節の見出しを外した代わり）。検索結果の
+    /// ように区分が 1 つしかない一覧では渡さない——全部に同じ絵が付くだけになる。
+    private func makeItem(for place: Place, symbol: String? = nil, titled title: String? = nil) -> CPListItem {
+        let item = CPListItem(text: title ?? place.name,
+                              detailText: title == nil ? place.subtitle : place.name,
+                              image: symbol.map { Self.rowImage(named: $0) })
         item.handler = { [weak self] _, completion in
             self?.choose(place)
             completion()
@@ -268,7 +270,7 @@ final class CarPlayDestinationBrowser: NSObject {
         Task {
             do {
                 let places = try await places(for: category)
-                let items = places.prefix(CPListTemplate.maximumItemCount).map(makeItem(for:))
+                let items = places.prefix(CPListTemplate.maximumItemCount).map { makeItem(for: $0) }
                 template.updateSections([CPListSection(items: Array(items))])
                 template.emptyViewSubtitleVariants = [isNavigating
                     ? String(localized: "この先には見つかりませんでした")
@@ -301,6 +303,13 @@ final class CarPlayDestinationBrowser: NSObject {
 
     /// グリッドアイコンの上限は 40pt（ガイド p.28）。
     /// SF Symbols を使うと light / dark 両方に自動で追従する。
+    /// 行の頭に置く絵。グリッドのものより小さい（あちらは押す的そのもの、こちらは目印）。
+    private static func rowImage(named symbol: String) -> UIImage {
+        let configuration = UIImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        return UIImage(systemName: symbol, withConfiguration: configuration)?
+            .withRenderingMode(.alwaysTemplate) ?? UIImage()
+    }
+
     private static func gridImage(named symbol: String) -> UIImage {
         let configuration = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
         return UIImage(systemName: symbol, withConfiguration: configuration)?

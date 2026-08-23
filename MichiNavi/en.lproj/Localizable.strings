@@ -18,9 +18,12 @@
 "%@・目的地まで徒歩 %@" = "%@ · %@ walk to destination";
 "%@先、%@" = "In %@, %@";
 "%@早く着く道があります" = "A route that saves %@";
+"%lld か所" = "%lld places";
+"%lld 日" = "%lld days";
 "%lldキロ" = "%lld km";
 "%lldメートル" = "%lld m";
 "2時間走りました。休憩しませんか" = "You've been driving for 2 hours. Time for a break?";
+"47 のうち %lld" = "%lld of 47";
 "ATM・銀行" = "ATM & Banks";
 "EV充電" = "EV charging";
 "MichiNavi で目的地を選んでください" = "Choose a destination in MichiNavi";
@@ -31,11 +34,11 @@
 "いいえ" = "No";
 "いちばん近い場所へ" = "Nearest one";
 "いまの指示をもう一度読み上げます。" = "Repeats the current instruction.";
+"およそ %@ 続きます" = "Lasts about %@";
 "お気に入り" = "Favorites";
 "お気に入りから外す" = "Remove from favorites";
 "お気に入りに追加" = "Add to favorites";
 "お気に入りや履歴の目的地へ案内を始めます。" = "Starts guidance to a favorite or recent destination.";
-"およそ %@ 続きます" = "Lasts about %@";
 "ここに停める" = "Park here";
 "ここまで歩いて戻る" = "Walk back to your car";
 "このままでは届きません" = "You won't make it this far";
@@ -49,10 +52,12 @@
 "さがす" = "Find one";
 "そのまま" = "Stay";
 "どこへ向かいますか" = "Where are you heading?";
+"まだ記録がありません" = "Nothing recorded yet";
 "まもなく" = "now";
 "まもなく%@" = "Now, %@";
 "もう一度読む" = "Repeat";
 "やめる" = "Cancel";
+"アプリを開いているあいだに走った道が、ここに残ります" = "Roads you drive while the app is open show up here";
 "カフェ" = "Cafes";
 "カーブが多い" = "More curves";
 "ガソリン" = "Fuel";
@@ -94,6 +99,7 @@
 "寄る" = "Stop there";
 "左折" = "Turn left";
 "左車線" = "Keep left";
+"市区町村" = "Municipalities";
 "所要" = "Duration";
 "探しています" = "Searching";
 "探しています…" = "Searching…";
@@ -114,6 +120,7 @@
 "案内開始" = "Go";
 "検索" = "Search";
 "注意" = "Notice";
+"消す" = "Erase";
 "満タン・満充電で走れる距離を入れると、届かない経路のときに途中の%@を提案します。車から残量を読む手段が無いため、この数字で判断します。" = "Enter how far you can go on a full tank or charge, and we'll suggest %@ along routes that are too long. There's no way to read the level from your vehicle, so this number is what we go on.";
 "現在地" = "Current location";
 "現在地が取得できていません" = "Your location isn't available yet";
@@ -146,6 +153,11 @@
 "設定し直す" = "Change";
 "設定アプリで位置情報の利用を許可してください" = "Allow location access in Settings";
 "買い物" = "Shopping";
+"走った日" = "Days driven";
+"走った距離" = "Distance driven";
+"走った道" = "Roads driven";
+"走った道の記録をすべて消しますか" = "Erase every recorded road?";
+"走った道を記録する" = "Record roads driven";
 "走っている案内をやめます。" = "Stops the guidance in progress.";
 "距離" = "Distance";
 "距離が短い" = "Shortest";
@@ -155,6 +167,7 @@
 "運転を始めて%lld時間になります。そろそろ休憩しませんか" = "You've been driving for %lld hours. Time for a break?";
 "避けない" = "No";
 "避ける" = "Yes";
+"都道府県" = "Prefectures";
 "閉じる" = "Close";
 "電波が戻ったら自動で引き直します" = "It will retry once you're back in range";
 "電話" = "Phone";

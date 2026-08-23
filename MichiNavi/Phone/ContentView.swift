@@ -7,9 +7,11 @@ struct ContentView: View {
     @EnvironmentObject private var navigation: NavigationController
     @ObservedObject private var location = LocationService.shared
     @ObservedObject private var store = DestinationStore.shared
+    @ObservedObject private var tracks = TrackStore.shared
 
     @State private var cameraPosition: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var isSearchPresented = false
+    @State private var isTrackPresented = false
     /// 検索シートを「行き先を選ぶ」ではなく「ピン留めを設定する」ために開いているか。
     @State private var assigningPin: DestinationStore.Pinned?
 
@@ -48,6 +50,7 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $isTrackPresented) { TrackSheet() }
         .onChange(of: isSearchPresented) { _, presented in
             // シートを閉じただけのときに、次に開いた検索が設定モードのまま始まらないように。
             if !presented { assigningPin = nil }
@@ -203,8 +206,11 @@ struct ContentView: View {
     private var bottomPanel: some View {
         switch navigation.phase {
         case .idle:
-            if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
-                notice(String(localized: "設定アプリで位置情報の利用を許可してください"))
+            VStack(spacing: 8) {
+                if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
+                    notice(String(localized: "設定アプリで位置情報の利用を許可してください"))
+                }
+                trackRow
             }
 
         case let .calculating(place):
@@ -254,6 +260,32 @@ struct ContentView: View {
             }
             .panel()
         }
+    }
+
+    /// 走った道への入口。**待機中の下がここまで空いていた**うえ、走った距離がそのまま
+    /// 「開く理由」になる。目的地の無い日にカーナビを開くのは、ふつうこれしか無い。
+    private var trackRow: some View {
+        Button {
+            isTrackPresented = true
+        } label: {
+            HStack {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "走った道"))
+                    Text(tracks.tracks.isEmpty
+                         ? String(localized: "まだ記録がありません")
+                         : Formatters.distanceText(tracks.totalDistance))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .panel()
     }
 
     private func notice(_ text: String) -> some View {
@@ -401,8 +433,8 @@ private extension View {
     }
 }
 
-private extension MKMapRect {
-    /// ルート全体を表示するときの余白。
+extension MKMapRect {
+    /// ルート全体を表示するときの余白。**`TrackSheet` も使う**ので file-private にしない。
     func padded(by factor: Double) -> MKMapRect {
         let widthDelta = size.width * (factor - 1) / 2
         let heightDelta = size.height * (factor - 1) / 2

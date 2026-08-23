@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         SunGlareAdvisor.shared.start()
         ParkingAdvisor.shared.start()
         TrafficAdvisor.shared.start()
+        // 走った道の記録。案内していないあいだも測位を受けるので、案内ではなく
+        // アプリの寿命に合わせる（`VoiceGuidance` と同じ理由）。
+        TrackStore.shared.start()
         return true
     }
 }

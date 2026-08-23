@@ -429,6 +429,11 @@ final class CarPlayCoordinator: NSObject {
         // 下の見積もりは差し替わったあとのものへ渡したい。
         refreshTripPause(isRerouting: navigation.isRerouting, progress: progress)
 
+        // 通ってきたところを塗り替える。**`currentRoute` は `.navigating` のときしか
+        // 返らない**ので、案内中に次の行き先を選んでいるあいだ（地図に出ているのは候補）は
+        // ここへ来ない。
+        mapViewController.showTravelled(progress, of: route)
+
         // 残り時間の色で、見込みからどれだけ遅れているかを示す（`TrafficCondition`）。
         // **測り直すまでは `.default`**。3 分おきの測り直しが 1 度も走っていないうちに
         // 色を出すと、根拠の無い緑を出発直後に見せることになる。

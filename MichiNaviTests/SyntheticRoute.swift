@@ -12,8 +12,12 @@ import MapKit
 /// 緯度方向なら地球上どこでも同じなので、メートルと座標の対応が読んで分かる。
 enum SyntheticRoute {
     /// MapKit が使う球の半径から出した、緯度 1 度あたりのメートル。
-    /// `MKMapPoint` の距離計算もこの球に乗っているので、換算の誤差は無視できる
-    /// （`RouteMeasurementTests` で実際に確かめている）。
+    ///
+    /// **`MKMapPoint` の距離とぴたりは合わない。** これは赤道での 1 度で、あちらは
+    /// 緯度で補正を掛けるため、**緯度 35 では 0.19% 短く出る**（1km につき 2m。
+    /// 2026-08-23 に実測、`RouteMeasurementTests` で止めている）。しきい値を
+    /// 数十メートル単位で見るぶんには効かないが、**メートル単位で比べるテストを
+    /// 書くときはこのぶんを見込むこと。**
     static let metersPerDegreeLatitude = 111_319.49
 
     static let origin = CLLocationCoordinate2D(latitude: 35.0, longitude: 139.0)

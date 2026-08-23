@@ -53,6 +53,19 @@ final class CarPlayMapViewController: UIViewController {
     private let style: Style
     private let mapView = MKMapView()
     private var routeOverlay: MKPolyline?
+    /// 通ってきたところ。経路の線の**上に**重ねて塗り替える。
+    private var travelledOverlay: MKPolyline?
+    /// 最後に塗り替えた地点までの距離。これだけ進むまで引き直さない。
+    private var travelledDistance: CLLocationDistance?
+
+    /// 塗り替えを引き直す間隔。時速 60km ならおよそ 3 秒に 1 回。
+    private static let travelledStep: CLLocationDistance = 50
+    /// 通ってきたところの色。**不透明**（下に経路の青が敷いてある）。
+    ///
+    /// 昼夜で入れ替わらない固定色にしてある。`systemGray` のような動的な色は
+    /// 夜に明るくなるので、**済んだところが残りより目立つ**という逆の効き方をする
+    /// （地図の昼夜は `overrideUserInterfaceStyle` で切り替わるので、動的な色はここでも効く）。
+    private static let travelledColor = UIColor(white: 0.45, alpha: 1)
     /// 経由地と目的地のピン。広い画面でだけ出す。
     private var routeAnnotations: [MKPointAnnotation] = []
 
@@ -183,6 +196,9 @@ final class CarPlayMapViewController: UIViewController {
             mapView.removeOverlay(routeOverlay)
             self.routeOverlay = nil
         }
+        // **経路が入れ替わったら通ったぶんも捨てる。** 引き直した経路は現在地から
+        // 引き直されているので、前の経路で塗ったぶんはどこにも対応しない。
+        clearTravelled()
         mapView.removeAnnotations(routeAnnotations)
         routeAnnotations = []
 
@@ -208,6 +224,41 @@ final class CarPlayMapViewController: UIViewController {
 
     /// 連続するジェスチャの最中は `animated: false` で呼ぶ。毎秒何十回も来るので、
     /// アニメーションを掛けると重なって指から遅れる。
+    /// 通ってきたところを塗り替える。
+    ///
+    /// **効くのはおもに全体表示**。案内中のカメラは自車の後ろから前を向いているので、
+    /// 通ったぶんは画面の下端から外れている。全体表示にしたときと、曲がった直後に
+    /// 後ろへ伸びる線が「どこまで来たか」を示す。
+    ///
+    /// **経路の線の上に重ねて隠す**（残りぶんを描き直すのではなく）。あちらは数千点
+    /// あって、進むたびに作り直すと 1 秒ごとに全長ぶんの点を舐めることになる。
+    /// **そのぶん色は不透明でなければならない**——透かすと下の青が出るだけで、
+    /// 地図が透けるわけではない。
+    func showTravelled(_ progress: RouteProgress, of route: NavRoute) {
+        let travelled = max(0, route.distance - progress.distanceRemaining)
+        // 毎秒引き直さない。数メートルでは絵が変わらないので、作り直すだけ無駄。
+        if let travelledDistance, abs(travelled - travelledDistance) < Self.travelledStep { return }
+
+        clearTravelled()
+        travelledDistance = travelled
+
+        let coordinates = NavRoute.coordinates(route.coordinates, upTo: travelled)
+        guard coordinates.count >= 2 else { return }
+
+        let line = MKPolyline(coordinates: coordinates, count: coordinates.count)
+        // 経路より**あとに**足す。同じ level なら後から足したほうが上に描かれる。
+        mapView.addOverlay(line, level: .aboveRoads)
+        travelledOverlay = line
+    }
+
+    private func clearTravelled() {
+        if let travelledOverlay {
+            mapView.removeOverlay(travelledOverlay)
+            self.travelledOverlay = nil
+        }
+        travelledDistance = nil
+    }
+
     func follow(location: CLLocation, animated: Bool = true) {
         guard isFollowingUser else { return }
 
@@ -586,7 +637,9 @@ extension CarPlayMapViewController: MKMapViewDelegate {
         guard let polyline = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
 
         let renderer = MKPolylineRenderer(polyline: polyline)
-        renderer.strokeColor = UIColor.systemBlue
+        renderer.strokeColor = polyline === travelledOverlay ? Self.travelledColor : UIColor.systemBlue
+        // **同じ太さでなければならない。** 細いと下の青が縁として残り、太いと
+        // 通っていないところまで塗る。
         renderer.lineWidth = style.isWide ? 10 : 8
         renderer.lineCap = .round
         renderer.lineJoin = .round

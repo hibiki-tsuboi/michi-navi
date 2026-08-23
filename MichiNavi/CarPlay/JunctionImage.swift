@@ -20,8 +20,9 @@ enum JunctionImage {
 
     /// 描画範囲の最小の広がり（メートル）。
     ///
-    /// **これが無いと、ほぼ直進の分岐で縮尺が発散する。** 前後がまっすぐ並ぶと
-    /// 横幅がほぼ 0 になり、そこへ画面いっぱいまで拡大しようとする。
+    /// **これが無いと、ごく短い区間が画面いっぱいに引き伸ばされる。** 枠に収める条件
+    /// だけで倍率を決めると、5m の区間が道 1 本ぶんの長さで描かれ、実際より大きな
+    /// 交差点に見える（下限を外すと 60pt まで伸びる）。
     private static let minimumExtent: Double = 70
 
     /// これより浅い曲がりでは描かない（ラジアン）。
@@ -34,6 +35,32 @@ enum JunctionImage {
     private static let padding: CGFloat = 10
     private static let departureLineWidth: CGFloat = 5
     private static let approachLineWidth: CGFloat = 3.5
+
+    /// 矢じりの長さと、中心から片側への張り出し。**線の幅よりはっきり大きくする。**
+    /// 2026-08-23 まで長さ 9・張り出し 5 で、線の幅 5 とほとんど変わらなかった。
+    /// そこへ丸い線端（半径 2.5）が先から飛び出すので、**矢印ではなく画鋲に見えていた**。
+    private static let arrowLength: CGFloat = 15
+    private static let arrowHalfWidth: CGFloat = 9
+
+    /// 曲がる地点を絵のどこに置くか（縦の割合）。
+    ///
+    /// **中央ではなく少し下。** 入ってくる道は「もう走ったところ」なので短くてよく、
+    /// 出ていく道に場所を譲る。曲がる地点がいつも同じ高さに来るので、**どこを見れば
+    /// よいかが図ごとに変わらない**。
+    ///
+    /// 2026-08-23 まで外接矩形の中心に合わせていた。あれだと L 字の 90 度で
+    /// **角が隅へ寄って半分が空白になる**（実際に描いて確かめた）。
+    private static let junctionAnchorY: CGFloat = 0.7
+
+    /// 入ってくる道を画面上でどれだけ見せるか（ポイント）。
+    ///
+    /// **メートルではなくポイントで切る。** あちらは「どこから来たか」の目印でしかないのに、
+    /// 縮尺を決める側に混ぜると 100m ぶんを収めるために出ていく道が潰れる
+    /// （実測: 90 度の右折で出ていく道が 18pt になり、矢じりだけの絵になった）。
+    private static let approachStubLength: CGFloat = 18
+
+    /// 曲がる向きと逆へ基準をずらす量（横幅の割合）。
+    private static let junctionAnchorBias: CGFloat = 0.18
 
     /// 曲がる地点の拡大図。描けなければ nil。
     ///
@@ -55,8 +82,8 @@ enum JunctionImage {
     /// カードは CarPlay が昼夜で塗り分けるうえ、こちらから色を渡す口が無い。
     /// 図の中で明暗を完結させておけば、どの背景の上でも読める。
     private static func render(approach: [CGPoint], departure: [CGPoint]) -> UIImage? {
-        let all = approach + departure
-        guard let bounds = fittingTransform(for: all) else { return nil }
+        // **縮尺を決めるのは出ていく道だけ**（[approachStubLength]）。
+        guard let bounds = fittingTransform(for: departure) else { return nil }
 
         let format = UIGraphicsImageRendererFormat.default()
         // 車の画面の倍率はこちらから決められないので、いちばん細かいところに合わせて
@@ -73,12 +100,15 @@ enum JunctionImage {
             cg.setLineCap(.round)
             cg.setLineJoin(.round)
 
-            stroke(approach.map(bounds), on: cg,
+            let departurePoints = departure.map(bounds)
+            stroke(clipped(approach.map(bounds), toLast: approachStubLength), on: cg,
                    color: UIColor.white.withAlphaComponent(0.45), width: approachLineWidth)
-            stroke(departure.map(bounds), on: cg,
+            // **矢じりに隠れるぶんだけ手前で止める。** 丸い線端が矢じりの先から
+            // 飛び出すと、矢印に見えなくなる。向きは削る前の点から取る。
+            stroke(trimmed(departurePoints, by: arrowLength * 0.8), on: cg,
                    color: .white, width: departureLineWidth)
 
-            drawArrowHead(at: departure.map(bounds), on: cg)
+            drawArrowHead(at: departurePoints, on: cg)
         }
     }
 
@@ -103,37 +133,107 @@ enum JunctionImage {
 
         let unit = CGPoint(x: vector.x / length, y: vector.y / length)
         let normal = CGPoint(x: -unit.y, y: unit.x)
-        let size: CGFloat = 9
 
         context.setFillColor(UIColor.white.cgColor)
         context.beginPath()
         context.move(to: tip)
-        context.addLine(to: CGPoint(x: tip.x - unit.x * size + normal.x * size * 0.55,
-                                    y: tip.y - unit.y * size + normal.y * size * 0.55))
-        context.addLine(to: CGPoint(x: tip.x - unit.x * size - normal.x * size * 0.55,
-                                    y: tip.y - unit.y * size - normal.y * size * 0.55))
+        context.addLine(to: CGPoint(x: tip.x - unit.x * arrowLength + normal.x * arrowHalfWidth,
+                                    y: tip.y - unit.y * arrowLength + normal.y * arrowHalfWidth))
+        context.addLine(to: CGPoint(x: tip.x - unit.x * arrowLength - normal.x * arrowHalfWidth,
+                                    y: tip.y - unit.y * arrowLength - normal.y * arrowHalfWidth))
         context.closePath()
         context.fillPath()
     }
 
-    /// メートル座標を画面座標へ移す関数を作る。縦横は同じ倍率で、全体が収まるように寄せる。
-    private static func fittingTransform(for points: [CGPoint]) -> ((CGPoint) -> CGPoint)? {
+    /// 末尾から `length` ぶんだけ残した線。入ってくる道を目印の長さに切るために使う。
+    private static func clipped(_ points: [CGPoint], toLast length: CGFloat) -> [CGPoint] {
+        guard points.count >= 2, let end = points.last else { return points }
+
+        var result = [end]
+        var previous = end
+        var travelled: CGFloat = 0
+        for point in points.dropLast().reversed() {
+            let span = hypot(point.x - previous.x, point.y - previous.y)
+            guard travelled + span < length else {
+                let ratio = span > 0 ? (length - travelled) / span : 0
+                result.insert(CGPoint(x: previous.x + (point.x - previous.x) * ratio,
+                                      y: previous.y + (point.y - previous.y) * ratio), at: 0)
+                return result
+            }
+            travelled += span
+            previous = point
+            result.insert(point, at: 0)
+        }
+        return result
+    }
+
+    /// 末尾を `length` ぶん削った線。矢じりの下に線端を隠すために使う。
+    ///
+    /// 最後の区間より深く削るときは、その区間ごと落として手前から削り直す
+    /// （交差点の中は点が細かいので、1 区間が数ポイントしかないことがある）。
+    private static func trimmed(_ points: [CGPoint], by length: CGFloat) -> [CGPoint] {
+        guard points.count >= 2, let tip = points.last else { return points }
+
+        let previous = points[points.count - 2]
+        let vector = CGPoint(x: tip.x - previous.x, y: tip.y - previous.y)
+        let span = hypot(vector.x, vector.y)
+        guard span > 0 else { return Array(points.dropLast()) }
+
+        if span <= length {
+            return trimmed(Array(points.dropLast()), by: length - span)
+        }
+        let ratio = (span - length) / span
+        var result = points
+        result[result.count - 1] = CGPoint(x: previous.x + vector.x * ratio,
+                                           y: previous.y + vector.y * ratio)
+        return result
+    }
+
+    /// メートル座標を画面座標へ移す関数を作る。縦横は同じ倍率。
+    ///
+    /// **基準は曲がる地点（原点）で、外接矩形の中心ではない。** 外接矩形に合わせると、
+    /// L 字の 90 度で角が隅へ寄って半分が空白になる。曲がる地点を決まった場所に置けば、
+    /// **どの図でも同じところを見れば曲がり方が分かる**。
+    ///
+    /// 倍率は「その基準のまま全部が枠に収まる最大」を点ごとに詰めて決める。
+    ///
+    /// **テストから触れるようにしてある。** 絵が読めるかどうかは目でしか決まらないが、
+    /// **縮尺が潰れたこと**（出ていく道が数ポイントになる）は数字で捕まえられる。
+    /// U ターンで実際に潰れたので、そこだけは落ちるようにしておく。
+    static func fittingTransform(for points: [CGPoint]) -> ((CGPoint) -> CGPoint)? {
         guard !points.isEmpty else { return nil }
 
-        let xs = points.map(\.x)
-        let ys = points.map(\.y)
-        let centre = CGPoint(x: (xs.min()! + xs.max()!) / 2, y: (ys.min()! + ys.max()!) / 2)
-        // ほぼ直進の分岐で横幅が 0 になると縮尺が発散するので、下限を入れる。
-        let width = max(xs.max()! - xs.min()!, minimumExtent)
-        let height = max(ys.max()! - ys.min()!, minimumExtent)
+        // **曲がる向きと逆へ基準をずらす。** 出ていく道は片側にしか伸びないので、
+        // 真ん中に置くと反対側が丸ごと空く（実際に描いて確かめた: 右折で左半分が空白）。
+        // ずらしたぶん出ていく道に幅が回り、同じ枠でも矢印が大きく描ける。
+        let furthestX = points.map(\.x).max(by: { abs($0) < abs($1) }) ?? 0
+        let bias: CGFloat = abs(furthestX) < 1 ? 0 : (furthestX > 0 ? -junctionAnchorBias : junctionAnchorBias)
+        // **縦も同じ**。折り返し（U ターン）では出ていく道が下へ戻るので、基準を下に
+        // 置いたままだと収める場所が無くて縮尺が潰れる（実際に描いて確かめた:
+        // 絵が塊になった）。そのときだけ基準を上へ寄せる。
+        let furthestY = points.map(\.y).max(by: { abs($0) < abs($1) }) ?? 0
+        let anchorY = furthestY < -1 ? 1 - junctionAnchorY : junctionAnchorY
+        let anchor = CGPoint(x: size.width * (0.5 + bias), y: size.height * anchorY)
+        let room = (left: anchor.x - padding,
+                    right: size.width - padding - anchor.x,
+                    up: anchor.y - padding,
+                    down: size.height - padding - anchor.y)
 
-        let usable = CGSize(width: size.width - padding * 2, height: size.height - padding * 2)
-        let scale = min(usable.width / width, usable.height / height)
+        // ほぼ直進の分岐では点が縦一列に並び、倍率がいくらでも大きくなる。
+        // **下限の広がり**（`minimumExtent`）を超えて拡大しない。
+        let usable = min(size.width - padding * 2, size.height - padding * 2)
+        var scale = usable / minimumExtent
+        for point in points {
+            if point.x > 0 { scale = min(scale, room.right / point.x) }
+            if point.x < 0 { scale = min(scale, room.left / -point.x) }
+            if point.y > 0 { scale = min(scale, room.up / point.y) }
+            if point.y < 0 { scale = min(scale, room.down / -point.y) }
+        }
+        guard scale > 0 else { return nil }
 
         return { point in
-            CGPoint(x: size.width / 2 + (point.x - centre.x) * scale,
-                    // メートル座標は北が +y、画面は下が +y。
-                    y: size.height / 2 - (point.y - centre.y) * scale)
+            // メートル座標は北が +y、画面は下が +y。
+            CGPoint(x: anchor.x + point.x * scale, y: anchor.y - point.y * scale)
         }
     }
 }

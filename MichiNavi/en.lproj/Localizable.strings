@@ -15,6 +15,7 @@
 "%@に入りました。%@を走るのは初めてです" = "Now entering %@. This is your first time driving through %@";
 "%@周辺です。案内を終了します" = "You're arriving at %@. Ending guidance.";
 "%@を設定" = "Set %@";
+"%@を走るのは初めてでした。通算%lld都道府県です" = "That was your first time driving through %1$@ — %2$lld regions so far";
 "%@を走るのは初めてです" = "This is your first time driving through %@";
 "%@・%@ 着" = "%@ · arriving %@";
 "%@・%@・%@ 着" = "%@ · %@ · arriving %@";
@@ -87,6 +88,7 @@
 "出口" = "Exit";
 "出発" = "Depart";
 "切り替える" = "Switch";
+"初めての街を%lldか所通りました。通算%lldか所です" = "You drove through %1$lld new towns — %2$lld so far";
 "到着" = "Arrive";
 "到着予定" = "Arrival";
 "到着時刻から逆算" = "Work back from arrival time";

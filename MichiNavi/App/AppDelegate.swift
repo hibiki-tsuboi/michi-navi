@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // 県境と初めての街の読み上げ。土台は `TrackStore` の逆ジオコーディングなので、
         // 必ずそのあとに購読を始める。
         VisitAdvisor.shared.start()
+        // ひと走りの収穫。出発時の控えを取るだけなので `TrackStore` との前後は問わないが、
+        // 読み上げるのは `VoiceGuidance` なので、こちらも案内ではなくアプリの寿命に合わせる。
+        TripSummary.shared.start()
         return true
     }
 }

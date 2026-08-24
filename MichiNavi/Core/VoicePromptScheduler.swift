@@ -27,6 +27,9 @@ enum VoicePrompt: Equatable {
     case prefecture(name: String, firstCity: String?)
     /// 初めて走る市区町村に入ったとき。同上。
     case firstCity(name: String)
+    /// 到着したときの「収穫」（`TripSummary`）。**この走行で初めて通った土地だけを数える。**
+    /// 初めてが 1 つも無ければそもそも作られないので、ここに 0 は来ない。
+    case harvest(prefecture: String?, cities: Int, totalPrefectures: Int, totalCities: Int)
 
     var spokenText: String {
         switch self {
@@ -54,6 +57,17 @@ enum VoicePrompt: Equatable {
             // 「初めてです」ではなく「走るのは初めてです」。歩いて訪ねたことまでは
             // こちらに分からないので、言い切れるところで止める。
             return String(localized: "\(name)を走るのは初めてです")
+        case let .harvest(prefecture, cities, totalPrefectures, totalCities):
+            // **1 回につきひと言**（`VisitAdvisor.Notice` と同じ決めごと）。県と街の
+            // 両方が初めてでも 2 つ並べない。県のほうを先に取るのは、数十キロに 1 回しか
+            // 起きないぶん、聞いて嬉しいのがそちらだから。
+            //
+            // **通算を必ず添える。** これが無いと、走行中に `VisitAdvisor` が言ったことを
+            // 到着時にもう一度言うだけになる。**貯まっていると分かるのはこの数字だけ。**
+            if let prefecture {
+                return String(localized: "\(prefecture)を走るのは初めてでした。通算\(totalPrefectures)都道府県です")
+            }
+            return String(localized: "初めての街を\(cities)か所通りました。通算\(totalCities)か所です")
         }
     }
 }

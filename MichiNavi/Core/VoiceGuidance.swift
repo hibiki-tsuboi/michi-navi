@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import CoreLocation
 
 /// 案内音声の読み上げ。`NavigationController` を購読するだけで、案内ロジックは持たない。
 ///
@@ -69,6 +70,12 @@ final class VoiceGuidance: NSObject {
         RestReminder.shared.suggestion
             .sink { [weak self] in self?.speak(.rest(hours: 2)) }
             .store(in: &cancellables)
+
+        // 県境と初めての街。**案内していないときにも流れてくる**ので、`activeRoute` を
+        // 見ずに受ける（この機能がいちばん効くのは目的地を入れずに走っている日）。
+        VisitAdvisor.shared.notice
+            .sink { [weak self] in self?.announce($0) }
+            .store(in: &cancellables)
     }
 
     // MARK: - 読み直し
@@ -93,6 +100,49 @@ final class VoiceGuidance: NSObject {
         speak(.maneuver(instruction: instruction,
                         distance: remaining <= VoicePromptScheduler.imminentThreshold ? nil : remaining))
     }
+
+    // MARK: - 案内とは無関係なひと言
+
+    /// 県境・初めての街を読む（`VisitAdvisor`）。**待たせず、溜めず、割り込まない。**
+    ///
+    /// 案内の予告と違って、これは**言えなければ言わなくてよい**ひと言。曲がる指示に
+    /// 重ねると、いちばん要る声がいちばん要らない声に押される。見送ったぶんは
+    /// `VisitLog` に残す——**画面には何も出ないので、黙った理由はそこにしか無い。**
+    private func announce(_ notice: VisitAdvisor.Notice) {
+        let prompt: VoicePrompt
+        switch notice {
+        case let .prefecture(name, firstCity): prompt = .prefecture(name: name, firstCity: firstCity)
+        case let .firstCity(name): prompt = .firstCity(name: name)
+        }
+
+        // **抱えない。** `speak(_:)` は聞き取り中の到着・経由地通過を `pendingPrompt` へ
+        // 溜めるが、県境は溜めても意味が無い（聞き取りが終わるころにはとうに過ぎている）。
+        // しかも溜めれば、抱えていた到着のひと言を押しのけることになる。
+        guard !isSuspended else {
+            VisitLog.silenced("suspended")
+            return
+        }
+        // 読み上げ中には重ねない。`AVSpeechSynthesizer` は捨てずに順に読むので、
+        // 重ねると曲がる指示のほうが数秒遅れて出る。
+        guard !synthesizer.isSpeaking, playingCount == 0 else {
+            VisitLog.silenced("speaking")
+            return
+        }
+        // 曲がり角が近いときは黙る。予告のしきい値（1000 / 500 / 200 / まもなく）のうち
+        // 下 3 つをこれで覆う。1000m の予告と重なる余地は残るが、そちらは遅れるだけで
+        // 消えないので、そこまでは詰めていない。
+        if navigation.activeRoute != nil,
+           let progress = navigation.progress,
+           progress.distanceToNextManeuver <= Self.quietDistance {
+            VisitLog.silenced("maneuver-near")
+            return
+        }
+
+        speak(prompt)
+    }
+
+    /// 次の曲がり角までこれより近ければ、案内と無関係なひと言は見送る。
+    private static let quietDistance: CLLocationDistance = 500
 
     // MARK: - 音声入力への譲り
 

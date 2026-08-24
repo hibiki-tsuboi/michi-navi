@@ -99,20 +99,21 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 16 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 17 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
 `NetworkMonitor.shared` / `RestReminder.shared` / `RangeAdvisor.shared` /
 `RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared` /
-`SunGlareAdvisor.shared` / `TrackStore.shared`。
+`SunGlareAdvisor.shared` / `TrackStore.shared` / `VisitAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
-後ろ 6 つ（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` /
-`TrafficAdvisor` / `SunGlareAdvisor`）は**助言を出すだけの層**で、
-`NavigationController` を購読して `PassthroughSubject` で知らせるところまでしか持たない。
-出すかどうか・どう見せるかは各 UI が決める。案内そのものには一切触らないので、
-足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ（`VoiceGuidance` と同じ理由で、
-シーンの寿命ではなくアプリの寿命に合わせる必要がある）。
+`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` /
+`SunGlareAdvisor` / `VisitAdvisor` の 7 つは**助言を出すだけの層**で、`PassthroughSubject` で
+知らせるところまでしか持たない。出すかどうか・どう見せるかは各 UI が決める。案内そのものには
+一切触らないので、足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ
+（`VoiceGuidance` と同じ理由で、シーンの寿命ではなくアプリの寿命に合わせる必要がある）。
+**購読先だけは 1 つ分かれる**——6 つは `NavigationController` を見るが、`VisitAdvisor` は
+`TrackStore` を見る（案内していない道でこそ言いたいため。→「県境と初めての街」）。
 
 ### `GuidanceEngine`（経路上の進捗計算）
 
@@ -196,6 +197,18 @@ Combine の使い分けにも意味がある:
   何もせず返るので、「鳴らす音が無いのにセッションを有効化しない」というガイドラインの
   要求も同時に満たす。`short` のときは音声ファイルを同梱せずに済ませるため、16bit PCM の
   WAV をその場で組み立ててトーンを鳴らす。
+- **案内と無関係なひと言は `announce` を通す**（県境・初めての街。→「助言を出す層」）。
+  `speak` との違いは 3 つで、どれも**言えなければ言わなくてよい**ことから来ている。
+  - **溜めない。** `speak` は聞き取り中の到着・経由地通過を `pendingPrompt` へ抱えるが、
+    県境を抱えても意味が無い（聞き取りが終わるころにはとうに過ぎている）うえ、
+    **抱えていた到着のひと言を押しのける**。
+  - **読み上げ中には重ねない。** `AVSpeechSynthesizer` は捨てずに順に読むので、重ねると
+    **曲がる指示のほうが数秒遅れて出る**。
+  - **曲がり角が近いときは黙る**（`quietDistance` は 500m）。予告のしきい値
+    （1000 / 500 / 200 / まもなく）のうち下 3 つをこれで覆う。1000m の予告と重なる余地は
+    残るが、そちらは遅れるだけで消えないので詰めていない。
+  - 見送ったぶんは `VisitLog.silenced` に残す。**画面には何も出ないので、黙った理由は
+    そこにしか無い。**
 
 ### 音声入力（`SpeechInput` / `DestinationIntent`）
 
@@ -275,10 +288,10 @@ Combine の使い分けにも意味がある:
   （「終わり」だけで案内を切ると同乗者との会話でも切れる）。**Apple Intelligence が
   無い環境ではこれが唯一走る経路**なので、判定を変えるときは誤爆の側を先に確かめること。
 
-### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` / `SunGlareAdvisor`）
+### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` / `SunGlareAdvisor` / `VisitAdvisor`）
 
-どれも「案内は変えず、知らせるだけ」。`NavigationController` を購読して
-`PassthroughSubject` を流し、出すかどうかは各 UI が決める。
+どれも「案内は変えず、知らせるだけ」。`PassthroughSubject` を流し、出すかどうかは各 UI が
+決める。購読先は `NavigationController`（**`VisitAdvisor` だけ `TrackStore`**）。
 
 - **連続運転は案内している時間だけを数える**。位置や速度から「走っているか」を判定する手も
   あるが、渋滞と停車が区別できず、案内を切って寄り道した時間も運転として数えてしまう。
@@ -360,6 +373,42 @@ Combine の使い分けにも意味がある:
   - **「いま見えているものは言わない」（`RouteWeather` が先頭の標本を捨てる理由）はここでは
     採らない。** 目の前の眩しさは窓を見れば分かるが、**それがいつまで続くか**は分からない。
 
+- **都道府県をまたいだことと、初めて走る市区町村を声で知らせる**（`VisitAdvisor`、2026-08-24）。
+  「バスガイドのような機能」から**言える中身だけを残した形**。**観光解説は作文しない**——
+  MapKit が返すのは名前・カテゴリ・住所・電話番号だけ（`CarPlayRouteInformation` で
+  営業時間すら返らないことを確かめてある）で、Foundation Models に書かせれば**運転中に
+  確かめようのない史実**を喋ることになる。`RoadName` が「取りこぼす側に倒す」のと、
+  交わる道を拡大図に描かないのと同じ判断。**残した 2 つは答えが手元にある**——県境は
+  逆ジオコーディングの結果、初めてかどうかは自分の走行履歴なので、**嘘になりようがない**。
+  - **材料は `TrackStore` がもう引いている**（3km ごと）ので、**問い合わせも許可も
+    1 件も増やさない**。`SunGlareAdvisor` と同じで、ケイパビリティを待たずに書いた日から動く。
+  - **購読するのは `TrackStore` で、`NavigationController` ではない**（助言の層でここだけ）。
+    **いちばん言いたいのは案内していない道**だから。通勤路や近所の買い物で県境をまたぐ人が
+    いる。裏返して、**`TrackStore.isRecording` を切ると鳴らない**（土台ごと止まる）ので、
+    `TrackSheet` の説明文にそう書いてある。
+  - **声だけ。CarPlay にも iPhone にも画面を持たない**（`TrackStore` を CarPlay に出して
+    いないのと同じ）。通話中・Siri 中（`promptStyle` が `none`）は何も起きない。
+  - **県境は間隔で抑えず、初めての街だけ抑える**（`minimumInterval` は 5 分）。県境は
+    数十キロに 1 回しか起きないので催促にならず、抑えると三県境で 1 件落ちるだけ。いっぽう
+    **市区町村は都心で数キロごとに変わる**ので、初めて東京を横断すると 15km で 4 回鳴る。
+  - **起動直後は県境を言わない**（`previousPrefecture` が nil）。前に居た土地を知らないので
+    言えるのは「いまここにいる」までで、「またいだ」ではない。`GuidanceEngine` が経路に
+    乗るまで逸脱を数えないのと同じで、基準が無いうちは判定が成り立たない。
+  - **基準は、言ったかどうかに関わらず進める。** 進めないと、切っているあいだにまたいだ
+    県境が次に入れたときへ持ち越され、県の真ん中で「入りました」と言う。**空のときだけ
+    進めない**——市区町村しか返らない国では都道府県が空になるので、そこを基準に据えると
+    次の 1 件が必ず「またいだ」になる。
+  - **県境と初めての街が重なったらひと言にまとめる**（`.prefecture(name:firstCity:)`）。
+    続けて 2 つ流すと、2 つ目は 1 つ目の余韻に埋まる。
+  - **読むかどうかは `VoiceGuidance.announce` が決める**（→「音声案内」）。**溜めない。**
+  - 切り分けは `VisitLog`（category `visit`）。**黙ったときの見え方は「何も起きていない」の
+    1 種類しかない**ので、これが無いと土台（記録が切り・圏外・3km 未満）と判定と声の
+    どれを疑えばよいかが決まらない。`located` が出ていれば土台は動いている。
+
+    ```bash
+    xcrun simctl spawn booted log stream --style compact --level info \
+      --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "visit"'
+    ```
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
 
@@ -431,6 +480,11 @@ MapKit の候補は「12分・8.2km」と「14分・7.1km」のように、数�
   - 引き直しは **3km ごと**（`DrivingSideLocator` の 100km と同じ用心。あちらは国、
     こちらは市区町村なので桁が違う）。**圏外では投げない。**
   - **分母を出すのは日本の都道府県だけ**（47）。市区町村は合併で変わるので数と名前だけ。
+- **市区町村を引いたことは `located` で流す**（`PassthroughSubject`。`visits` は貯まった
+  結果なので別に要る）。**`isFirst` は貯める前に見た結果**で、`$visits` を購読しても
+  後からは作れない（届いたときにはもう入っている）。**初めてでなくても流す**——都道府県を
+  またいだかどうかは続けて引いた 2 件を比べないと分からないため。使うのは `VisitAdvisor`
+  だけで、記録そのものには関わらない。
 - **CarPlay には出さない。** 運転席から見るものではないし、走行中に読める行数は限られる
   （駐車位置を CarPlay に出していないのと同じ）。
 - **記録は切れるし、消せる。** どこを走ったかは残すかどうかを利用者が決めてよい種類のもの。
@@ -1589,6 +1643,19 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   何十時間ぶんか貯まってから `TrackSheet` の地図を開くとどうなるか）。もう 1 つは
   **線の太さと色**（いまは案内の経路と同じ青の 3pt。地図の道路と重なって読めるかは
   重ねてみないと分からない——`JunctionImage` で「出ている」と「読める」は別だと分かった話と同じ）。
+- **県境と初めての街の読み上げを一度も聞いていない**（2026-08-24 追加ぶん）。**判定のほうは
+  テストで止めた**（`VisitAdvisorTests`。7 か所を壊して落ちることも確かめた）が、
+  **耳で聞いたことは無い**。聞いてから決まることが 2 つある。
+  - **ひと言が長い。** 市区町村は `cityName` をそのまま読むので「大野郡白川村」のように
+    郡が入る（実測の値。→「走った道」）。県境と重なると「岐阜県に入りました。大野郡
+    白川村を走るのは初めてです」になる。**文字で見て自然でも耳で聞くと冗長**なのは
+    英語ローカライズで書いたとおりで、日本語でも同じ。長すぎるなら郡を落とすことになるが、
+    落とすと「白川村」と「〇〇村」が区別できなくなる県がある。
+  - **鳴る位置が遅れる。** 逆ジオコーディングは 3km ごと（`TrackStore.geocodeInterval`）
+    なので、**県境の標識を過ぎてから最大 3km 走ったところで鳴る**。高速なら 1 分半。
+    許せる遅れかどうかは実際に聞くまで分からない。詰めるなら間隔を短くするしかないが、
+    そのぶん問い合わせが増える（`DrivingSideLocator` の 100km と同じ用心で置いた値）。
+  - 切り分けは `VisitLog`（category `visit`）。→「助言を出す層」。
 - **駐車場の提案の実走確認**（2026-08-16 追加ぶん）。**アプリを通して出したことは一度も無い。**
   ここだけは UI を叩く必要があり、テストターゲットが無いあいだは実走かシミュレータでの
   手動操作になる。切り分けは `ParkingLog`（category `parking`）を見る。**出なかったときに

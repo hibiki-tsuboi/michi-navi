@@ -11,8 +11,11 @@
 "%@ の駐車位置" = "Parking near %@";
 "%@ までのルートを計算中…" = "Finding a route to %@…";
 "%@ 着になります" = "You'd arrive at %@";
+"%@に入りました" = "Now entering %@";
+"%@に入りました。%@を走るのは初めてです" = "Now entering %@. This is your first time driving through %@";
 "%@に到着しました。案内を終了します" = "You've arrived at %@. Ending guidance.";
 "%@を設定" = "Set %@";
+"%@を走るのは初めてです" = "This is your first time driving through %@";
 "%@・%@ 着" = "%@ · arriving %@";
 "%@・%@・%@ 着" = "%@ · %@ · arriving %@";
 "%@・目的地まで徒歩 %@" = "%@ · %@ walk to destination";
@@ -132,6 +135,7 @@
 "目的地を検索" = "Search for a destination";
 "目的地を車に送れませんでした" = "Couldn't send the destination to your vehicle";
 "直進" = "Continue";
+"県境と初めての街を読み上げる" = "Announce new regions and towns";
 "着きたい時刻" = "Arrive by";
 "立ち寄り先" = "Stop";
 "立ち寄り先を追加しました。%@" = "Stop added. %@";
@@ -168,6 +172,7 @@
 "避けない" = "No";
 "避ける" = "Yes";
 "都道府県" = "Prefectures";
+"都道府県をまたいだときと、初めて走る市区町村に入ったときに声で知らせます。記録を切ると鳴りません" = "Speaks up when you cross into a new region, or drive through a town for the first time. Nothing is spoken while recording is off.";
 "閉じる" = "Close";
 "電波が戻ったら自動で引き直します" = "It will retry once you're back in range";
 "電話" = "Phone";

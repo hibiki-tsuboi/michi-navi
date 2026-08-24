@@ -18,6 +18,11 @@ enum VoicePrompt: Equatable {
     case arrival(destination: String)
     /// 連続運転が長くなったとき。案内とは無関係に流れる。
     case rest(hours: Int)
+    /// 都道府県をまたいだとき。`firstCity` が入っていれば、その市区町村も初めて。
+    /// **案内していないときにも流れる**（`VisitAdvisor`）。
+    case prefecture(name: String, firstCity: String?)
+    /// 初めて走る市区町村に入ったとき。同上。
+    case firstCity(name: String)
 
     var spokenText: String {
         switch self {
@@ -38,6 +43,13 @@ enum VoicePrompt: Equatable {
             return String(localized: "\(destination)に到着しました。案内を終了します")
         case let .rest(hours):
             return String(localized: "運転を始めて\(hours)時間になります。そろそろ休憩しませんか")
+        case let .prefecture(name, firstCity):
+            guard let firstCity else { return String(localized: "\(name)に入りました") }
+            return String(localized: "\(name)に入りました。\(firstCity)を走るのは初めてです")
+        case let .firstCity(name):
+            // 「初めてです」ではなく「走るのは初めてです」。歩いて訪ねたことまでは
+            // こちらに分からないので、言い切れるところで止める。
+            return String(localized: "\(name)を走るのは初めてです")
         }
     }
 }

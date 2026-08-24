@@ -53,8 +53,21 @@ final class TrackStore: ObservableObject {
         var id: String { "\(prefecture)/\(city)" }
     }
 
+    /// 市区町村を引いた、という**その瞬間の出来事**。
+    ///
+    /// `visits` は貯まった結果なので、これとは別に要る。**`isFirst` は貯める前に
+    /// 見た結果**で、`$visits` を購読しても後からは作れない（届いたときにはもう入っている）。
+    /// 使うのは `VisitAdvisor` だけで、記録そのものには関わらない。
+    struct Located: Equatable {
+        let prefecture: String
+        let city: String
+        /// これまでに走ったことのない市区町村か。
+        let isFirst: Bool
+    }
+
     @Published private(set) var tracks: [Track] = []
     @Published private(set) var visits: [Visit] = []
+    let located = PassthroughSubject<Located, Never>()
 
     /// 記録するかどうか。**切れるようにしてある**——どこを走ったかは、残すかどうかを
     /// 利用者が決めてよい種類のもの。既定は入り（切りで始めると、最初に開いた画面が
@@ -203,10 +216,18 @@ final class TrackStore: ObservableObject {
         }
     }
 
-    private func remember(_ visit: Visit) {
-        guard !visits.contains(where: { $0.id == visit.id }) else { return }
-        visits.append(visit)
-        defaults.set(try? JSONEncoder().encode(visits), forKey: Self.visitsKey)
+    /// 貯めて、流す。**`private` にしていないのはテストから呼ぶため**（`isFirst` は
+    /// ここでしか決まらないので、外からは 2 度目かどうかを確かめようがない）。
+    func remember(_ visit: Visit) {
+        let isFirst = !visits.contains(where: { $0.id == visit.id })
+        if isFirst {
+            visits.append(visit)
+            defaults.set(try? JSONEncoder().encode(visits), forKey: Self.visitsKey)
+        }
+        // **貯めてから流す。** 受け取った側が `visits` を読み直しても食い違わないように。
+        // 初めてでなくても流すのは、都道府県をまたいだかどうかが**続けて引いた 2 件を
+        // 比べないと分からない**ため（`VisitAdvisor`）。
+        located.send(Located(prefecture: visit.prefecture, city: visit.city, isFirst: isFirst))
     }
 
     private static func visit(at location: CLLocation) async -> Visit? {

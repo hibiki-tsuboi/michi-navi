@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // 走った道の記録。案内していないあいだも測位を受けるので、案内ではなく
         // アプリの寿命に合わせる（`VoiceGuidance` と同じ理由）。
         TrackStore.shared.start()
+        // 県境と初めての街の読み上げ。土台は `TrackStore` の逆ジオコーディングなので、
+        // 必ずそのあとに購読を始める。
+        VisitAdvisor.shared.start()
         return true
     }
 }

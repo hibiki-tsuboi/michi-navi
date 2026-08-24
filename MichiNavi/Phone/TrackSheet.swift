@@ -8,6 +8,7 @@ import SwiftUI
 /// 駐車位置を CarPlay に出していないのと同じ理由。
 struct TrackSheet: View {
     @ObservedObject private var store = TrackStore.shared
+    @ObservedObject private var advisor = VisitAdvisor.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var isClearing = false
@@ -34,8 +35,13 @@ struct TrackSheet: View {
 
                 Section {
                     Toggle(String(localized: "走った道を記録する"), isOn: $store.isRecording)
+                    Toggle(String(localized: "県境と初めての街を読み上げる"), isOn: $advisor.isEnabled)
                     Button(String(localized: "記録を消す"), role: .destructive) { isClearing = true }
                         .disabled(store.tracks.isEmpty && store.visits.isEmpty)
+                } footer: {
+                    // **記録を切ると読み上げも止まる**（市区町村を引くのは記録の側）。
+                    // 画面に出さないと、切ったことと鳴らないことが結びつかない。
+                    Text(String(localized: "都道府県をまたいだときと、初めて走る市区町村に入ったときに声で知らせます。記録を切ると鳴りません"))
                 }
             }
             .navigationTitle(String(localized: "走った道"))

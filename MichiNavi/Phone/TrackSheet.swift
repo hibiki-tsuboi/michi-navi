@@ -58,11 +58,20 @@ struct TrackSheet: View {
         }
     }
 
+    /// 走った道の色。**`CarPlayMapViewController.trackColor` と同じ値**（片方だけ変えないこと。
+    /// `Core/` は UI に依存しない決まりなので `UIColor` / `Color` を共有できない——
+    /// 済んだぶんの灰が 2 か所にあるのと同じ）。
+    ///
+    /// **青をやめた**（2026-08-24）。この画面には経路が出ないので青でも読めるが、
+    /// **同じ線が CarPlay ではマゼンタで出る**ことになる。アプリの中で青は「これから走る道」に
+    /// 使っているので、走った道が青いのはここだけ意味が裏返っていた。
+    private static let trackColor = Color(red: 0.85, green: 0.2, blue: 0.6).opacity(0.7)
+
     private var map: some View {
         Map(initialPosition: initialPosition, interactionModes: [.pan, .zoom]) {
             ForEach(store.tracks) { track in
                 MapPolyline(coordinates: track.coordinates)
-                    .stroke(.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    .stroke(Self.trackColor, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
             }
         }
         .frame(height: 280)

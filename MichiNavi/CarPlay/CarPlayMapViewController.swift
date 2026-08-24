@@ -66,6 +66,21 @@ final class CarPlayMapViewController: UIViewController {
     /// 夜に明るくなるので、**済んだところが残りより目立つ**という逆の効き方をする
     /// （地図の昼夜は `overrideUserInterfaceStyle` で切り替わるので、動的な色はここでも効く）。
     private static let travelledColor = UIColor(white: 0.45, alpha: 1)
+
+    /// これまでに走った道（`TrackStore`）。**線ごとに 1 本**持って、伸びたものだけ引き直す。
+    private var trackOverlays: [UUID: MKPolyline] = [:]
+    /// 走った道の色。**半透明**——済んだぶんの灰とは逆で、こちらは経路の下に敷く下地なので、
+    /// 地図の道路が透けたほうが「記録を重ねた」ように見える（塗り替えではない）。
+    ///
+    /// 色は 2026-08-24 に実地図の上で決めた（`MKMapSnapshotter` の画像に候補を重ねて
+    /// 昼夜ぶん描き出す。済んだぶんの灰を決めたときと同じ手）。**落ちた候補に理由がある**——
+    /// オレンジは**地図が高速道路に使っている色**、緑は**公園の緑**と混ざる。灰は済んだぶんと
+    /// 見分けが付かない（まさに区別したい 2 つ）。薄い青は残りの経路に見えるうえ、
+    /// 昼の地図では鉄道の線に紛れて消える。**マゼンタだけが地図の側で使われていない。**
+    private static let trackColor = UIColor(red: 0.85, green: 0.2, blue: 0.6, alpha: 0.7)
+    /// 走った道の太さ。**経路より細く**（案内の線が主役で、こちらは下地）。
+    private static let trackWidth: CGFloat = 4
+
     /// 経由地と目的地のピン。広い画面でだけ出す。
     private var routeAnnotations: [MKPointAnnotation] = []
 
@@ -249,6 +264,54 @@ final class CarPlayMapViewController: UIViewController {
         // 経路より**あとに**足す。同じ level なら後から足したほうが上に描かれる。
         mapView.addOverlay(line, level: .aboveRoads)
         travelledOverlay = line
+    }
+
+    /// これまでに走った道を敷く。**案内には一切関わらない**（`TrackStore` が
+    /// `NavigationController` ではなく `LocationService` を直に見ているのと同じ理由で、
+    /// いちばん塗りたいのは案内していない道）。
+    ///
+    /// **広い画面だけ。** ダッシュボードとメーター内は「clutter の少ない最小限の地図」が
+    /// 要件（ガイド p.54-55）で、目的地ピンを出していないのと同じ判断。走った道は
+    /// 案内に要らない情報なので、狭い画面では真っ先に落ちる側になる。
+    func showTracks(_ tracks: [TrackStore.Track]) {
+        guard style.isWide else { return }
+
+        let changes = Self.trackChanges(for: tracks, drawn: trackOverlays.mapValues(\.pointCount))
+        for id in changes.remove {
+            guard let line = trackOverlays.removeValue(forKey: id) else { continue }
+            mapView.removeOverlay(line)
+        }
+        for track in tracks where changes.redraw.contains(track.id) {
+            let line = TrackPolyline(coordinates: track.coordinates, count: track.coordinates.count)
+            // **必ず先頭へ差し込む。** 同じ level では後から足したものが上に描かれるので、
+            // `addOverlay` にすると経路より先に足した線だけが下に入る（走っている最中に
+            // 伸びた線は経路の上に乗ってしまう）。
+            mapView.insertOverlay(line, at: 0, level: .aboveRoads)
+            trackOverlays[track.id] = line
+        }
+    }
+
+    /// 引き直す線と、地図から外す線。
+    ///
+    /// **選ぶところを描くところから離してある**ので、地図を持たずに確かめられる
+    /// （`JunctionGeometry` ↔ `JunctionImage` と同じ分け方）。`drawn` はいま地図に載って
+    /// いる線の点の数。
+    static func trackChanges(for tracks: [TrackStore.Track], drawn: [UUID: Int]) -> TrackChanges {
+        var changes = TrackChanges()
+        var stale = Set(drawn.keys)
+
+        for track in tracks where track.coordinates.count >= 2 {
+            stale.remove(track.id)
+            // **伸びた線だけ引き直す。** 走っているあいだ点が増えるのは最後の 1 本だけで、
+            // 点の数が同じなら絵は変わらない（`$tracks` は 50m ごとに流れてくる）。
+            guard drawn[track.id] != track.coordinates.count else { continue }
+            changes.redraw.insert(track.id)
+            // 伸びたぶんは載せ替えになるので、古いほうを先に外す。
+            if drawn[track.id] != nil { changes.remove.insert(track.id) }
+        }
+        // 残ったものは消えた線（利用者が記録を消した）。
+        changes.remove.formUnion(stale)
+        return changes
     }
 
     private func clearTravelled() {
@@ -637,12 +700,28 @@ extension CarPlayMapViewController: MKMapViewDelegate {
         guard let polyline = overlay as? MKPolyline else { return MKOverlayRenderer(overlay: overlay) }
 
         let renderer = MKPolylineRenderer(polyline: polyline)
-        renderer.strokeColor = polyline === travelledOverlay ? Self.travelledColor : UIColor.systemBlue
-        // **同じ太さでなければならない。** 細いと下の青が縁として残り、太いと
-        // 通っていないところまで塗る。
-        renderer.lineWidth = style.isWide ? 10 : 8
+        if polyline is TrackPolyline {
+            renderer.strokeColor = Self.trackColor
+            renderer.lineWidth = Self.trackWidth
+        } else {
+            renderer.strokeColor = polyline === travelledOverlay ? Self.travelledColor : UIColor.systemBlue
+            // 経路と、その上に重ねる済んだぶんは**同じ太さでなければならない。**
+            // 細いと下の青が縁として残り、太いと通っていないところまで塗る。
+            renderer.lineWidth = style.isWide ? 10 : 8
+        }
         renderer.lineCap = .round
         renderer.lineJoin = .round
         return renderer
     }
 }
+
+/// 走った道の線のうち、引き直すものと外すもの（[CarPlayMapViewController.trackChanges]）。
+struct TrackChanges: Equatable {
+    var redraw: Set<UUID> = []
+    var remove: Set<UUID> = []
+}
+
+/// 走った道の線。**型で見分ける**ために分けてある。`travelledOverlay` のように
+/// `===` で照合する手もあるが、あちらは 1 本しかないのに対しこちらは走行の数だけあり、
+/// `rendererFor` は線 1 本ごとに呼ばれるので、照合すると線の数の 2 乗になる。
+final class TrackPolyline: MKPolyline {}

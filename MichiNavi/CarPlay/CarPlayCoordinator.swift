@@ -284,6 +284,13 @@ final class CarPlayCoordinator: NSObject {
             .sink { [weak self] in self?.apply(phase: $0) }
             .store(in: &cancellables)
 
+        // これまでに走った道を地図へ敷く。**`NavigationController` を経由しない**——
+        // `TrackStore` は案内に関わらない層で、案内していない道こそ塗りたいもの。
+        // 助言を出す層が `navigation` を購読しているのとは別の筋になる。
+        TrackStore.shared.$tracks
+            .sink { [weak self] in self?.mapViewController.showTracks($0) }
+            .store(in: &cancellables)
+
         navigation.$progress
             .compactMap { $0 }
             .sink { [weak self] in self?.apply(progress: $0) }

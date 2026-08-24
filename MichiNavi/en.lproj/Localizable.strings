@@ -13,7 +13,7 @@
 "%@ 着になります" = "You'd arrive at %@";
 "%@に入りました" = "Now entering %@";
 "%@に入りました。%@を走るのは初めてです" = "Now entering %@. This is your first time driving through %@";
-"%@に到着しました。案内を終了します" = "You've arrived at %@. Ending guidance.";
+"%@周辺です。案内を終了します" = "You're arriving at %@. Ending guidance.";
 "%@を設定" = "Set %@";
 "%@を走るのは初めてです" = "This is your first time driving through %@";
 "%@・%@ 着" = "%@ · arriving %@";

@@ -123,11 +123,16 @@ struct GuidanceEngineTests {
 
     // MARK: - 到着
 
-    @Test("到着は残り 30m")
+    /// **両側から挟むこと。** 「残り 50m では着かない」だけでは、しきい値を 30m へ
+    /// 戻しても通る。案内が終わる位置は実走で「早い」と言われて詰めた値なので、
+    /// 広げたときに落ちる形にしておく。
+    @Test("到着は残り 15m")
     func arrivesWithinThreshold() {
         let (engine, _) = makeEngine()
-        #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 950))).hasArrived == false)
-        #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 985))).hasArrived)
+        // 残り 25m。**30m に戻すとここで着いてしまう。**
+        #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 975))).hasArrived == false)
+        // 残り 10m。
+        #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 990))).hasArrived)
     }
 
     // MARK: - 測位が途切れているあいだ
@@ -159,13 +164,14 @@ struct GuidanceEngineTests {
     @Test("推測は到着圏の手前で止まる")
     func extrapolationStopsBeforeArrivalZone() {
         let (engine, _) = makeEngine()
-        // 全長 1000m。到着のしきい値は 30m なので、推測で行けるのは 970m まで。
+        // 全長 1000m。到着のしきい値は 15m なので、推測で行けるのは 985m まで。
         _ = engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 900), speed: 20))
 
-        // 20 m/s で 3 秒＝960m。まだ手前なので進める。
-        #expect(engine.extrapolate(elapsed: 3) != nil)
-        // 4 秒＝980m。到着圏に入るので返さない。
-        #expect(engine.extrapolate(elapsed: 4) == nil)
+        // 20 m/s で 4 秒＝980m。まだ手前なので進める（**しきい値を 30m に戻すと
+        // ここで止まる**）。
+        #expect(engine.extrapolate(elapsed: 4) != nil)
+        // 5 秒＝1000m。到着圏に入るので返さない。
+        #expect(engine.extrapolate(elapsed: 5) == nil)
         // どれだけ経っても端に張り付かない。
         #expect(engine.extrapolate(elapsed: 600) == nil)
     }

@@ -15,6 +15,10 @@ enum VoicePrompt: Equatable {
     case maneuver(instruction: String, distance: CLLocationDistance?)
     /// 経由地に着いたとき。案内は続くので、終了とは言い分ける。
     case waypoint(name: String)
+    /// 目的地に着いたとき。**「到着しました」と言い切らない。**
+    /// 案内が終わるのは経路の終端の手前（`GuidanceEngine.arrivalThreshold`）で、
+    /// その経路の終端もピンの手前にある（実測で 13〜640m）。**着く前に着いたと言う**
+    /// ことになるので、一般のカーナビと同じく「周辺です」に留める。
     case arrival(destination: String)
     /// 連続運転が長くなったとき。案内とは無関係に流れる。
     case rest(hours: Int)
@@ -40,7 +44,7 @@ enum VoicePrompt: Equatable {
         case let .waypoint(name):
             return String(localized: "経由地の\(name)に到着しました。案内を続けます")
         case let .arrival(destination):
-            return String(localized: "\(destination)に到着しました。案内を終了します")
+            return String(localized: "\(destination)周辺です。案内を終了します")
         case let .rest(hours):
             return String(localized: "運転を始めて\(hours)時間になります。そろそろ休憩しませんか")
         case let .prefecture(name, firstCity):

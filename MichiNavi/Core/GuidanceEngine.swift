@@ -41,7 +41,22 @@ final class GuidanceEngine {
     /// 経路に乗らないまま出発地からこれだけ離れたら、乗っていなくても逸脱を数え始める。
     private let departureThreshold: CLLocationDistance = 100
     /// 目的地にこれだけ近づいたら到着とみなす。
-    private let arrivalThreshold: CLLocationDistance = 30
+    ///
+    /// **ここで案内が終わるので、そのぶん手前で「着いた」と言うことになる。**
+    /// 2026-08-24 まで 30m で、実走で「到着が早い」と言われた。早さは 2 つの
+    /// 足し算になっている。
+    ///
+    /// 1. このしきい値ぶん（時速 30km で 3.6 秒）。
+    /// 2. **経路の終端がそもそも目的地ピンの手前にある**。徒歩の step を落とすのと、
+    ///    MapKit が車道で経路を終えるため。同日に実データで測ったところ、経路の終端から
+    ///    ピンまでが 13m（白川郷）／15m（コンビニ）／92m（金沢21世紀美術館）／
+    ///    97m（東京タワー）／102m（横浜赤レンガ倉庫）／640m（イオンモール幕張新都心）。
+    ///
+    /// **2 は動かせない**（→ CLAUDE.md「MapKit の制約」8）ので、動かせるのは 1 だけ。
+    /// 下げすぎると、目的地の手前で駐車場へ折れたときに**到着ではなく逸脱として
+    /// 引き直しが走る**幅が広がるので、「まもなく」（`VoicePromptScheduler` の 60m）と
+    /// 重ならない程度に留める。
+    private let arrivalThreshold: CLLocationDistance = 15
 
     private let route: NavRoute
     private let points: [MKMapPoint]

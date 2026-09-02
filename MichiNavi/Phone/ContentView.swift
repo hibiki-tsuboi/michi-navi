@@ -246,10 +246,12 @@ struct ContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    let characterTags = RouteCharacter.tags(for: routes).first ?? []
-                    let noveltyTag = RouteNovelty.label(for: route).map { [$0] } ?? []
-                    tags(noveltyTag + characterTags)
-                    advisories(route.advisoryNotices)
+                    let brief = route.driveBrief ?? DriveBrief.make(
+                        for: route,
+                        comparisonTags: RouteCharacter.tags(for: routes).first ?? [],
+                        departure: Date()
+                    )
+                    DriveBriefCard(brief: brief)
                     DepartureTimeRow(destination: route.destination)
 
                     HStack {
@@ -313,34 +315,46 @@ struct ContentView: View {
             .panel()
     }
 
-    /// 経路を選ぶ材料を小さなタグでまとめる。初めての道は候補が 1 本でも表示する。
-    @ViewBuilder
-    private func tags(_ tags: [String]) -> some View {
-        if !tags.isEmpty {
-            HStack(spacing: 6) {
-                ForEach(tags, id: \.self) { tag in
-                    Text(tag)
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.tint.opacity(0.15), in: Capsule())
+}
+
+// MARK: - ドライブブリーフ
+
+/// 出発前に見る要点。最初は開いておき、地図を広く見たいときだけ畳めるようにする。
+private struct DriveBriefCard: View {
+    let brief: DriveBrief
+
+    @State private var isExpanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(brief.items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.symbolName)
+                            .frame(width: 18)
+                            .foregroundStyle(color(for: item.kind))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.title)
+                                .font(.caption.bold())
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
+            .padding(.top, 8)
+        } label: {
+            Label(String(localized: "ドライブブリーフ"), systemImage: "car.side.fill")
+                .font(.subheadline.bold())
         }
     }
 
-    /// MapKit がルートに付けてくる注意（有料道路・通行規制など）。
-    /// どのルートを選ぶかの判断材料になるので、候補を見せる場所で出す。
-    @ViewBuilder
-    private func advisories(_ notices: [String]) -> some View {
-        if !notices.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(notices, id: \.self) { notice in
-                    Label(notice, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
+    private func color(for kind: DriveBrief.Item.Kind) -> Color {
+        switch kind {
+        case .sunlight, .advisory: .orange
+        case .waypoint: .purple
+        case .novelty, .comparison, .turns: .accentColor
         }
     }
 }

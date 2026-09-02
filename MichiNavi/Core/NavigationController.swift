@@ -323,8 +323,13 @@ final class NavigationController: ObservableObject {
         }
         var routes = try await routeProvider.routes(from: origin, via: waypoints, to: destination)
         let percentages = RouteNovelty.percentages(for: routes, tracks: TrackStore.shared.tracks)
+        let characters = RouteCharacter.tags(for: routes)
+        let departure = Date()
         for index in routes.indices {
             routes[index].newRoadPercentage = percentages[index]
+            routes[index].driveBrief = DriveBrief.make(for: routes[index],
+                                                       comparisonTags: characters[index],
+                                                       departure: departure)
         }
         return routes
     }

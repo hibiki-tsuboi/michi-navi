@@ -474,17 +474,19 @@ final class CarPlayCoordinator: NSObject {
     /// 候補ルートすべてを 1 つの `CPTrip` にまとめる。
     /// CarPlay ではこうすると「他のルート」で切り替えられる。
     private func makeTrip(for routes: [NavRoute]) -> CPTrip {
-        // 数字だけでは候補の違いが読み取れないので、比較して分かる特徴を添える。
+        // 直接組み立てた経路でも候補の要約を失わないよう、ブリーフが無い場合だけここで補う。
         let characters = RouteCharacter.tags(for: routes)
+        let departure = Date()
 
         let choices = routes.enumerated().map { index, route -> CPRouteChoice in
             let summary = Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime)
-            // 特徴と、有料道路・通行規制などの注意を要約に足す。variants は
+            // ブリーフの短縮形を要約に足す。variants は
             // 「入るなら長い方」を選ぶ仕組みなので、幅の狭い車では自動的に短い表記へ落ちる。
-            // 初めての道の割合は、このアプリならではの選択材料なので先頭に置く。
             // 狭い画面で長い variants が省略されても、短い summary は下に残る。
-            let novelty = RouteNovelty.label(for: route).map { [$0] } ?? []
-            let extras = novelty + characters[index] + route.advisoryNotices
+            let brief = route.driveBrief ?? DriveBrief.make(for: route,
+                                                             comparisonTags: characters[index],
+                                                             departure: departure)
+            let extras = brief.highlights
             let variants = extras.isEmpty
                 ? [summary]
                 : ["\(summary)・\(extras.joined(separator: "、"))", summary]
@@ -1094,7 +1096,7 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private var routeInfoButton: CPBarButton {
-        CPBarButton(title: String(localized: "この経路について")) { [weak self] _ in
+        CPBarButton(title: String(localized: "ブリーフ")) { [weak self] _ in
             self?.presentRouteInformation()
         }
     }

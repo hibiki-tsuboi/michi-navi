@@ -186,3 +186,17 @@
 "高速を使う" = "Uses highways";
 "高速を避ける" = "Avoid highways";
 "高速道路を避ける" = "Avoid highways";
+"%@ ごろから朝日" = "Morning sun from %@";
+"%@ ごろから西日" = "Afternoon sun from %@";
+"%@。%@" = "%@. %@";
+"ドライブブリーフ" = "Drive brief";
+"ブリーフ" = "Brief";
+"初めての道" = "New roads";
+"右折 %1$lld回・左折 %2$lld回" = "%1$lld right turns · %2$lld left turns";
+"曲がる回数" = "Turns";
+"経路上の注意" = "Route notice";
+"候補との違い" = "Why this route";
+"全体の %lld%%・約 %@" = "%1$lld%% of the route · about %2$@";
+"朝日への備え" = "Morning sun";
+"西日への備え" = "Afternoon sun";
+"・" = " · ";

@@ -42,6 +42,9 @@ struct NavRoute: Identifiable {
     /// MapKit が経路を返したあと、`NavigationController` がその時点の `TrackStore` と照合して
     /// 入れる。経路提供側やテストが直接作った時点ではまだ測っていないので nil。
     var newRoadPercentage: Int? = nil
+
+    /// 案内開始前に見せる、この経路の要点。走行履歴との照合が終わったあとに作る。
+    var driveBrief: DriveBrief? = nil
 }
 
 extension NavRoute {

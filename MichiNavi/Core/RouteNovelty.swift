@@ -44,9 +44,8 @@ enum RouteNovelty {
         percentages(for: [route], tracks: tracks).first ?? 0
     }
 
-    /// iPhone のタグと CarPlay の候補説明で同じ文言を使う。
-    static func label(for route: NavRoute) -> String? {
-        guard let percentage = route.newRoadPercentage else { return nil }
+    /// iPhone のブリーフと CarPlay の候補説明で同じ文言を使う。
+    static func label(for percentage: Int) -> String {
         return String.localizedStringWithFormat(String(localized: "初めての道 %lld%%"),
                                                 Int64(percentage))
     }

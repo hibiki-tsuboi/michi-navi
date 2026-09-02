@@ -46,6 +46,15 @@ final class SunGlareAdvisor {
             String(localized: "およそ \(Formatters.durationText(duration)) 続きます")
         }
 
+        /// CarPlay の候補一覧に入る短縮形。詳しい時刻と長さはブリーフ本体で見せる。
+        var briefMessage: String {
+            let time = Formatters.arrivalText(start)
+            switch sun {
+            case .morning: return String(localized: "\(time) ごろから朝日")
+            case .evening: return String(localized: "\(time) ごろから西日")
+            }
+        }
+
         var symbolName: String { "sun.horizon.fill" }
     }
 
@@ -91,12 +100,7 @@ final class SunGlareAdvisor {
     /// 標本の数の上限。長距離でも計算量が伸びないよう、間隔のほうを広げる。
     private static let maximumSamples = 200
 
-    /// すでに知らせた目的地。
-    ///
-    /// **`NavRoute.id` で数えない**（`ParkingAdvisor` と同じ理由）。あちらは引き直すたびに
-    /// 変わる UUID なので、経路を外れるたびに同じことを言うことになる。太陽の位置は
-    /// 引き直しでは変わらない。
-    private var advisedDestinationID: String?
+    private var announcementGate = AnnouncementGate()
     private var cancellables = Set<AnyCancellable>()
 
     private init() {}
@@ -108,18 +112,51 @@ final class SunGlareAdvisor {
     }
 
     private func apply(phase: NavigationController.Phase) {
-        guard case let .navigating(route) = phase else {
-            // 案内が終わったら忘れる。同じ場所へもう一度案内を始めたら、また出す。
-            advisedDestinationID = nil
-            return
-        }
-        guard advisedDestinationID != route.destination.id else { return }
-        advisedDestinationID = route.destination.id
+        guard let route = announcementGate.routeToCheck(for: phase) else { return }
 
         // **待つものが何も無い**ので、ほかの層と違って `Task` に逃がさない。
         // 標本 200 点ぶんの三角関数は 1 ミリ秒に満たない。
         guard let found = Self.find(on: route, departure: Date()) else { return }
         glare.send(found)
+    }
+
+    /// 日差しを探すべき経路だけを通す。太陽の計算と、画面を見たかどうかの状態を分ける。
+    struct AnnouncementGate {
+        /// すでに知らせた目的地。
+        ///
+        /// **`NavRoute.id` で数えない**（`ParkingAdvisor` と同じ理由）。あちらは引き直すたびに
+        /// 変わる UUID なので、経路を外れるたびに同じことを言うことになる。
+        private var advisedDestinationID: String?
+        /// 案内開始前のブリーフですでに日差しを見せた目的地。
+        private var briefedDestinationIDs = Set<String>()
+
+        mutating func routeToCheck(for phase: NavigationController.Phase) -> NavRoute? {
+            switch phase {
+            case .idle:
+                // 案内が終わったら忘れる。同じ場所へもう一度案内を始めたら、また出す。
+                advisedDestinationID = nil
+                briefedDestinationIDs.removeAll()
+                return nil
+
+            case .calculating:
+                // ここで消すと、提示から案内開始へ進む途中の印まで失う。
+                return nil
+
+            case let .previewing(routes):
+                briefedDestinationIDs = Set(routes.compactMap { route in
+                    route.driveBrief?.glare == nil ? nil : route.destination.id
+                })
+                return nil
+
+            case let .navigating(route):
+                guard advisedDestinationID != route.destination.id else { return nil }
+                advisedDestinationID = route.destination.id
+
+                // 出発前に見た内容を、案内開始ボタンを押した直後の通知でもう一度出さない。
+                guard briefedDestinationIDs.remove(route.destination.id) == nil else { return nil }
+                return route
+            }
+        }
     }
 
     /// 経路の上を歩いて、正面に低い太陽が来る最初のひと続きを探す。

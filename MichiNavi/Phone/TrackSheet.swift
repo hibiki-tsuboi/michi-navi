@@ -1,7 +1,7 @@
 import MapKit
 import SwiftUI
 
-/// 走った道を見せる画面。
+/// 走った道を線とメッシュで見せる「走破マップ」。
 ///
 /// **iPhone にしか出さない。** 運転席から見るものではないし、CarPlay の画面で
 /// 眺めさせるものでもない（走行中に読める行数は限られる、という制約がそのまま効く）。
@@ -14,13 +14,14 @@ struct TrackSheet: View {
     @State private var isClearing = false
 
     var body: some View {
+        let coverage = ExplorationCoverage.Summary(tracks: store.tracks)
         NavigationStack {
             List {
                 if store.tracks.isEmpty {
                     Section { empty }
                 } else {
-                    Section { map.listRowInsets(EdgeInsets()) }
-                    Section { summary }
+                    Section { map(coverage).listRowInsets(EdgeInsets()) }
+                    Section { summary(coverage) }
                 }
 
                 ForEach(store.visitsByPrefecture, id: \.prefecture) { group in
@@ -44,7 +45,7 @@ struct TrackSheet: View {
                     Text(String(localized: "初めての道へ入る前と、都道府県をまたいだとき、初めて走る市区町村に入ったときに声で知らせます。記録を切ると県境・街の通知は止まります"))
                 }
             }
-            .navigationTitle(String(localized: "走った道"))
+            .navigationTitle(String(localized: "走破マップ"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -66,9 +67,14 @@ struct TrackSheet: View {
     /// **同じ線が CarPlay ではマゼンタで出る**ことになる。アプリの中で青は「これから走る道」に
     /// 使っているので、走った道が青いのはここだけ意味が裏返っていた。
     private static let trackColor = Color(red: 0.85, green: 0.2, blue: 0.6).opacity(0.7)
+    private static let coverageColor = Color.pink.opacity(0.16)
 
-    private var map: some View {
+    private func map(_ coverage: ExplorationCoverage.Summary) -> some View {
         Map(initialPosition: initialPosition, interactionModes: [.pan, .zoom]) {
+            ForEach(coverage.cells) { cell in
+                MapPolygon(coordinates: cell.coordinates)
+                    .foregroundStyle(Self.coverageColor)
+            }
             ForEach(store.tracks) { track in
                 MapPolyline(coordinates: track.coordinates)
                     .stroke(Self.trackColor, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
@@ -86,11 +92,17 @@ struct TrackSheet: View {
     }
 
     @ViewBuilder
-    private var summary: some View {
+    private func summary(_ coverage: ExplorationCoverage.Summary) -> some View {
         LabeledContent(String(localized: "走った距離"), value: Formatters.distanceText(store.totalDistance))
+        LabeledContent(String(localized: "開拓メッシュ"), value: String(localized: "\(coverage.cells.count) マス"))
+        LabeledContent(String(localized: "走破エリア"), value: coverageAreaText(coverage))
         LabeledContent(String(localized: "走った日"), value: String(localized: "\(store.days) 日"))
         LabeledContent(String(localized: "都道府県"), value: prefectureText)
         LabeledContent(String(localized: "市区町村"), value: String(localized: "\(store.visits.count) か所"))
+    }
+
+    private func coverageAreaText(_ coverage: ExplorationCoverage.Summary) -> String {
+        String.localizedStringWithFormat(String(localized: "約 %.1f km²"), coverage.squareKilometers)
     }
 
     /// **分母を出すのは日本だけ。** 47 という数はここでしか通じないし、市区町村のほうは
@@ -103,7 +115,7 @@ struct TrackSheet: View {
     private var empty: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(String(localized: "まだ記録がありません"))
-            Text(String(localized: "アプリを開いているあいだに走った道が、ここに残ります"))
+            Text(String(localized: "アプリを開いているあいだに走った道とメッシュが、ここに残ります"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

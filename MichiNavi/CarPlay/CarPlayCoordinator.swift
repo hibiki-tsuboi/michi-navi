@@ -523,11 +523,11 @@ final class CarPlayCoordinator: NSObject {
         // **目的地名は必ず渡す**（ヘッダが「1 件以上」と要求している）。案内カードや
         // メーターに出る名前がここから来る。名前を持たない地点（座標だけの履歴）が
         // あるので、空なら言葉で埋める。
-        let name = route.destination.name
+        let name = route.isExplorationLoop ? String(localized: "探索ドライブ") : route.destination.name
         trip.destinationNameVariants = [name.isEmpty ? String(localized: "目的地") : name]
         // 目的地を車の純正ナビへ渡せることを申告する（ガイド p.60）。対応した車でだけ
         // ルート選択画面に共有ボタンが出るので、いつでも立てておいてよい。
-        if #available(iOS 26.1, *) { trip.hasShareableDestination = true }
+        if #available(iOS 26.1, *) { trip.hasShareableDestination = !route.isExplorationLoop }
         return trip
     }
 

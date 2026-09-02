@@ -226,7 +226,7 @@ final class CarPlayMapViewController: UIViewController {
         // ガイドが求める「clutter の少ない最小限の地図」から外れる。
         guard style.isWide else { return }
 
-        routeAnnotations = (route.waypoints + [route.destination]).map { place in
+        routeAnnotations = (route.displayedWaypoints + [route.destination]).map { place in
             let pin = MKPointAnnotation()
             pin.coordinate = place.coordinate
             pin.title = place.name

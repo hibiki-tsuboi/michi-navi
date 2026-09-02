@@ -116,7 +116,11 @@ final class CarPlayRouteSharing {
                                    name: String(localized: "現在地"))
 
         for leg in legs {
-            let destination = Self.waypoint(for: leg.destination)
+            // 探索ルートの内部点を、車側で「立ち寄り先」と読める名前では渡さない。
+            // 区間の形には座標が必要なので、探索ドライブの途中として名前だけ差し替える。
+            let destination = leg.isHidden
+                ? Self.waypoint(at: leg.destination.coordinate, name: String(localized: "探索ドライブ"))
+                : Self.waypoint(for: leg.destination)
             // 「いま向かっている指示」は案内カードと同じ切り出し方に揃える。
             // まだ入っていない区間では、その区間の先頭から数える。
             let from = min(max(stepIndex, leg.range.lowerBound), leg.range.upperBound)
@@ -153,17 +157,19 @@ final class CarPlayRouteSharing {
     /// `waypointStepIndices` は各経由地に着く step の添字。最後の step に載っている
     /// 経由地は、目的地と区別できないので区間を切らない（空の区間ができてしまう）。
     private static func legs(of route: NavRoute,
-                             stepCount: Int) -> [(range: ClosedRange<Int>, destination: Place)] {
+                             stepCount: Int) -> [(range: ClosedRange<Int>,
+                                                 destination: Place,
+                                                 isHidden: Bool)] {
         guard stepCount > 0 else { return [] }
 
-        var result: [(range: ClosedRange<Int>, destination: Place)] = []
+        var result: [(range: ClosedRange<Int>, destination: Place, isHidden: Bool)] = []
         var start = 0
         for (place, end) in zip(route.waypoints, route.waypointStepIndices)
         where end >= start && end < stepCount - 1 {
-            result.append((start...end, place))
+            result.append((start...end, place, route.hiddenWaypointIDs.contains(place.id)))
             start = end + 1
         }
-        result.append((start...(stepCount - 1), route.destination))
+        result.append((start...(stepCount - 1), route.destination, false))
         return result
     }
 

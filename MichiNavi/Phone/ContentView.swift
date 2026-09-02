@@ -1,3 +1,4 @@
+import Combine
 import MapKit
 import SwiftUI
 
@@ -12,6 +13,8 @@ struct ContentView: View {
     @State private var cameraPosition: MapCameraPosition = .userLocation(fallback: .automatic)
     @State private var isSearchPresented = false
     @State private var isTrackPresented = false
+    @State private var isExplorationPresented = false
+    @State private var errorMessage: String?
     /// 検索シートを「行き先を選ぶ」ではなく「ピン留めを設定する」ために開いているか。
     @State private var assigningPin: DestinationStore.Pinned?
 
@@ -35,7 +38,7 @@ struct ContentView: View {
                                 style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                 }
                 // 立ち寄り先は目的地と見分けが付くよう別の印にする。
-                ForEach(route.waypoints) { waypoint in
+                ForEach(route.displayedWaypoints) { waypoint in
                     Marker(waypoint.name, systemImage: "mappin.and.ellipse", coordinate: waypoint.coordinate)
                         .tint(.orange)
                 }
@@ -63,6 +66,12 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $isTrackPresented) { TrackSheet() }
+        .sheet(isPresented: $isExplorationPresented) {
+            ExplorationDriveSheet { duration in
+                isExplorationPresented = false
+                navigation.requestExplorationRoutes(duration: duration)
+            }
+        }
         .onChange(of: isSearchPresented) { _, presented in
             // シートを閉じただけのときに、次に開いた検索が設定モードのまま始まらないように。
             if !presented { assigningPin = nil }
@@ -79,6 +88,16 @@ struct ContentView: View {
             default:
                 break
             }
+        }
+        .onReceive(navigation.$lastError.compactMap { $0 }) { errorMessage = $0 }
+        .alert(String(localized: "計算できませんでした"),
+               isPresented: Binding(
+                   get: { errorMessage != nil },
+                   set: { if !$0 { errorMessage = nil } }
+               )) {
+            Button(String(localized: "閉じる"), role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "")
         }
     }
 
@@ -236,13 +255,18 @@ struct ContentView: View {
                 if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
                     notice(String(localized: "設定アプリで位置情報の利用を許可してください"))
                 }
+                explorationRow
                 trackRow
             }
 
         case let .calculating(place):
             HStack(spacing: 12) {
                 ProgressView()
-                Text(String(localized: "\(place.name) までのルートを計算中…"))
+                if navigation.explorationTargetDuration != nil {
+                    Text(String(localized: "探索ルートを計算中…"))
+                } else {
+                    Text(String(localized: "\(place.name) までのルートを計算中…"))
+                }
                 Spacer()
                 Button(String(localized: "中止")) { navigation.cancelNavigation() }
             }
@@ -251,7 +275,7 @@ struct ContentView: View {
         case let .previewing(routes):
             if let route = routes.first {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(route.destination.name).font(.headline)
+                    Text(previewTitle(for: route)).font(.headline)
                     Text(Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -262,7 +286,9 @@ struct ContentView: View {
                         departure: Date()
                     )
                     DriveBriefCard(brief: brief)
-                    DepartureTimeRow(destination: route.destination)
+                    if !route.isExplorationLoop {
+                        DepartureTimeRow(destination: route.destination)
+                    }
 
                     HStack {
                         Button(String(localized: "やめる")) { navigation.cancelNavigation() }
@@ -298,6 +324,11 @@ struct ContentView: View {
         }
     }
 
+    private func previewTitle(for route: NavRoute) -> String {
+        guard let duration = route.explorationDuration else { return route.destination.name }
+        return String(localized: "探索ドライブ・\(Formatters.durationText(duration))コース")
+    }
+
     private func newRoadText(_ progress: RouteNovelty.Profile.Progress) -> String {
         switch progress {
         case let .approaching(distance):
@@ -307,7 +338,30 @@ struct ContentView: View {
         }
     }
 
-    /// 走った道への入口。**待機中の下がここまで空いていた**うえ、走った距離がそのまま
+    /// 行き先を決めずに走る入口。時間を選ぶところまでを停車中の iPhone で済ませる。
+    private var explorationRow: some View {
+        Button {
+            isExplorationPresented = true
+        } label: {
+            HStack {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.pink)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "探索ドライブ"))
+                    Text(String(localized: "時間を選んで、初めての道が多い周回コースへ"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .panel()
+    }
+
+    /// 走破マップへの入口。**待機中の下がここまで空いていた**うえ、走った距離がそのまま
     /// 「開く理由」になる。目的地の無い日にカーナビを開くのは、ふつうこれしか無い。
     private var trackRow: some View {
         Button {
@@ -317,7 +371,7 @@ struct ContentView: View {
                 Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
                     .foregroundStyle(.tint)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "走った道"))
+                    Text(String(localized: "走破マップ"))
                     Text(tracks.tracks.isEmpty
                          ? String(localized: "まだ記録がありません")
                          : Formatters.distanceText(tracks.totalDistance))
@@ -340,6 +394,56 @@ struct ContentView: View {
             .panel()
     }
 
+}
+
+/// 探索ドライブの長さだけを決める。周回の方角と道路は履歴を見てアプリが選ぶ。
+private struct ExplorationDriveSheet: View {
+    let onSelect: (TimeInterval) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(String(localized: "現在地へ戻る周回コースを、初めての道が多い順に探します"))
+                    .foregroundStyle(.secondary)
+
+                ForEach(ExplorationDrive.durationOptions, id: \.self) { duration in
+                    Button {
+                        onSelect(duration)
+                    } label: {
+                        HStack {
+                            Image(systemName: "clock")
+                            Text(String(localized: "約\(Formatters.durationText(duration))"))
+                                .font(.headline)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.pink)
+                }
+
+                Text(String(localized: "実際の所要時間は道路状況により前後します"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding()
+            .navigationTitle(String(localized: "探索ドライブ"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "閉じる")) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
 }
 
 // MARK: - 到着後の収穫
@@ -392,7 +496,7 @@ private struct ArrivalHarvestCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 Spacer()
-                Button(String(localized: "走った道を見る"), action: onOpenTracks)
+                Button(String(localized: "走破マップを見る"), action: onOpenTracks)
                     .font(.caption.bold())
             }
         }

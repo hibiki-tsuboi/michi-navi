@@ -129,7 +129,7 @@ struct DriveBrief: Equatable {
             leftTurns: leftTurns,
             glare: SunGlareAdvisor.find(on: route, departure: departure),
             advisories: route.advisoryNotices,
-            waypointNames: route.waypoints.map(\.name)
+            waypointNames: route.displayedWaypoints.map(\.name)
         )
     }
 }

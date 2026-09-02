@@ -49,9 +49,22 @@ struct NavRoute: Identifiable {
 
     /// 案内開始前に見せる、この経路の要点。走行履歴との照合が終わったあとに作る。
     var driveBrief: DriveBrief? = nil
+
+    /// 探索ドライブで選んだ目標時間。通常の目的地ルートでは nil。
+    ///
+    /// 周回を形作る `waypoints` はリルートに必要なので、通常ルートとの区別にも使う。
+    var explorationDuration: TimeInterval? = nil
+
+    /// 周回を形作るためだけの通過点。利用者が追加した立ち寄り先とは ID で分ける。
+    var hiddenWaypointIDs: Set<String> = []
 }
 
 extension NavRoute {
+    var isExplorationLoop: Bool { explorationDuration != nil }
+
+    /// 地図・ブリーフ・通過通知へ出してよい、利用者が選んだ立ち寄り先。
+    var displayedWaypoints: [Place] { waypoints.filter { !hiddenWaypointIDs.contains($0.id) } }
+
     /// 中身から作る指紋。**引き直した結果が前とまったく同じ経路かどうか**を見分ける。
     ///
     /// `id` は生成のたびに変わるので、同じ道を同じ順に曲がる経路でも別物になる。

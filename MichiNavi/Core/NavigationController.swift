@@ -35,6 +35,10 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// 探索ドライブを計算中・提示中なら、利用者が選んだ目標時間。
+    /// 経路ができたあとは `NavRoute.explorationDuration` にも同じ値を持たせる。
+    @Published private(set) var explorationTargetDuration: TimeInterval?
+
     /// 走行中の「初めての道」。iPhone はこれを残り時間の下へ添える。
     @Published private(set) var newRoadProgress: RouteNovelty.Profile.Progress?
 
@@ -232,6 +236,48 @@ final class NavigationController: ObservableObject {
         }
     }
 
+    /// 時間だけを選び、現在地へ戻る探索ドライブを計算して提示する。
+    /// 初めての道の多さと目標時間からのずれを合わせて、上位 3 候補へ絞る。
+    func requestExplorationRoutes(duration: TimeInterval) {
+        guard network.isOnline else {
+            lastError = NavigationError.offline.errorDescription
+            return
+        }
+        guard let origin = location.location?.coordinate else {
+            lastError = NavigationError.noCurrentLocation.errorDescription
+            return
+        }
+
+        if activeRoute == nil { noveltyBaselineTracks = TrackStore.shared.tracks }
+        explorationTargetDuration = duration
+        let start = ExplorationDrive.startPlace(at: origin)
+        beginRouteRequest(to: start)
+
+        routingTask = Task {
+            var candidates: [NavRoute] = []
+            for plan in ExplorationDrive.plans(from: origin, targetDuration: duration) {
+                if var route = try? await routeProvider.routes(from: origin,
+                                                               via: plan.waypoints,
+                                                               to: start).first {
+                    route.hiddenWaypointIDs = Set(plan.waypoints.map(\.id))
+                    candidates.append(route)
+                }
+                guard !Task.isCancelled else { return }
+            }
+
+            guard !candidates.isEmpty else {
+                lastError = RouteError.noRouteFound.localizedDescription
+                cancelNavigation()
+                return
+            }
+
+            let prepared = decorate(candidates, explorationDuration: duration)
+            let ranked = ExplorationDrive.ranked(prepared, targetDuration: duration)
+            guard !Task.isCancelled, !ranked.isEmpty else { return }
+            phase = .previewing(ranked)
+        }
+    }
+
     /// ルートを計算してそのまま案内を始める。
     /// CarPlay Dashboard のショートカットのように、提示画面を見てもらえない
     /// 場所から呼ばれる想定。
@@ -257,7 +303,10 @@ final class NavigationController: ObservableObject {
         routingTask?.cancel()
         routingTask = Task {
             do {
-                let routes = try await calculateRoutes(to: route.destination, via: waypoints)
+                let routes = try await calculateRoutes(to: route.destination,
+                                                       via: waypoints,
+                                                       explorationDuration: route.explorationDuration,
+                                                       hiddenWaypointIDs: route.hiddenWaypointIDs)
                 guard !Task.isCancelled, let best = routes.first else { return }
                 startNavigation(with: best, reason: .waypointAdded)
             } catch is CancellationError {
@@ -278,7 +327,10 @@ final class NavigationController: ObservableObject {
         guard case let .navigating(route) = phase else { return nil }
 
         let waypoints = remainingWaypoints(of: route) + [place]
-        guard let best = try? await calculateRoutes(to: route.destination, via: waypoints).first else {
+        guard let best = try? await calculateRoutes(to: route.destination,
+                                                    via: waypoints,
+                                                    explorationDuration: route.explorationDuration,
+                                                    hiddenWaypointIDs: route.hiddenWaypointIDs).first else {
             return nil
         }
         return (best.distance, best.expectedTravelTime)
@@ -317,19 +369,8 @@ final class NavigationController: ObservableObject {
         // **計算を投げる前に控える。** 返事を待っているあいだにも走行記録は増える。
         // 案内中なら、ひと走りの開始時に取った控えをそのまま使う。
         if activeRoute == nil { noveltyBaselineTracks = TrackStore.shared.tracks }
-        routingTask?.cancel()
-        lastError = nil
-        phase = .calculating(destination)
-        // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
-        //
-        // **下ろすのは `phase` を動かしたあと。** 立ち下がりを購読している CarPlay は
-        // `resumeTrip` を投げるので、まだ `.navigating` のうちに下ろすと、**いま捨てようと
-        // している経路**を「引き直しの結果」として車へ渡してしまう。`.calculating` を
-        // 先に流しておけば、あちらはセッションを畳んでから受け取るので何も起きない。
-        isRerouting = false
-        lastRerouteFinished = nil
-        rerouteFailures = 0
-        lastRerouteOrigin = nil
+        explorationTargetDuration = nil
+        beginRouteRequest(to: destination)
 
         routingTask = Task {
             do {
@@ -352,18 +393,47 @@ final class NavigationController: ObservableObject {
         }
     }
 
-    private func calculateRoutes(to destination: Place, via waypoints: [Place] = []) async throws -> [NavRoute] {
+    /// 通常ルートと探索ルートに共通する、計算開始時の状態整理。
+    private func beginRouteRequest(to destination: Place) {
+        routingTask?.cancel()
+        lastError = nil
+        phase = .calculating(destination)
+        // 別の目的地を引き直すので、途中だった再検索の状態は捨てる。
+        //
+        // **下ろすのは `phase` を動かしたあと。** 立ち下がりを購読している CarPlay は
+        // `resumeTrip` を投げるので、まだ `.navigating` のうちに下ろすと、**いま捨てようと
+        // している経路**を「引き直しの結果」として車へ渡してしまう。`.calculating` を
+        // 先に流しておけば、あちらはセッションを畳んでから受け取るので何も起きない。
+        isRerouting = false
+        lastRerouteFinished = nil
+        rerouteFailures = 0
+        lastRerouteOrigin = nil
+    }
+
+    private func calculateRoutes(to destination: Place,
+                                 via waypoints: [Place] = [],
+                                 explorationDuration: TimeInterval? = nil,
+                                 hiddenWaypointIDs: Set<String> = []) async throws -> [NavRoute] {
         guard let origin = location.location?.coordinate else {
             throw NavigationError.noCurrentLocation
         }
-        // `await` の前に値型の配列を控える。計算中に `TrackStore` が伸びても、この問い合わせの
-        // 候補どうしは同じ時点の履歴で比べる。
-        let noveltyTracks = noveltyBaselineTracks ?? TrackStore.shared.tracks
         var routes = try await routeProvider.routes(from: origin, via: waypoints, to: destination)
+        for index in routes.indices {
+            routes[index].hiddenWaypointIDs = hiddenWaypointIDs
+        }
+        return decorate(routes, explorationDuration: explorationDuration)
+    }
+
+    /// 履歴との照合・経路の性格・ドライブブリーフを、同じ出発時刻で候補全部へ載せる。
+    private func decorate(_ rawRoutes: [NavRoute],
+                          explorationDuration: TimeInterval?) -> [NavRoute] {
+        var routes = rawRoutes
+        let noveltyTracks = noveltyBaselineTracks ?? TrackStore.shared.tracks
         let novelty = RouteNovelty.analyses(for: routes, tracks: noveltyTracks)
         let characters = RouteCharacter.tags(for: routes)
         let departure = Date()
         for index in routes.indices {
+            routes[index].explorationDuration = explorationDuration
             routes[index].newRoadPercentage = novelty[index].percentage
             routes[index].newRoadProfile = novelty[index].profile
             routes[index].driveBrief = DriveBrief.make(for: routes[index],
@@ -402,7 +472,9 @@ final class NavigationController: ObservableObject {
         // もう新しい値でなければならない。
         lastRouteChange = reason
         // 実際に案内を始めた地点だけを履歴に残す。ルートを見ただけでは残さない。
-        DestinationStore.shared.remember(route.destination)
+        if !route.isExplorationLoop {
+            DestinationStore.shared.remember(route.destination)
+        }
         guidance = GuidanceEngine(route: route)
         // **`phase` より先に置く。** 案内が生きているかを見ている側（`VoiceGuidance`）は
         // こちらを購読しているので、経路と読み上げの段取りをここで揃える。
@@ -411,6 +483,7 @@ final class NavigationController: ObservableObject {
         progress = nil
         lastFix = nil
         phase = .navigating(route)
+        explorationTargetDuration = nil
         location.setNavigating(true)
         startDeadReckoning()
         // 引いたばかりの経路には出発時の見積もりが入っているので、すぐには測り直さない。
@@ -477,6 +550,7 @@ final class NavigationController: ObservableObject {
         routingTask = nil
         finishTrip()
         phase = .idle
+        explorationTargetDuration = nil
         // **下ろすのは `phase` を動かしたあと**（`route(to:)` と同じ理由）。まだ
         // `.navigating` のうちに下ろすと、立ち下がりを見ている CarPlay が畳む寸前の
         // セッションへ `resumeTrip` を投げる。そのとき `progress` はもう nil なので、
@@ -539,7 +613,11 @@ final class NavigationController: ObservableObject {
             NavigationLog.offRoute(distanceFromRoute: updated.distanceFromRoute,
                                    accuracy: current.horizontalAccuracy,
                                    speed: current.speed)
-            reroute(to: route.destination, via: remainingWaypoints(of: route), from: current)
+            reroute(to: route.destination,
+                    via: remainingWaypoints(of: route),
+                    explorationDuration: route.explorationDuration,
+                    hiddenWaypointIDs: route.hiddenWaypointIDs,
+                    from: current)
             return
         }
 
@@ -594,6 +672,8 @@ final class NavigationController: ObservableObject {
             )[0]
             candidate.newRoadPercentage = novelty.percentage
             candidate.newRoadProfile = novelty.profile
+            candidate.explorationDuration = route.explorationDuration
+            candidate.hiddenWaypointIDs = route.hiddenWaypointIDs
 
             // **差し替える前に控える。** `applyMeasuredTimeRemaining` を通したあとの
             // 見込みは測った値そのものになるので、渋滞かどうかを見る差が消える。
@@ -715,7 +795,8 @@ final class NavigationController: ObservableObject {
         guard let previous else { return }
 
         for (place, index) in zip(route.waypoints, route.waypointStepIndices)
-        where index >= previous && index < current {
+        where !route.hiddenWaypointIDs.contains(place.id)
+            && index >= previous && index < current {
             waypointReached.send(place)
         }
     }
@@ -733,7 +814,11 @@ final class NavigationController: ObservableObject {
     ///
     /// という形で確実に破綻する。**間隔だけでは足りない**ので、停まっているあいだは
     /// そもそも投げない（[canReroute(from:)]）。
-    private func reroute(to destination: Place, via waypoints: [Place], from current: CLLocation) {
+    private func reroute(to destination: Place,
+                         via waypoints: [Place],
+                         explorationDuration: TimeInterval?,
+                         hiddenWaypointIDs: Set<String>,
+                         from current: CLLocation) {
         // **次の行き先を選んでいるあいだは引き直さない。** `routingTask` は 1 本しかないので、
         // ここで投げると**利用者が待っている目的地の計算を取り消す**。しかも成功すれば
         // `startNavigation(with:)` が `phase` を `.navigating` へ戻すので、**候補の一覧が
@@ -794,7 +879,10 @@ final class NavigationController: ObservableObject {
             }
 
             do {
-                let routes = try await calculateRoutes(to: destination, via: waypoints)
+                let routes = try await calculateRoutes(to: destination,
+                                                       via: waypoints,
+                                                       explorationDuration: explorationDuration,
+                                                       hiddenWaypointIDs: hiddenWaypointIDs)
                 guard !Task.isCancelled else { return }
 
                 guard let best = routes.first else {

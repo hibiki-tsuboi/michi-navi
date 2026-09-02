@@ -223,6 +223,16 @@ struct ContentView: View {
         switch navigation.phase {
         case .idle:
             VStack(spacing: 8) {
+                if let arrival = navigation.arrivalHarvest {
+                    ArrivalHarvestCard(
+                        arrival: arrival,
+                        onOpenTracks: {
+                            navigation.dismissArrivalHarvest()
+                            isTrackPresented = true
+                        },
+                        onDismiss: navigation.dismissArrivalHarvest
+                    )
+                }
                 if location.authorizationStatus == .denied || location.authorizationStatus == .restricted {
                     notice(String(localized: "設定アプリで位置情報の利用を許可してください"))
                 }
@@ -315,6 +325,83 @@ struct ContentView: View {
             .panel()
     }
 
+}
+
+// MARK: - 到着後の収穫
+
+/// 到着したあとにだけ残る、ひと走りの成果。走行中に読む画面ではないので iPhone に出し、
+/// 詳しい履歴は既存の「走った道」へつなぐ。初めての土地が無い走行では生成されない。
+private struct ArrivalHarvestCard: View {
+    let arrival: NavigationController.ArrivalHarvest
+    let onOpenTracks: () -> Void
+    let onDismiss: () -> Void
+
+    private var harvest: TripSummary.Harvest { arrival.harvest }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(String(localized: "今回の収穫"), systemImage: "sparkles")
+                        .font(.headline)
+                        .foregroundStyle(.pink)
+                    Text(String(localized: "\(arrival.destinationName)周辺までのドライブ"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "閉じる"))
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                if let prefecture = harvest.prefecture {
+                    harvestMetric(value: prefecture,
+                                  label: String(localized: "初めて走った都道府県"),
+                                  symbol: "map.fill")
+                }
+                harvestMetric(value: String(localized: "\(harvest.cities)か所"),
+                              label: String(localized: "初めて走った街"),
+                              symbol: "building.2.fill")
+            }
+
+            HStack {
+                Label(
+                    String(localized: "通算\(harvest.totalPrefectures)都道府県・\(harvest.totalCities)市区町村"),
+                    systemImage: "flag.checkered"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                Spacer()
+                Button(String(localized: "走った道を見る"), action: onOpenTracks)
+                    .font(.caption.bold())
+            }
+        }
+        .panel()
+        .accessibilityElement(children: .contain)
+    }
+
+    private func harvestMetric(value: String, label: String, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundStyle(.pink)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value)
+                    .font(.title3.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: - ドライブブリーフ

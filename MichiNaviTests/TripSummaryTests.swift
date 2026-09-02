@@ -96,4 +96,26 @@ struct TripSummaryTests {
         #expect(both.spokenText.contains("12"))
         #expect(!both.spokenText.contains("38"))
     }
+
+    /// 毎日の通勤では空のカードも出さない。読み上げだけが黙り、画面に 0 件の成果が
+    /// 残ると、同じ機能なのに出る条件が分かれてしまう。
+    @Test func 収穫が無ければ到着カードも作らない() {
+        #expect(NavigationController.ArrivalHarvest.make(destinationName: "東京駅",
+                                                         harvest: nil) == nil)
+    }
+
+    /// 到着時に確定した同じ値をカードと音声が分け合えるよう、目的地と収穫を一緒に保持する。
+    @Test func 到着カードは確定した収穫を保持する() throws {
+        let harvest = TripSummary.Harvest(prefecture: "神奈川県",
+                                          cities: 2,
+                                          totalPrefectures: 3,
+                                          totalCities: 12)
+        let card = try #require(NavigationController.ArrivalHarvest.make(
+            destinationName: "横浜赤レンガ倉庫",
+            harvest: harvest
+        ))
+
+        #expect(card.destinationName == "横浜赤レンガ倉庫")
+        #expect(card.harvest == harvest)
+    }
 }

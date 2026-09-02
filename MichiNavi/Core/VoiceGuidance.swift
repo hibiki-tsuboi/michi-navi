@@ -59,7 +59,7 @@ final class VoiceGuidance: NSObject {
             .sink { [weak self] route in
                 self?.isAnnouncingArrival = true
                 self?.speak(.arrival(destination: route.destination.name))
-                self?.speakHarvest()
+                self?.speakHarvest(self?.navigation.arrivalHarvest?.harvest)
             }
             .store(in: &cancellables)
 
@@ -145,13 +145,13 @@ final class VoiceGuidance: NSObject {
     /// 次の曲がり角までこれより近ければ、案内と無関係なひと言は見送る。
     private static let quietDistance: CLLocationDistance = 500
 
-    /// 到着のひと言に続けて、ひと走りの収穫を読む（`TripSummary`）。
+    /// 到着のひと言に続けて、ひと走りの収穫を読む。
     ///
     /// **呼ぶ場所が決まっている**——`arrived` の sink の中、到着を積んだ直後。ここには
-    /// 理由が 2 つある。`NavigationController` は `arrived` を流してから `activeRoute` を
-    /// nil にするので、**この時点でしか収穫を測れない**（`TripSummary` の控えはその
-    /// 立ち下がりで捨てられる）。そして 2 つを同じ sink で順に積めば、`PassthroughSubject` を
-    /// もう 1 本足したときのような**購読の順番しだいで前後が入れ替わる**形にならない。
+    /// `NavigationController` は `arrived` を流す直前に収穫を確定している。ここで測り直さず
+    /// 同じ値を受け取ることで、iPhone のカードと音声の数字が食い違わない。そして 2 つを
+    /// 同じ sink で順に積めば、`PassthroughSubject` をもう 1 本足したときのような
+    /// **購読の順番しだいで前後が入れ替わる**形にならない。
     ///
     /// 読み上げが最後まで残るのは `isAnnouncingArrival` のおかげ。到着の直後に
     /// `activeRoute` が nil になって `apply(route:)` が来るが、あちらはこの印が
@@ -160,13 +160,13 @@ final class VoiceGuidance: NSObject {
     /// **入り切りは `VisitAdvisor` と分け合う。** 題材が同じ（初めて走る土地）なので、
     /// 走行中のひと言を切った人は到着時のひと言も要らない。トグルを 2 つ置いても
     /// 片方だけ切る理由が言えない。
-    private func speakHarvest() {
+    private func speakHarvest(_ harvest: TripSummary.Harvest?) {
         // **抱えない**（`announce(_:)` と同じ）。`speak(_:)` は聞き取り中のひと言を
         // `pendingPrompt` へ溜めるが、そこは 1 つしか入らない。ここで溜めると、
         // **同じ sink で先に積んだ到着のひと言を押しのける**ことになる。
         guard !isSuspended else { return }
         guard VisitAdvisor.shared.isEnabled else { return }
-        guard let harvest = TripSummary.shared.harvest() else { return }
+        guard let harvest else { return }
         speak(.harvest(prefecture: harvest.prefecture,
                        cities: harvest.cities,
                        totalPrefectures: harvest.totalPrefectures,

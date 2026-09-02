@@ -200,3 +200,10 @@
 "朝日への備え" = "Morning sun";
 "西日への備え" = "Afternoon sun";
 "・" = " · ";
+"今回の収穫" = "This drive's harvest";
+"%@周辺までのドライブ" = "Your drive to %@";
+"初めて走った都道府県" = "New region";
+"初めて走った街" = "New towns";
+"%lldか所" = "%lld";
+"通算%lld都道府県・%lld市区町村" = "%1$lld regions · %2$lld towns total";
+"走った道を見る" = "See roads driven";

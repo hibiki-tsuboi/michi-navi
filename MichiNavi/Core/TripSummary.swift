@@ -72,8 +72,8 @@ final class TripSummary {
 
     /// いまのひと走りの収穫。**副作用が無い**ので、いつ呼んでも同じ値を返す。
     ///
-    /// 呼ぶのは到着の 1 か所だけ（`VoiceGuidance`）。**到着（`arrived`）は
-    /// `activeRoute` が nil になる前に流れる**ので、そこで呼べば控えはまだ生きている。
+    /// 呼ぶのは到着判定の 1 か所だけ（`NavigationController`）。**`activeRoute` を nil に
+    /// する前**に呼べば控えはまだ生きている。確定した値を画面と音声で分け合う。
     func harvest() -> Harvest? {
         guard let mark else { return nil }
         return Self.harvest(since: mark, visits: TrackStore.shared.visits)

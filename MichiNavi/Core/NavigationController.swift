@@ -35,6 +35,24 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// 直近の到着で得た「ひと走りの収穫」。iPhone の待機画面に、閉じるまで残す。
+    ///
+    /// **到着の瞬間に確定した値を持つ。** `finishTrip()` で `activeRoute` が nil になると
+    /// `TripSummary` の出発時の控えは捨てられるため、画面を描くときに測り直すことはできない。
+    /// 音声もこの値を読むことで、カードと別々に測って食い違う形を避ける。
+    struct ArrivalHarvest: Equatable {
+        let destinationName: String
+        let harvest: TripSummary.Harvest
+
+        /// 収穫が無い到着には空のカードを作らない。
+        static func make(destinationName: String, harvest: TripSummary.Harvest?) -> Self? {
+            guard let harvest else { return nil }
+            return Self(destinationName: destinationName, harvest: harvest)
+        }
+    }
+
+    @Published private(set) var arrivalHarvest: ArrivalHarvest?
+
     /// **自分では何も出せない入口から、失敗を利用者へ伝えるための口。**
     ///
     /// Dashboard のショートカットがこれを使う。あちらにはテンプレートが出せないので、
@@ -342,6 +360,9 @@ final class NavigationController: ObservableObject {
     /// よらず同じ。既定を `.started` にしてあるのは、外から呼ぶ入口（提示画面の開始
     /// ボタン）がそれだから。
     func startNavigation(with route: NavRoute, reason: RouteChangeReason = .started) {
+        // 前の到着カードを次のひと走りへ持ち越さない。検索しただけでは消さず、
+        // 実際に発進すると決めたところを区切りにする。
+        arrivalHarvest = nil
         // **`phase` を動かす前に置く。** `@Published` は `willSet` で流れるので、
         // 購読側（`VoiceGuidance`）が `.navigating` を受け取った時点でここは
         // もう新しい値でなければならない。
@@ -424,6 +445,11 @@ final class NavigationController: ObservableObject {
         isRerouting = false
     }
 
+    /// 到着カードを閉じる。走行履歴そのものは消さない。
+    func dismissArrivalHarvest() {
+        arrivalHarvest = nil
+    }
+
     // MARK: - 位置更新
 
     /// **案内が生きているかは `activeRoute` で見る。`phase` ではない。**
@@ -452,6 +478,11 @@ final class NavigationController: ObservableObject {
             // 着いた地点を車の置き場所として残す。目的地の座標ではなく**実際に
             // 着いた座標**を使う（施設が目的地なら、車は入口ではなく駐車場にある）。
             DestinationStore.shared.rememberParking(at: current.coordinate, near: route.destination)
+            // **案内を畳む前に 1 回だけ測る。** `finishTrip()` が `activeRoute` を nil にすると
+            // `TripSummary` の控えも捨てられる。先に確定しておけば、カードと音声は同じ値を
+            // 使え、Combine の購読順にも左右されない。
+            arrivalHarvest = ArrivalHarvest.make(destinationName: route.destination.name,
+                                                  harvest: TripSummary.shared.harvest())
             arrived.send(route)
             // **段階を落とすのは案内の段階にいるときだけ。** 次の行き先を選んでいる最中に
             // 元の目的地へ着くことはありうるが、そこで `.idle` へ落とすと**利用者が見ている

@@ -36,6 +36,12 @@ struct NavRoute: Identifiable {
     let coordinates: [CLLocationCoordinate2D]
     /// `coordinates` 上で各 step が終わる添字。
     let stepEndIndices: [Int]
+
+    /// この経路のうち、走行履歴と重ならない距離の割合（0...100）。
+    ///
+    /// MapKit が経路を返したあと、`NavigationController` がその時点の `TrackStore` と照合して
+    /// 入れる。経路提供側やテストが直接作った時点ではまだ測っていないので nil。
+    var newRoadPercentage: Int? = nil
 }
 
 extension NavRoute {

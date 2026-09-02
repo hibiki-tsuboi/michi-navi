@@ -481,7 +481,10 @@ final class CarPlayCoordinator: NSObject {
             let summary = Formatters.routeSummary(distance: route.distance, duration: route.expectedTravelTime)
             // 特徴と、有料道路・通行規制などの注意を要約に足す。variants は
             // 「入るなら長い方」を選ぶ仕組みなので、幅の狭い車では自動的に短い表記へ落ちる。
-            let extras = characters[index] + route.advisoryNotices
+            // 初めての道の割合は、このアプリならではの選択材料なので先頭に置く。
+            // 狭い画面で長い variants が省略されても、短い summary は下に残る。
+            let novelty = RouteNovelty.label(for: route).map { [$0] } ?? []
+            let extras = novelty + characters[index] + route.advisoryNotices
             let variants = extras.isEmpty
                 ? [summary]
                 : ["\(summary)・\(extras.joined(separator: "、"))", summary]

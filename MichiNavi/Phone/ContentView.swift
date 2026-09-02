@@ -246,7 +246,9 @@ struct ContentView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    characterTags(RouteCharacter.tags(for: routes).first ?? [])
+                    let characterTags = RouteCharacter.tags(for: routes).first ?? []
+                    let noveltyTag = RouteNovelty.label(for: route).map { [$0] } ?? []
+                    tags(noveltyTag + characterTags)
                     advisories(route.advisoryNotices)
                     DepartureTimeRow(destination: route.destination)
 
@@ -311,9 +313,9 @@ struct ContentView: View {
             .panel()
     }
 
-    /// 候補どうしを比べて分かる特徴。候補が 1 本しか無ければ何も出ない。
+    /// 経路を選ぶ材料を小さなタグでまとめる。初めての道は候補が 1 本でも表示する。
     @ViewBuilder
-    private func characterTags(_ tags: [String]) -> some View {
+    private func tags(_ tags: [String]) -> some View {
         if !tags.isEmpty {
             HStack(spacing: 6) {
                 ForEach(tags, id: \.self) { tag in

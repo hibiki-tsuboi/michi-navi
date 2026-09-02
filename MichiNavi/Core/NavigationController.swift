@@ -321,7 +321,12 @@ final class NavigationController: ObservableObject {
         guard let origin = location.location?.coordinate else {
             throw NavigationError.noCurrentLocation
         }
-        return try await routeProvider.routes(from: origin, via: waypoints, to: destination)
+        var routes = try await routeProvider.routes(from: origin, via: waypoints, to: destination)
+        let percentages = RouteNovelty.percentages(for: routes, tracks: TrackStore.shared.tracks)
+        for index in routes.indices {
+            routes[index].newRoadPercentage = percentages[index]
+        }
+        return routes
     }
 
     // MARK: - 案内の開始と終了

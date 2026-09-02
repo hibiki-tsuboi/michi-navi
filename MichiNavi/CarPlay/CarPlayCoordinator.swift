@@ -318,6 +318,10 @@ final class CarPlayCoordinator: NSObject {
             .sink { [weak self] _ in self?.finishSession() }
             .store(in: &cancellables)
 
+        navigation.newRoadAhead
+            .sink { [weak self] in self?.presentNewRoadAhead(distance: $0) }
+            .store(in: &cancellables)
+
         navigation.$lastError
             .compactMap { $0 }
             .sink { [weak self] in self?.presentAlert(message: $0) }
@@ -1342,6 +1346,23 @@ final class CarPlayCoordinator: NSObject {
             primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
             secondaryAction: nil,
             duration: 10)
+        mapTemplate.present(navigationAlert: alert, animated: true)
+    }
+
+    /// 初めて走る区間の手前で、操作を求めない短いカードを出す。
+    /// 次の行き先を選んでいるあいだは案内セッション自体を畳んでいるので出さない。
+    private func presentNewRoadAhead(distance: CLLocationDistance) {
+        guard navigationSession != nil, navigation.currentRoute != nil else { return }
+        let subtitle = distance <= VoicePromptScheduler.imminentThreshold
+            ? String(localized: "この先から")
+            : String(localized: "約\(Formatters.distanceText(distance))先から")
+        let alert = CPNavigationAlert(
+            titleVariants: [String(localized: "まもなく初めての道です")],
+            subtitleVariants: [subtitle],
+            image: UIImage(systemName: "sparkles"),
+            primaryAction: CPAlertAction(title: "OK", style: .default) { _ in },
+            secondaryAction: nil,
+            duration: 8)
         mapTemplate.present(navigationAlert: alert, animated: true)
     }
 

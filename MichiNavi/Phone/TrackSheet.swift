@@ -35,13 +35,13 @@ struct TrackSheet: View {
 
                 Section {
                     Toggle(String(localized: "走った道を記録する"), isOn: $store.isRecording)
-                    Toggle(String(localized: "県境と初めての街を読み上げる"), isOn: $advisor.isEnabled)
+                    Toggle(String(localized: "初めての道や街を読み上げる"), isOn: $advisor.isEnabled)
                     Button(String(localized: "記録を消す"), role: .destructive) { isClearing = true }
                         .disabled(store.tracks.isEmpty && store.visits.isEmpty)
                 } footer: {
-                    // **記録を切ると読み上げも止まる**（市区町村を引くのは記録の側）。
-                    // 画面に出さないと、切ったことと鳴らないことが結びつかない。
-                    Text(String(localized: "都道府県をまたいだときと、初めて走る市区町村に入ったときに声で知らせます。記録を切ると鳴りません"))
+                    // **記録を切ると県境・街だけ止まる**（市区町村を引くのは記録の側）。
+                    // 道は保存済みの履歴と比べられるので、記録の入り切りとは分ける。
+                    Text(String(localized: "初めての道へ入る前と、都道府県をまたいだとき、初めて走る市区町村に入ったときに声で知らせます。記録を切ると県境・街の通知は止まります"))
                 }
             }
             .navigationTitle(String(localized: "走った道"))

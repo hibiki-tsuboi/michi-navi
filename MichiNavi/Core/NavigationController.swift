@@ -35,6 +35,9 @@ final class NavigationController: ObservableObject {
     @Published private(set) var progress: RouteProgress?
     @Published private(set) var lastError: String?
 
+    /// 走行中の「初めての道」。iPhone はこれを残り時間の下へ添える。
+    @Published private(set) var newRoadProgress: RouteNovelty.Profile.Progress?
+
     /// 直近の到着で得た「ひと走りの収穫」。iPhone の待機画面に、閉じるまで残す。
     ///
     /// **到着の瞬間に確定した値を持つ。** `finishTrip()` で `activeRoute` が nil になると
@@ -107,6 +110,8 @@ final class NavigationController: ObservableObject {
     let arrived = PassthroughSubject<NavRoute, Never>()
     /// 経由地を通過した瞬間に流れる。案内はそのまま続く。
     let waypointReached = PassthroughSubject<Place, Never>()
+    /// 初めての道まで 500m 以内へ入った瞬間。音声と CarPlay は 1 回だけ受け取る。
+    let newRoadAhead = PassthroughSubject<CLLocationDistance, Never>()
 
     /// 到着予定を測り直した瞬間に流れる。**測るために引いた経路も一緒に渡す。**
     ///
@@ -164,6 +169,15 @@ final class NavigationController: ObservableObject {
     /// 到着予定を最後に測り直した時刻。
     private var lastTravelTimeRefresh: Date?
     private var isRefreshingTravelTime = false
+
+    /// ひと走りの開始時点の履歴。走行中に `TrackStore` が伸びても、初めてだった区間を
+    /// 途中で「走行済み」へ変えない。引き直しもこの同じ控えで測る。
+    private var noveltyBaselineTracks: [TrackStore.Track]?
+    /// リルート前に走った初めての道。経路の距離基準が 0 に戻っても表示の数字を戻さない。
+    private var newRoadDistanceBeforeRoute: CLLocationDistance = 0
+    private var newRoadDistanceOnRoute: CLLocationDistance = 0
+    /// リルート後も同じ区間を二度知らせない、ひと走りぶんの門番。
+    private var newRoadAnnouncementGate = RouteNovelty.AnnouncementGate()
 
     private init() {
         location.$location
@@ -300,6 +314,9 @@ final class NavigationController: ObservableObject {
             lastError = NavigationError.offline.errorDescription
             return
         }
+        // **計算を投げる前に控える。** 返事を待っているあいだにも走行記録は増える。
+        // 案内中なら、ひと走りの開始時に取った控えをそのまま使う。
+        if activeRoute == nil { noveltyBaselineTracks = TrackStore.shared.tracks }
         routingTask?.cancel()
         lastError = nil
         phase = .calculating(destination)
@@ -339,12 +356,16 @@ final class NavigationController: ObservableObject {
         guard let origin = location.location?.coordinate else {
             throw NavigationError.noCurrentLocation
         }
+        // `await` の前に値型の配列を控える。計算中に `TrackStore` が伸びても、この問い合わせの
+        // 候補どうしは同じ時点の履歴で比べる。
+        let noveltyTracks = noveltyBaselineTracks ?? TrackStore.shared.tracks
         var routes = try await routeProvider.routes(from: origin, via: waypoints, to: destination)
-        let percentages = RouteNovelty.percentages(for: routes, tracks: TrackStore.shared.tracks)
+        let novelty = RouteNovelty.analyses(for: routes, tracks: noveltyTracks)
         let characters = RouteCharacter.tags(for: routes)
         let departure = Date()
         for index in routes.indices {
-            routes[index].newRoadPercentage = percentages[index]
+            routes[index].newRoadPercentage = novelty[index].percentage
+            routes[index].newRoadProfile = novelty[index].profile
             routes[index].driveBrief = DriveBrief.make(for: routes[index],
                                                        comparisonTags: characters[index],
                                                        departure: departure)
@@ -360,6 +381,19 @@ final class NavigationController: ObservableObject {
     /// よらず同じ。既定を `.started` にしてあるのは、外から呼ぶ入口（提示画面の開始
     /// ボタン）がそれだから。
     func startNavigation(with route: NavRoute, reason: RouteChangeReason = .started) {
+        let isContinuingTrip = activeRoute != nil
+        if isContinuingTrip {
+            // 引き直し・立ち寄り・利用者の切り替え。新しい経路は現在地を 0m として始まるので、
+            // それまでの収穫を先に確定して足す。
+            newRoadDistanceBeforeRoute += newRoadDistanceOnRoute
+        } else {
+            // 外から計算済みの経路を直に渡された場合にも、ここで控えを用意する。
+            noveltyBaselineTracks = noveltyBaselineTracks ?? TrackStore.shared.tracks
+            newRoadDistanceBeforeRoute = 0
+            newRoadAnnouncementGate = RouteNovelty.AnnouncementGate()
+        }
+        newRoadDistanceOnRoute = 0
+        newRoadProgress = nil
         // 前の到着カードを次のひと走りへ持ち越さない。検索しただけでは消さず、
         // 実際に発進すると決めたところを区切りにする。
         arrivalHarvest = nil
@@ -418,6 +452,11 @@ final class NavigationController: ObservableObject {
         activeRoute = nil
         announcedStepIndex = nil
         progress = nil
+        newRoadProgress = nil
+        noveltyBaselineTracks = nil
+        newRoadDistanceBeforeRoute = 0
+        newRoadDistanceOnRoute = 0
+        newRoadAnnouncementGate = RouteNovelty.AnnouncementGate()
         lastFix = nil
         hasReportedDeadReckoningStall = false
         deadReckoningTimer?.invalidate()
@@ -504,6 +543,8 @@ final class NavigationController: ObservableObject {
             return
         }
 
+        updateNewRoadProgress(on: route, progress: updated)
+
         // **ここから下は案内の段階でだけ。** 指示の差し替えは CarPlay の案内カード
         // （選んでいるあいだは畳んである）を宛先にしており、到着予定の測り直しは結果を
         // `.navigating` でしか受け取らない（`MKDirections` を投げるだけ無駄になる）。
@@ -538,12 +579,21 @@ final class NavigationController: ObservableObject {
                 lastTravelTimeRefresh = Date()
             }
 
-            guard let candidate = try? await routeProvider.currentBestRoute(
+            guard var candidate = try? await routeProvider.currentBestRoute(
                 from: origin,
                 via: remainingWaypoints(of: route),
                 to: route.destination) else { return }
             // 待っているあいだに引き直しが挟まっていたら、測った値は前の経路のもの。捨てる。
             guard case let .navigating(current) = phase, current.id == route.id else { return }
+
+            // 渋滞回避の提案からこの経路へ切り替えることがある。通常の `calculateRoutes` を
+            // 通らない候補にも、ひと走りの開始時点の履歴で区間表を載せておく。
+            let novelty = RouteNovelty.analyses(
+                for: [candidate],
+                tracks: noveltyBaselineTracks ?? TrackStore.shared.tracks
+            )[0]
+            candidate.newRoadPercentage = novelty.percentage
+            candidate.newRoadProfile = novelty.profile
 
             // **差し替える前に控える。** `applyMeasuredTimeRemaining` を通したあとの
             // 見込みは測った値そのものになるので、渋滞かどうかを見る差が消える。
@@ -622,11 +672,42 @@ final class NavigationController: ObservableObject {
         }
 
         progress = updated
+        updateNewRoadProgress(on: route, progress: updated)
         // `handle(location:)` と同じ切り分け。表示と読み上げは進めるが、案内カードへの
         // 差し替えは画面が出ているあいだだけ。
         guard isNavigatingPhase else { return }
         announceIfNeeded(on: route, stepIndex: updated.stepIndex)
     }
+
+    /// 凍結した区間表を、現在の残距離へ当てる。表示は毎回更新し、声と CarPlay の合図は
+    /// 500m 以内へ入った最初の 1 回だけ流す。
+    private func updateNewRoadProgress(on route: NavRoute, progress: RouteProgress) {
+        guard let profile = route.newRoadProfile, !profile.stretches.isEmpty else {
+            newRoadProgress = nil
+            newRoadDistanceOnRoute = 0
+            return
+        }
+
+        newRoadDistanceOnRoute = profile.newDistanceTravelled(remaining: progress.distanceRemaining)
+        switch profile.progress(remaining: progress.distanceRemaining) {
+        case let .exploring(distance):
+            newRoadProgress = .exploring(distance: newRoadDistanceBeforeRoute + distance)
+        case let .approaching(distance):
+            newRoadProgress = .approaching(distance: distance)
+        case nil:
+            newRoadProgress = nil
+        }
+
+        guard let approaching = profile.approaching(remaining: progress.distanceRemaining,
+                                                    within: Self.newRoadAnnouncementDistance),
+              newRoadAnnouncementGate.shouldAnnounce(approaching.stretch,
+                                                       hasJoinedRoute: progress.hasJoinedRoute) else { return }
+        VisitLog.newRoadAhead(distance: approaching.distance)
+        newRoadAhead.send(approaching.distance)
+    }
+
+    /// 市街地でおよそ 30〜60 秒手前。曲がり角が近ければ `VoiceGuidance` が声だけ見送る。
+    private static let newRoadAnnouncementDistance: CLLocationDistance = 500
 
     /// 区間が進んだ間にあった経由地を、通過したものとして知らせる。
     /// GPS が飛んで一度に複数の区間を跨いでも取りこぼさないよう、範囲で見る。

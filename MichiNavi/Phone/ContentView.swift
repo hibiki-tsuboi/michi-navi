@@ -282,6 +282,12 @@ struct ContentView: View {
                         Text(String(localized: "\(Formatters.distanceText(progress.distanceRemaining))・\(Formatters.arrivalText(progress.arrivalDate)) 着"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let newRoad = navigation.newRoadProgress {
+                            Label(newRoadText(newRoad), systemImage: "sparkles")
+                                .font(.caption)
+                                .foregroundStyle(.pink)
+                                .lineLimit(1)
+                        }
                     }
                 }
                 Spacer()
@@ -289,6 +295,15 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
             }
             .panel()
+        }
+    }
+
+    private func newRoadText(_ progress: RouteNovelty.Profile.Progress) -> String {
+        switch progress {
+        case let .approaching(distance):
+            String(localized: "初めての道まで\(Formatters.distanceText(distance))")
+        case let .exploring(distance):
+            String(localized: "初めての道を\(Formatters.distanceText(distance))走行")
         }
     }
 

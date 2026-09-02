@@ -27,6 +27,8 @@ enum VoicePrompt: Equatable {
     case prefecture(name: String, firstCity: String?)
     /// 初めて走る市区町村に入ったとき。同上。
     case firstCity(name: String)
+    /// まもなく、案内開始時点では走ったことのなかった道へ入る。
+    case newRoad(distance: CLLocationDistance)
     /// 到着したときの「収穫」（`TripSummary`）。**この走行で初めて通った土地だけを数える。**
     /// 初めてが 1 つも無ければそもそも作られないので、ここに 0 は来ない。
     case harvest(prefecture: String?, cities: Int, totalPrefectures: Int, totalCities: Int)
@@ -57,6 +59,11 @@ enum VoicePrompt: Equatable {
             // 「初めてです」ではなく「走るのは初めてです」。歩いて訪ねたことまでは
             // こちらに分からないので、言い切れるところで止める。
             return String(localized: "\(name)を走るのは初めてです")
+        case let .newRoad(distance):
+            guard distance > VoicePromptScheduler.imminentThreshold else {
+                return String(localized: "まもなく初めて走る道に入ります")
+            }
+            return String(localized: "\(Formatters.spokenDistance(distance))先から、初めて走る道です")
         case let .harvest(prefecture, cities, totalPrefectures, totalCities):
             // **1 回につきひと言**（`VisitAdvisor.Notice` と同じ決めごと）。県と街の
             // 両方が初めてでも 2 つ並べない。県のほうを先に取るのは、数十キロに 1 回しか

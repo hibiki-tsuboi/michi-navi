@@ -1,11 +1,12 @@
+import CoreLocation
 import Foundation
 import os
 
-/// 県境・初めての街の読み上げが「出た／出なかった」の理由だけを残す。
+/// 県境・初めての街・初めての道の読み上げが「出た／出なかった」の理由だけを残す。
 ///
-/// 設けている理由は [ParkingLog] と同じで、**出なかったときに画面には何も出ない**ため。
-/// しかもこれは**声だけの機能**なので、黙ったときの見え方は「何も起きていない」1 種類しか
-/// ない。次の 6 つが全部それになる。
+/// 設けている理由は [ParkingLog] と同じで、**声が出なかった理由は画面から分からない**ため。
+/// 県境と街は声だけで、道も進行表示からは音声を見送ったか判別できない。次の 6 つが
+/// どれも「声が出ない」という同じ見え方になる。
 ///
 ///   - `TrackStore.isRecording` が切り、または圏外で市区町村を引けていない
 ///   - まだ 3km 走っていない（`TrackStore.geocodeInterval`）
@@ -39,7 +40,12 @@ enum VisitLog {
         }
     }
 
-    /// 言うことが無かった。`reason` は `disabled` / `too-soon` / `same-ground`。
+    /// 初めての道が予告距離へ入った。声が見送られても、判定まで来たことはここで分かる。
+    static func newRoadAhead(distance: CLLocationDistance) {
+        emit("new-road ahead=\(Int(distance))m")
+    }
+
+    /// 言うことが無かった。`reason` は `disabled(-new-road)` / `too-soon` / `same-ground`。
     static func skipped(_ reason: String) {
         emit("skipped(\(reason))")
     }

@@ -68,6 +68,17 @@ final class VoiceGuidance: NSObject {
             .sink { [weak self] in self?.speak(.waypoint(name: $0.name)) }
             .store(in: &cancellables)
 
+        navigation.newRoadAhead
+            .sink { [weak self] distance in
+                // 県境・初めての街と同じ題材なので、声の入り切りを分けない。
+                guard VisitAdvisor.shared.isEnabled else {
+                    VisitLog.skipped("disabled-new-road")
+                    return
+                }
+                self?.announce(.newRoad(distance: distance))
+            }
+            .store(in: &cancellables)
+
         RestReminder.shared.suggestion
             .sink { [weak self] in self?.speak(.rest(hours: 2)) }
             .store(in: &cancellables)
@@ -102,7 +113,7 @@ final class VoiceGuidance: NSObject {
                         distance: remaining <= VoicePromptScheduler.imminentThreshold ? nil : remaining))
     }
 
-    // MARK: - 案内とは無関係なひと言
+    // MARK: - 案内指示より優先度の低いひと言
 
     /// 県境・初めての街を読む（`VisitAdvisor`）。**待たせず、溜めず、割り込まない。**
     ///
@@ -116,6 +127,11 @@ final class VoiceGuidance: NSObject {
         case let .firstCity(name): prompt = .firstCity(name: name)
         }
 
+        announce(prompt)
+    }
+
+    /// 初めての土地についての短いひと言。県境・街・道で、案内音声を邪魔しない条件を揃える。
+    private func announce(_ prompt: VoicePrompt) {
         // **抱えない。** `speak(_:)` は聞き取り中の到着・経由地通過を `pendingPrompt` へ
         // 溜めるが、県境は溜めても意味が無い（聞き取りが終わるころにはとうに過ぎている）。
         // しかも溜めれば、抱えていた到着のひと言を押しのけることになる。
@@ -142,7 +158,7 @@ final class VoiceGuidance: NSObject {
         speak(prompt)
     }
 
-    /// 次の曲がり角までこれより近ければ、案内と無関係なひと言は見送る。
+    /// 次の曲がり角までこれより近ければ、探索についてのひと言は見送る。
     private static let quietDistance: CLLocationDistance = 500
 
     /// 到着のひと言に続けて、ひと走りの収穫を読む。

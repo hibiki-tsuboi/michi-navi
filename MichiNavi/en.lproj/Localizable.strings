@@ -207,3 +207,12 @@
 "%lldか所" = "%lld";
 "通算%lld都道府県・%lld市区町村" = "%1$lld regions · %2$lld towns total";
 "走った道を見る" = "See roads driven";
+"まもなく初めて走る道に入ります" = "You're about to enter a road that's new to you";
+"%@先から、初めて走る道です" = "In %@, you'll enter a road that's new to you";
+"まもなく初めての道です" = "New road ahead";
+"約%@先から" = "Starting in about %@";
+"この先から" = "Starting just ahead";
+"初めての道まで%@" = "New road in %@";
+"初めての道を%@走行" = "%@ of new roads explored";
+"初めての道や街を読み上げる" = "Announce new roads and towns";
+"初めての道へ入る前と、都道府県をまたいだとき、初めて走る市区町村に入ったときに声で知らせます。記録を切ると県境・街の通知は止まります" = "Speaks before you enter a new road, cross into a new region, or drive through a town for the first time. Turning off recording stops region and town announcements.";

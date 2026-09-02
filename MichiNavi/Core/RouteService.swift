@@ -43,6 +43,10 @@ struct NavRoute: Identifiable {
     /// 入れる。経路提供側やテストが直接作った時点ではまだ測っていないので nil。
     var newRoadPercentage: Int? = nil
 
+    /// 走行中に「初めての道まで」と「初めての道を走行中」を出すための区間。
+    /// 割合と同じ履歴スナップショットから作るため、走行中に履歴が増えても変わらない。
+    var newRoadProfile: RouteNovelty.Profile? = nil
+
     /// 案内開始前に見せる、この経路の要点。走行履歴との照合が終わったあとに作る。
     var driveBrief: DriveBrief? = nil
 }

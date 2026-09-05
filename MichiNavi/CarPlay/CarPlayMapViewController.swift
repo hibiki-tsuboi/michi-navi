@@ -79,6 +79,11 @@ final class CarPlayMapViewController: UIViewController {
     /// 昼の地図では鉄道の線に紛れて消える。**マゼンタだけが地図の側で使われていない。**
     private static let trackColor = UIColor(red: 0.85, green: 0.2, blue: 0.6, alpha: 0.7)
     /// 走った道の太さ。**経路より細く**（案内の線が主役で、こちらは下地）。
+    ///
+    /// 2026-09-05 に経路を 10 から 8 へ落としたときも**この値は動かしていない**。
+    /// 比は 2.5 倍から 2 倍に縮むが、半分の太さ・半透明・地図が使っていない色の 3 つで
+    /// 下地として読めるはず、という判断。**まだ CarPlay の地図に敷いたところを
+    /// 見ていない**ので、見ていない値を推測で動かさない（→「未実装」）。
     private static let trackWidth: CGFloat = 4
 
     /// 経由地と目的地のピン。広い画面でだけ出す。
@@ -707,7 +712,14 @@ extension CarPlayMapViewController: MKMapViewDelegate {
             renderer.strokeColor = polyline === travelledOverlay ? Self.travelledColor : UIColor.systemBlue
             // 経路と、その上に重ねる済んだぶんは**同じ太さでなければならない。**
             // 細いと下の青が縁として残り、太いと通っていないところまで塗る。
-            renderer.lineWidth = style.isWide ? 10 : 8
+            //
+            // 2026-09-05 に 10 / 8 から落とした（実機の CarPlay で「太い」と言われた）。
+            // 遠い画面なので iPhone の 6pt より太くするのは正しいが、**上限は
+            // 「地図の道路を覆わないこと」**——走行縮尺（`cameraDistance` 500m）では
+            // 1pt がおよそ 0.5m なので、10pt は 2 車線ぶんの幅になり、交差点の形と
+            // 分岐の角度が線の下に隠れる。`JunctionImage` が拡大図で足そうとしている
+            // ものを、地図の側で消すことになっていた。
+            renderer.lineWidth = style.isWide ? 8 : 6
         }
         renderer.lineCap = .round
         renderer.lineJoin = .round

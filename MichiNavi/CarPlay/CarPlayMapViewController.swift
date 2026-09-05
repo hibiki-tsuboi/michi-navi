@@ -54,7 +54,7 @@ final class CarPlayMapViewController: UIViewController {
     private let mapView = MKMapView()
     private var routeOverlay: MKPolyline?
     /// 通ってきたところ。経路の線の**上に**重ねて塗り替える。
-    private var travelledOverlay: MKPolyline?
+    private var travelledOverlay: TravelledPolyline?
     /// 最後に塗り替えた地点までの距離。これだけ進むまで引き直さない。
     private var travelledDistance: CLLocationDistance?
 
@@ -265,7 +265,7 @@ final class CarPlayMapViewController: UIViewController {
         let coordinates = route.travelled(remaining: progress.distanceRemaining)
         guard coordinates.count >= 2 else { return }
 
-        let line = MKPolyline(coordinates: coordinates, count: coordinates.count)
+        let line = TravelledPolyline(coordinates: coordinates, count: coordinates.count)
         // 経路より**あとに**足す。同じ level なら後から足したほうが上に描かれる。
         mapView.addOverlay(line, level: .aboveRoads)
         travelledOverlay = line
@@ -709,7 +709,7 @@ extension CarPlayMapViewController: MKMapViewDelegate {
             renderer.strokeColor = Self.trackColor
             renderer.lineWidth = Self.trackWidth
         } else {
-            renderer.strokeColor = polyline === travelledOverlay ? Self.travelledColor : UIColor.systemBlue
+            renderer.strokeColor = polyline is TravelledPolyline ? Self.travelledColor : UIColor.systemBlue
             // 経路と、その上に重ねる済んだぶんは**同じ太さでなければならない。**
             // 細いと下の青が縁として残り、太いと通っていないところまで塗る。
             //
@@ -733,7 +733,16 @@ struct TrackChanges: Equatable {
     var remove: Set<UUID> = []
 }
 
-/// 走った道の線。**型で見分ける**ために分けてある。`travelledOverlay` のように
-/// `===` で照合する手もあるが、あちらは 1 本しかないのに対しこちらは走行の数だけあり、
-/// `rendererFor` は線 1 本ごとに呼ばれるので、照合すると線の数の 2 乗になる。
+/// 走った道の線。**型で見分ける**ために分けてある。保持している線と `===` で
+/// 照合する手もあるが、こちらは走行の数だけあり、`rendererFor` は線 1 本ごとに
+/// 呼ばれるので、照合すると線の数の 2 乗になる。
 final class TrackPolyline: MKPolyline {}
+
+/// 通ってきたところの線。**これも型で見分ける。** 1 本しかないので保持している
+/// 線と `===` で照合していたが、**それでは色が付かなかった**（2026-09-05 まで
+/// 案内中ずっと青いままだった）。`MKMapView` は **`addOverlay` の内側で同期的に**
+/// `rendererFor` を呼ぶので、足したあとに代入する書き方では**色を決める瞬間には
+/// まだ nil**。しかもレンダラはキャッシュされるため、あとで代入しても直らない。
+/// 代入を先へ動かすだけでも通るが、順序でしか守れない決まりをコメントに預けるより、
+/// 型にして順序と無関係にするほうが確実（`TrackPolyline` と同じ形になる）。
+final class TravelledPolyline: MKPolyline {}

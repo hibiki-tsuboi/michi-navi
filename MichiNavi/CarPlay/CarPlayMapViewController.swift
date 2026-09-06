@@ -94,6 +94,7 @@ final class CarPlayMapViewController: UIViewController {
         didSet {
             guard oldValue != isFollowingUser else { return }
             onFollowingChanged?(isFollowingUser)
+            onNavigationViewChanged?()
         }
     }
 
@@ -102,8 +103,17 @@ final class CarPlayMapViewController: UIViewController {
     /// 切り替わった瞬間に貼り直さないと「追従が外れているのに戻すボタンが無い」が起きる。
     var onFollowingChanged: ((Bool) -> Void)?
 
+    /// 全体表示・パン・縮小からナビへ戻せる状態が変わった合図。
+    var onNavigationViewChanged: (() -> Void)?
+
+    var needsNavigationReturn: Bool {
+        !isFollowingUser || cameraDistanceIsStale || cameraDistance > navigationCameraDistance
+    }
+
     /// 追従時のカメラ高度。ズームボタンとピンチで上下する。
     private var cameraDistance: CLLocationDistance
+    /// 初期の走行縮尺、または利用者がさらに近づけた縮尺。ここから引いたら復帰ボタンを出す。
+    private var navigationCameraDistance: CLLocationDistance
     private let minimumCameraDistance: CLLocationDistance = 200
     private let maximumCameraDistance: CLLocationDistance = 20_000
 
@@ -167,6 +177,7 @@ final class CarPlayMapViewController: UIViewController {
         self.style = style
         // ダッシュボードは面積が小さいので、同じ高度だと何も読み取れない。近づける。
         cameraDistance = style.isWide ? 500 : 300
+        navigationCameraDistance = cameraDistance
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -458,7 +469,16 @@ final class CarPlayMapViewController: UIViewController {
     /// 押した人は「いまの案内へ戻せ」と言っているのであって、戻る途中を見たいのではない。
     /// `follow` の毎秒の更新は動かしたままにする（あちらは 1 秒ぶんの隙間を埋めるもので、
     /// 止めると自車が飛び飛びに動く）。
-    func recenter() {
+    /// `zoomToMaximum` は「ナビに戻る」からだけ指定する。現在地と縮尺をまとめて戻す。
+    func recenter(zoomToMaximum: Bool = false) {
+        let previouslyNeededReturn = needsNavigationReturn
+        if zoomToMaximum {
+            cameraDistance = minimumCameraDistance
+            navigationCameraDistance = minimumCameraDistance
+            cameraDistanceIsStale = false
+            // 基準を nil にするとピンチの続きをタップと取り違えるので、距離だけ寄せる。
+            if zoomBaseDistance != nil { zoomBaseDistance = minimumCameraDistance }
+        }
         isFollowingUser = true
         abandonOverview()
         isRotatingByGesture = false
@@ -467,7 +487,13 @@ final class CarPlayMapViewController: UIViewController {
         lastPitchCenter = nil
         if let location = LocationService.shared.location {
             follow(location: location, animated: false)
+        } else if zoomToMaximum {
+            // 次の測位までのあいだも縮小したままにしない。測位が届けば現在地へ追従する。
+            let camera = mapView.camera
+            camera.centerCoordinateDistance = cameraDistance
+            mapView.setCamera(camera, animated: false)
         }
+        if previouslyNeededReturn != needsNavigationReturn { onNavigationViewChanged?() }
     }
 
     func zoomIn() {
@@ -502,7 +528,9 @@ final class CarPlayMapViewController: UIViewController {
     /// 傾いた地図では 2 つが `cos(pitch)` ぶんずれる。混ぜると、ピンチを始めた瞬間に
     /// 縮尺が跳ねる。
     private func setCameraDistance(_ distance: CLLocationDistance, animated: Bool = true) {
+        let previouslyNeededReturn = needsNavigationReturn
         cameraDistance = min(max(distance, minimumCameraDistance), maximumCameraDistance)
+        navigationCameraDistance = min(navigationCameraDistance, cameraDistance)
         cameraDistanceIsStale = false
         abandonOverview()
         if let location = LocationService.shared.location, isFollowingUser {
@@ -512,6 +540,7 @@ final class CarPlayMapViewController: UIViewController {
             camera.centerCoordinateDistance = cameraDistance
             mapView.setCamera(camera, animated: animated)
         }
+        if previouslyNeededReturn != needsNavigationReturn { onNavigationViewChanged?() }
     }
 
     /// パン操作。指のドラッグ（タッチ対応の車）とノブ／トラックパッドの方向入力の

@@ -192,6 +192,7 @@ final class CarPlayCoordinator: NSObject {
         window.rootViewController = mapViewController
         // 追従が入り切りしたら、その枠のボタンを現在地 ⇄ パンで貼り替える。
         mapViewController.onFollowingChanged = { [weak self] _ in self?.refreshMapButtons() }
+        mapViewController.onNavigationViewChanged = { [weak self] in self?.refreshNavigationViewButton() }
 
         let configuration = CPSessionConfiguration(delegate: self)
         sessionConfiguration = configuration
@@ -424,9 +425,9 @@ final class CarPlayCoordinator: NSObject {
     /// **ここは指が触れている最中にも通る**。`recenter()` が進行中の回転・傾けの基準を
     /// 捨てるので、必ずログを残す。残さないとジェスチャの行だけを見ても
     /// 「急に効かなくなった」理由が読めない。
-    private func recenterMap(_ reason: String) {
+    private func recenterMap(_ reason: String, zoomToMaximum: Bool = false) {
         stopGlide()
-        mapViewController.recenter()
+        mapViewController.recenter(zoomToMaximum: zoomToMaximum)
         CarPlayGestureLog.camera("recenter(\(reason))", camera: mapViewController.cameraState())
     }
 
@@ -1162,7 +1163,7 @@ final class CarPlayCoordinator: NSObject {
         mapTemplate.mapButtons = mapButtons
         // ナビゲーションバーは左右 2 つずつが上限。マップボタンは 4 つで埋まっている
         // （しかもパン UI に入ると 2 つ落ちる）ので、音声はこちらへ置く。
-        mapTemplate.leadingNavigationBarButtons = [voiceButton, overviewButton]
+        mapTemplate.leadingNavigationBarButtons = [voiceButton, navigationViewButton]
         mapTemplate.trailingNavigationBarButtons = [repeatButton, endNavigationButton]
     }
 
@@ -1191,6 +1192,12 @@ final class CarPlayCoordinator: NSObject {
     private func refreshMapButtons() {
         guard !mapTemplate.isPanningInterfaceVisible else { return }
         mapTemplate.mapButtons = mapButtons
+    }
+
+    /// 縮小しても追従は続くので、追従の入り切りだけでなく縮尺の変化でも貼り直す。
+    private func refreshNavigationViewButton() {
+        guard lastPhaseKind == .navigating, !mapTemplate.isPanningInterfaceVisible else { return }
+        mapTemplate.leadingNavigationBarButtons = [voiceButton, navigationViewButton]
     }
 
     private func toggleMapOrientation() {
@@ -1237,9 +1244,19 @@ final class CarPlayCoordinator: NSObject {
         }
     }
 
-    private var overviewButton: CPBarButton {
-        CPBarButton(title: String(localized: "全体表示")) { [weak self] _ in
-            self?.showOverview()
+    /// 同じ場所で「全体表示」と「ナビに戻る」を切り替え、拡大の連打を不要にする。
+    private var navigationViewButton: CPBarButton {
+        let shouldReturn = mapViewController.needsNavigationReturn
+        let title = shouldReturn ? String(localized: "ナビに戻る") : String(localized: "全体表示")
+        return CPBarButton(title: title) { [weak self] _ in
+            guard let self else { return }
+            if shouldReturn {
+                stopSustainedPan()
+                lastZoomStep = nil
+                recenterMap("navigation button", zoomToMaximum: true)
+            } else {
+                showOverview()
+            }
         }
     }
 

@@ -121,10 +121,10 @@ final class CarPlayRouteSharing {
             let destination = leg.isHidden
                 ? Self.waypoint(at: leg.destination.coordinate, name: String(localized: "探索ドライブ"))
                 : Self.waypoint(for: leg.destination)
-            // 「いま向かっている指示」は案内カードと同じ切り出し方に揃える。
-            // まだ入っていない区間では、その区間の先頭から数える。
+            // 案内カードと同じく、現在の指示は 1 件だけ渡す。
+            // まだ入っていない区間では、その区間の先頭を使う。
             let from = min(max(stepIndex, leg.range.lowerBound), leg.range.upperBound)
-            let upcoming = Array(maneuvers[from...leg.range.upperBound].prefix(2))
+            let upcoming = [maneuvers[from]]
 
             let segment = Self.withCoordinates(Self.coordinates(of: route, in: leg.range)) { points, count in
                 CPRouteSegment(__origin: origin,

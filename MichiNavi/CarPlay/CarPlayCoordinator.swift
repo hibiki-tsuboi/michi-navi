@@ -748,7 +748,7 @@ final class CarPlayCoordinator: NSObject {
               !routeManeuvers.isEmpty,
               maneuverRouteID == route.id else { return false }
         let stepIndex = min(progress?.stepIndex ?? 0, routeManeuvers.count - 1)
-        let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
+        let upcoming = [routeManeuvers[stepIndex]]
         let estimates = tripEstimates(for: route, progress: progress)
 
         // **`resumeTrip` は `.rerouting` で止めたときしか受け付けない。**
@@ -898,12 +898,12 @@ final class CarPlayCoordinator: NSObject {
         }
     }
 
-    /// 次の指示（と、その次）を CarPlay の案内カードに載せる。
-    /// CarPlay は 2 件までしか表示しないので 2 件で切る。
+    /// 次に行う指示だけを CarPlay の案内カードに載せる。
+    /// 2 件目は下段に先読みとして出て、いまの指示と混同しやすいため 1 件に絞る。
     private func showManeuvers(from stepIndex: Int) {
         guard routeManeuvers.indices.contains(stepIndex) else { return }
 
-        let upcoming = Array(routeManeuvers[stepIndex...].prefix(2))
+        let upcoming = [routeManeuvers[stepIndex]]
         navigationSession?.upcomingManeuvers = upcoming
         // いま走っている道の名前。**車のメーター・HUD にしか出ない。**
         // 拾えなかった step では空にする（前の道の名前を残すと、曲がったあとも

@@ -947,7 +947,9 @@ CarPlay 層は触らずに済む設計。
     が普通の形で、走行中に青いインジケータが出るのが正しい姿。
   - **背景モードを外さないこと。** 外すと `setNavigating` が例外になり、しかも落ちるのは
     案内を始めたときなので**気づくのは走り出してから**。`BackgroundModeTests` で止めている。
-- **CarPlay の `upcomingManeuvers` は 2 件までしか表示されない**ので 2 件で切っている。
+- **CarPlay の案内カードには次の指示を 1 件だけ表示する**。2 件目は下段に先読みとして
+  出て、いま行う指示と混同しやすい。通常更新・リルートからの再開・ルート共有の
+  `currentManeuvers` をすべて 1 件に揃える。全経路の `maneuvers` は削らない。
 - **自アプリが前面でないあいだ、指示と助言はバナーとして出る**。出すかどうかは
   `CPMapTemplateDelegate` の 3 つの callback で決められるが、**実装しているのは
   更新の可否だけ**（`shouldUpdateNotificationFor`）。

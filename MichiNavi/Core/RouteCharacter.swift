@@ -64,7 +64,7 @@ enum RouteCharacter {
         init(route: NavRoute) {
             let directions = route.steps.map { ManeuverDirection.inferred(from: $0.instruction) }
             rightTurns = directions.count(where: \.isRightTurn)
-            usesHighway = directions.contains(where: \.entersHighway)
+            usesHighway = route.steps.contains { ManeuverDirection.usesHighway(in: $0.instruction) }
             curvature = Self.curvature(of: route)
         }
 

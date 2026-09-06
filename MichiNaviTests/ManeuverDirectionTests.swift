@@ -6,6 +6,7 @@ import Testing
 /// **ここで決めた向きは画面のアイコンだけでなく `CPManeuver.maneuverType` として
 /// 車のメーター・HUD へも送られる**ので、外すと両方が同時にずれる。守っているのは
 /// 個々の語ではなく**並び順**で、規則は 2 つ（長い語を先に置く／道路名に現れる語を入れない）。
+@MainActor
 struct ManeuverDirectionTests {
     @Test("長い語を短い語より先に見る", arguments: [
         ("斜め右方向", ManeuverDirection.slightRight),
@@ -60,5 +61,59 @@ struct ManeuverDirectionTests {
     @Test("読めない指示文は unknown（無理に当てない）")
     func unknownStaysUnknown() {
         #expect(ManeuverDirection.inferred(from: "") == .unknown)
+    }
+
+    // 2026-09-06に東京→渋谷・八王子→小田原・横浜→つくばで取得したMapKitの文。
+    // 道路名の「高速」や方面名の「出口」を、入口・出口の操作と誤認していた。
+    @Test("実際のJCT・ランプの指示を道路名や方面と分ける", arguments: [
+        ("神田橋ランプで左方向 首都高速都心環状線入口へ", ManeuverDirection.onRamp),
+        ("竹橋JCTで左車線を走行して首都高速都心環状線（霞が関、中央道方面）へ", .keepLeft),
+        ("生麦JCTで右車線を走行して首都高速神奈川1号横羽線（羽田、生麦出口方面）へ", .keepRight),
+        ("谷町JCTで右車線を走行して渋谷、東名方面へ", .keepRight),
+        ("渋谷ランプで出口（玉川通り、山手通り方面）", .offRamp),
+        ("羽田ランプで左車線を走行して首都高速1号羽田線へ", .keepLeft),
+        ("相模原愛川ICで左車線を走行 国道468号入口へ", .onRamp),
+        ("荻窪ICで出口（荻窪、小田原市街方面）", .offRamp),
+        ("大手町で右方向 日比谷通り（本郷、首都高速方面）へ", .right),
+        ("東通り入口で右方向", .right),
+    ])
+    func highwayInstructions(instruction: String, expected: ManeuverDirection) {
+        #expect(ManeuverDirection.inferred(from: instruction) == expected)
+    }
+
+    @Test("高速の本線・分岐・入口・合流を区別する", arguments: [
+        ("東名高速道路を直進します", ManeuverDirection.straight),
+        ("東名高速道路に入ります", .onRamp),
+        ("中央自動車道に入ります", .onRamp),
+        ("海老名JCTで左方向 圏央道へ", .keepLeft),
+        ("分岐を右へ進む", .keepRight),
+        ("左車線を走行して羽田、生麦出口方面へ", .keepLeft),
+        ("Continue on Pacific Highway", .straight),
+        ("Keep left onto the freeway", .keepLeft),
+        ("Merge onto the highway", .merge),
+        ("Take the left ramp toward Tokyo", .onRamp),
+        ("Take exit 23 on the left toward Shibuya", .offRamp),
+        ("Keep right toward Exit 12", .keepRight),
+        ("Continue on Wright Parkway", .straight),
+        ("Turn left onto Wright Road", .left),
+        ("Continue on Left Lane", .straight),
+    ])
+    func separatesHighwayActions(instruction: String, expected: ManeuverDirection) {
+        #expect(ManeuverDirection.inferred(from: instruction) == expected)
+    }
+
+    @Test("出口の側は明記された場合だけ読む", arguments: [
+        ("左側の出口へ", ManeuverDirection.Side?.some(.left)),
+        ("右車線を走行して出口へ", .some(.right)),
+        ("Take exit 23 on the left toward Wright Road", .some(.left)),
+        ("Take the right exit toward Left Bank", .some(.right)),
+        ("渋谷ランプで出口（玉川通り、山手通り方面）", nil),
+        ("出口（右京方面）", nil),
+        ("左車線から右側の出口へ", nil),
+        ("Take exit 23 toward Right Lane", nil),
+        ("Take exit 23 onto Left Lane", nil),
+    ])
+    func readsOnlyExplicitSide(instruction: String, expected: ManeuverDirection.Side?) {
+        #expect(ManeuverDirection.side(in: instruction) == expected)
     }
 }

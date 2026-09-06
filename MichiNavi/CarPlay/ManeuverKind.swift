@@ -13,29 +13,35 @@ import UIKit
 /// 向きは表示以外にも使う（候補ルートの右折の数を数えるなど）ので、CarPlay の型と
 /// 一緒にしておけない。
 struct ManeuverKind {
-    /// 読み取った向き。**短縮形の指示文（`shortInstruction`）を作るのに要る**ので、
-    /// 読み替えたあとも捨てずに持っておく。捨てると呼ぶ側が推測をもう一度走らせることになり、
-    /// 同じ文から 2 通りの結果が出る余地を作ってしまう。
-    let direction: ManeuverDirection
     let symbolName: String
     let type: CPManeuverType
 
-    static func inferred(from instruction: String) -> ManeuverKind {
-        let direction = ManeuverDirection.inferred(from: instruction)
-        let appearance = appearance(for: direction)
-        return ManeuverKind(direction: direction,
-                            symbolName: appearance.symbolName,
-                            type: appearance.type)
+    init(_ instruction: ManeuverInstruction) {
+        let appearance = Self.appearance(for: instruction.direction, side: instruction.side)
+        symbolName = appearance.symbolName
+        type = appearance.type
     }
 
     /// どの規則にも当てはまらなかったときは、矢印を直進のまま出したいので
     /// 型も「いまの道をそのまま進む」に寄せて、画面と HUD の食い違いを避ける。
-    private static func appearance(for direction: ManeuverDirection) -> (symbolName: String, type: CPManeuverType) {
+    private static func appearance(for direction: ManeuverDirection,
+                                   side: ManeuverDirection.Side?) -> (symbolName: String, type: CPManeuverType) {
         switch direction {
         case .uTurn: ("arrow.uturn.down", .uTurn)
         case .roundabout: ("arrow.triangle.turn.up.right.circle", .enterRoundabout)
-        case .offRamp: ("arrow.triangle.turn.up.right", .offRamp)
-        case .onRamp: ("arrow.triangle.merge", .onRamp)
+        case .offRamp:
+            // 向き不明の出口に右矢印を付けない。分かる左右は車のメーターにも同じ意味で渡す。
+            switch side {
+            case .left: ("arrow.up.left", .highwayOffRampLeft)
+            case .right: ("arrow.up.right", .highwayOffRampRight)
+            case nil: ("road.lanes", .offRamp)
+            }
+        case .onRamp:
+            switch side {
+            case .left: ("arrow.up.left", .onRamp)
+            case .right: ("arrow.up.right", .onRamp)
+            case nil: ("road.lanes", .onRamp)
+            }
         case .merge: ("arrow.merge", .onRamp)
         // 車線の指示は矢印ではなく道路の記号にする。**斜め右折と見分けが付かないと
         // 分岐の手前でハンドルを切られる。** 型のほうも `.keepRight` があるので、

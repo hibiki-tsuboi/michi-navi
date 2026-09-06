@@ -89,6 +89,8 @@
 "全体表示" = "Overview";
 "ナビに戻る" = "Resume";
 "出口" = "Exit";
+"分岐" = "Junction";
+"方面" = "Toward";
 "出発" = "Depart";
 "切り替える" = "Switch";
 "初めての街を%lldか所通りました。通算%lldか所です" = "You drove through %1$lld new towns — %2$lld so far";

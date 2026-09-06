@@ -60,6 +60,22 @@ struct RouteCharacterTests {
         #expect(mentionsHighway == false)
     }
 
+    @Test("入口と分岐を区別しても高速上から始まる経路を下道にしない", arguments: [
+        "東名高速道路を直進します",
+        "竹橋JCTで左車線を走行して首都高速都心環状線へ",
+        "Continue on Pacific Highway",
+        "Keep left onto the freeway",
+        "渋谷ランプで出口（玉川通り方面）",
+    ])
+    func highwayDoesNotRequireAnEntrance(instruction: String) {
+        let highway = route(minutes: 10, metres: 6_000, instructions: [instruction])
+        let surface = route(minutes: 12, metres: 6_000,
+                            instructions: ["右方向 日比谷通り（本郷、首都高速方面）へ", "2番目の出口で出る"])
+        let tags = RouteCharacter.tags(for: [highway, surface])
+        #expect(tags[0].contains(String(localized: "高速を使う")))
+        #expect(tags[1].contains(String(localized: "下道のみ")))
+    }
+
     @Test("カーブの多さは距離で割って比べる（遠回りが必ず「カーブが多い」にならない）")
     func curvatureIsPerKilometre() {
         // **合計では長いほうが勝ち、1km あたりでは短いほうが勝つ**ように組んである。

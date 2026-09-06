@@ -6,14 +6,24 @@ enum RoadNameImage {
     private static let size = CGSize(width: 140, height: 100)
     private static let textArea = CGRect(x: 8, y: 30, width: 124, height: 62)
 
-    static func make(for roadName: String?, direction: ManeuverDirection) -> UIImage? {
+    static func make(for roadName: String?, direction: ManeuverDirection,
+                     signpost: ManeuverInstruction.Signpost? = nil) -> UIImage? {
         // 直進や到着で「〜へ」と出すと、別の道路へ曲がる指示に見えてしまう。
         switch direction {
         case .straight, .depart, .arrive, .unknown: return nil
         default: break
         }
-        guard let roadName, !roadName.isEmpty else { return nil }
-        let title = String(localized: "\(roadName)へ")
+        let title: String
+        let caption: String
+        if let signpost {
+            // 高速では道路名より、標識と照合する方面・出口名を優先する。
+            title = signpost.title
+            caption = signpost.caption
+        } else {
+            guard let roadName, !roadName.isEmpty else { return nil }
+            title = String(localized: "\(roadName)へ")
+            caption = String(localized: "進む道路")
+        }
         guard let layout = layout(for: title) else { return nil }
 
         let format = UIGraphicsImageRendererFormat.default()
@@ -29,8 +39,7 @@ enum RoadNameImage {
             border.lineWidth = 1
             border.stroke()
 
-            let caption = String(localized: "進む道路") as NSString
-            caption.draw(in: CGRect(x: 8, y: 8, width: 124, height: 18), withAttributes: [
+            (caption as NSString).draw(in: CGRect(x: 8, y: 8, width: 124, height: 18), withAttributes: [
                 .font: UIFont.systemFont(ofSize: 13, weight: .medium),
                 .foregroundColor: UIColor.white.withAlphaComponent(0.8),
                 .paragraphStyle: paragraphStyle(),
@@ -52,8 +61,14 @@ enum RoadNameImage {
             .compactMap { title.range(of: $0) }
             .first { $0.lowerBound > title.startIndex }
         let wrapped = suffix.map { String(title[..<$0.lowerBound]) + "\n" + title[$0.lowerBound...] }
+        let separator = title.indices.filter { "、・／/".contains(title[$0]) }
+            .min { abs(title.distance(from: title.startIndex, to: $0) - title.count / 2)
+                < abs(title.distance(from: title.startIndex, to: $1) - title.count / 2) }
+        let destinations = separator.map {
+            String(title[...$0]) + "\n" + title[title.index(after: $0)...]
+        }
         for lines in 1...2 {
-            let candidates = lines == 1 ? [title] : [wrapped, title].compactMap { $0 }
+            let candidates = lines == 1 ? [title] : [destinations, wrapped, title].compactMap { $0 }
             for candidate in candidates {
                 let text = candidate as NSString
                 for pointSize in stride(from: CGFloat(28), through: 20, by: -1) {

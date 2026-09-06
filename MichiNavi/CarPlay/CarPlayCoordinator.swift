@@ -927,68 +927,18 @@ final class CarPlayCoordinator: NSObject {
         }
     }
 
-    /// 指示文の道路番号を標識の画像に差し替えた文。番号が無ければ nil。
-    ///
-    /// 添付できるのは**テキストアタッチメントだけ**で、ほかの属性は CarPlay が剥がす
-    /// （ヘッダに明記）。色や字体を付けても消えるので、渡すのは画像 1 つに絞る。
-    private func attributedInstruction(for instruction: String) -> NSAttributedString? {
-        guard let found = RoadNumber.first(in: instruction),
-              let image = RoadShieldImage.make(for: found.road) else { return nil }
-
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        // 行の中で下がって見えないよう、少しだけ持ち上げる。
-        attachment.bounds = CGRect(x: 0, y: -4, width: image.size.width, height: image.size.height)
-
-        let result = NSMutableAttributedString(string: String(instruction[..<found.range.lowerBound]))
-        result.append(NSAttributedString(attachment: attachment))
-        result.append(NSAttributedString(string: String(instruction[found.range.upperBound...])))
-        return result
-    }
-
     private func makeManeuver(for step: NavStep,
                               at stepIndex: Int,
                               on route: NavRoute,
                               distance: CLLocationDistance) -> CPManeuver {
-        let kind = ManeuverKind.inferred(from: step.instruction)
-
-        let maneuver = CPManeuver()
+        let instruction = ManeuverInstruction(step.instruction)
+        let maneuver = ManeuverCard.make(for: instruction)
         // 出口の角度は、車のメーター・HUDへ渡すロータリーでだけ測る。
-        let junction = kind.direction == .roundabout
+        let junction = instruction.direction == .roundabout
             ? JunctionGeometry.make(for: route, stepIndex: stepIndex) : nil
-        apply(junction: junction, direction: kind.direction, to: maneuver)
-        // **候補は「長い順」に並べる。** CarPlay は先頭から見て**入るものを選ぶ**ので、
-        // 1 件しか渡さないと入らなかったときに省略される。地名と道路名を落とした
-        // 短縮形を後ろに置いておけば、狭い画面でも向きだけは必ず残る。
-        let short = kind.direction.shortInstruction
-        maneuver.instructionVariants = [step.instruction, short].compactMap { $0 }
-        // Dashboard と通知バナーは案内カードよりさらに狭いので、**短いほうを先に**する。
-        // 渡さなければ `instructionVariants` に落ちるだけなので、短縮形が作れないとき
-        // （向きが読めなかったとき）は触らない。
-        if let short {
-            maneuver.dashboardInstructionVariants = [short, step.instruction]
-            maneuver.notificationInstructionVariants = [short, step.instruction]
-        }
-        // 道路番号を標識の画像に差し替える（「国道156号を右方向」→「[156] を右方向」）。
-        //
-        // **見つかったときだけ渡す。** `attributedInstructionVariants` は
-        // `instructionVariants` より優先されるので、常に渡すと上の短縮形の落とし先が
-        // 効かなくなる。短縮形のぶんも同じ配列に入れて並びを保つ。
-        if let attributed = attributedInstruction(for: step.instruction) {
-            maneuver.attributedInstructionVariants = [attributed]
-                + [short].compactMap { $0 }.map { NSAttributedString(string: $0) }
-        }
-        maneuver.symbolImage = kind.image
-        // 画面のアイコンだけでなく、車のメーター・HUD へもこの型で送られる。
-        maneuver.maneuverType = kind.type
+        apply(junction: junction, direction: instruction.direction, to: maneuver)
         // ロータリーの回り方に効く。既定は右側通行なので、渡さないと日本では逆に描かれる。
         maneuver.trafficSide = DrivingSideLocator.shared.current.carPlaySide
-        // 曲がった先の道路名を大きく表示する。元の指示文も残し、交差点名や出口の情報を落とさない。
-        // Dashboardも同じ画像を使う。拾えない道路は画像を作らず、通常の案内だけにする。
-        let road = RoadName.first(in: step.instruction)
-        maneuver.junctionImage = RoadNameImage.make(for: road, direction: kind.direction)
-        if let road { maneuver.roadFollowingManeuverVariants = [road] }
-        CarPlayVehicleLog.roadName(road, from: step.instruction)
         // **距離と時間は同じ値から出す。** `distance` は走っている区間だけ「残り」に
         // なる（`currentDistanceToManeuver`）ので、時間のほうを step 全体で出すと組が
         // 食い違う。首都高の 4172m の区間で出口の 200m 手前にいると「200m ＝ 5 分」に

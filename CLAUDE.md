@@ -99,24 +99,24 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
-共有シングルトンは 18 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 19 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
 `NetworkMonitor.shared` / `RestReminder.shared` / `RangeAdvisor.shared` /
 `RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared` /
 `SunGlareAdvisor.shared` / `TrackStore.shared` / `VisitAdvisor.shared` /
-`TripSummary.shared`。
+`TripSummary.shared` / `SightseeingAdvisor.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 `RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` /
-`SunGlareAdvisor` / `VisitAdvisor` の 7 つは**助言を出すだけの層**で、`PassthroughSubject` で
+`SunGlareAdvisor` / `VisitAdvisor` / `SightseeingAdvisor` の 8 つは**助言を出すだけの層**で、`PassthroughSubject` で
 知らせるところまでしか持たない。出すかどうか・どう見せるかは各 UI が決める。案内そのものには
 一切触らないので、足しても状態遷移は変わらない。`AppDelegate` から `start()` を呼ぶ
 （`VoiceGuidance` と同じ理由で、シーンの寿命ではなくアプリの寿命に合わせる必要がある）。
-**購読先だけは 1 つ分かれる**——6 つは `NavigationController` を見るが、`VisitAdvisor` は
-`TrackStore` を見る（案内していない道でこそ言いたいため。→「県境と初めての街」）。
+6 つは `NavigationController` を見るが、`VisitAdvisor` は `TrackStore` を、
+`SightseeingAdvisor` は `LocationService` を見る。どちらも目的地を入れずに走るときに使う。
 
-`TripSummary` はこの 7 つに**入らない**。あちらは `PassthroughSubject` を持たず、
+`TripSummary` はこの 8 つに**入らない**。あちらは `PassthroughSubject` を持たず、
 **聞かれたときに測って返すだけ**（→「ひと走りの収穫」）。到着の瞬間に
 `NavigationController` が 1 回だけ測り、`arrivalHarvest` として画面と音声へ分ける。
 `SolarPosition` ↔ `SunGlareAdvisor` と同じ
@@ -205,7 +205,7 @@ Combine の使い分けにも意味がある:
   何もせず返るので、「鳴らす音が無いのにセッションを有効化しない」というガイドラインの
   要求も同時に満たす。`short` のときは音声ファイルを同梱せずに済ませるため、16bit PCM の
   WAV をその場で組み立ててトーンを鳴らす。
-- **案内と無関係なひと言は `announce` を通す**（県境・初めての街。→「助言を出す層」）。
+- **案内と無関係なひと言は `announce` を通す**（県境・初めての街・観光。→「助言を出す層」）。
   `speak` との違いは 3 つで、どれも**言えなければ言わなくてよい**ことから来ている。
   - **溜めない。** `speak` は聞き取り中の到着・経由地通過を `pendingPrompt` へ抱えるが、
     県境を抱えても意味が無い（聞き取りが終わるころにはとうに過ぎている）うえ、
@@ -322,10 +322,11 @@ Combine の使い分けにも意味がある:
   （「終わり」だけで案内を切ると同乗者との会話でも切れる）。**Apple Intelligence が
   無い環境ではこれが唯一走る経路**なので、判定を変えるときは誤爆の側を先に確かめること。
 
-### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` / `SunGlareAdvisor` / `VisitAdvisor`）
+### 助言を出す層（`RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` / `SunGlareAdvisor` / `VisitAdvisor` / `SightseeingAdvisor`）
 
 どれも「案内は変えず、知らせるだけ」。`PassthroughSubject` を流し、出すかどうかは各 UI が
-決める。購読先は `NavigationController`（**`VisitAdvisor` だけ `TrackStore`**）。
+決める。購読先は主に `NavigationController`。`VisitAdvisor` は `TrackStore`、
+`SightseeingAdvisor` は `LocationService` を購読する。
 
 - **連続運転は案内している時間だけを数える**。位置や速度から「走っているか」を判定する手も
   あるが、渋滞と停車が区別できず、案内を切って寄り道した時間も運転として数えてしまう。
@@ -408,11 +409,9 @@ Combine の使い分けにも意味がある:
     採らない。** 目の前の眩しさは窓を見れば分かるが、**それがいつまで続くか**は分からない。
 
 - **都道府県をまたいだことと、初めて走る市区町村を声で知らせる**（`VisitAdvisor`、2026-08-24）。
-  「バスガイドのような機能」から**言える中身だけを残した形**。**観光解説は作文しない**——
-  MapKit が返すのは名前・カテゴリ・住所・電話番号だけ（`CarPlayRouteInformation` で
-  営業時間すら返らないことを確かめてある）で、Foundation Models に書かせれば**運転中に
-  確かめようのない史実**を喋ることになる。`RoadName` が「取りこぼす側に倒す」のと
-  同じ判断。**残した 2 つは答えが手元にある**——県境は
+  県境は逆ジオコーディング、初めてかどうかは走行履歴から分かる。観光解説は
+  別の `SightseeingAdvisor` で扱う（2026-09-06）。**由緒をモデルに作文させない**方針は
+  共通で、観光案内の原稿には公式情報の出典を持たせる。**この 2 つは答えが手元にある**——県境は
   逆ジオコーディングの結果、初めてかどうかは自分の走行履歴なので、**嘘になりようがない**。
   - **材料は `TrackStore` がもう引いている**（3km ごと）ので、**問い合わせも許可も
     1 件も増やさない**。`SunGlareAdvisor` と同じで、ケイパビリティを待たずに書いた日から動く。
@@ -445,6 +444,48 @@ Combine の使い分けにも意味がある:
     ```
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
+
+### 車窓の観光音声（`SightseeingGuide` / `SightseeingAdvisor`、2026-09-06）
+
+CarPlay 接続中に「右手に○○神社があります」と短く紹介する。目的地を入れていなくても
+動く。**「見えます」とは言わない**。座標から左右は分かるが、塀や建物で隠れているかは
+分からないため。画面にカードを増やさず、`VoiceGuidance` が声だけで伝える。
+
+- **接続は全 3 シーンの集合で数える。** Dashboard だけで起動した場合も動き、一つの
+  シーンが切れても他が残れば止めない。最後の切断で検索と観光の読み上げを止める。
+- **場所と名前は MapKit**（`SightseeingSearch`）。半径 1.5km の名所・城・要塞・記念物・
+  博物館の検索と、「神社」「寺院」の名称検索を行う。2026-09-06 に実検索で確認した
+  白川八幡神社・鶴岡八幡宮・善光寺・熱田神宮はカテゴリが nil なので、カテゴリだけでは
+  拾えない。名称検索では寺社の末尾とカテゴリを確認し、同名の店や駐車場を除く。
+  半径外の結果・空の名前・重複も除く。検索の一部が失敗しても成功した結果は使う。
+  地区全体の代表点は左右の目印にできないので、「荻町地区」などの結果も除く。
+- **由緒は出典を確認した原稿だけ**（`SightseeingFacts`）。初期原稿は上記 4 寺社と
+  松本城・犬山城の 6 か所。原稿の一致には名前と座標の両方を要求する。同名の寺が別の
+  都道府県にあっても説明を流用しない。それ以外の施設では名前と方向だけ紹介する。
+  日英の原稿と出典 URL はアプリに同梱し、実行中に AI や観光サイトへ現在地を送らない。
+- **実測の進行方向を使う。** 位置精度 35m 以内、測位から 10 秒以内、速度 3m/s 以上、
+  進行方位の精度 20 度以内が条件。300m 以内の斜め前方だけを対象にし、正面・後方・
+  方位や位置の誤差で左右が入れ替わりうる施設は紹介しない。
+- **ナビを優先する。** 次の指示まで 500m または 25 秒以内、経路未合流、逸脱中、
+  リルート中、到着時は黙る。音声入力・別の読み上げ・通話・Siri の最中も溜めない。
+  観光案内では `.short` を通知音に置き換えない。解説の途中でもナビの指示が来たら
+  `stopSpeaking` で打ち切る。`SpeechUtterances` が取り消した発話の遅い完了通知を無視し、
+  次に始めたナビ音声の再生数を減らさない。
+- **3 分は間隔を空け、同じ施設はアプリ起動中に繰り返さない。** ルート変更、観光案内の
+  入り切り、CarPlay 再接続で読み上げ済みの記録を捨てない。
+  ID が変わっても、同名で 100m 以内なら同じ施設として扱う。
+- **検索は最低 1 分空ける。** 成功した範囲は 800m 移動するか 10 分経つまで再利用する。
+  失敗時も 1 分空けて再試行する。切断や設定 OFF で取り消し、遅れて戻る旧検索は世代 ID
+  で拒否する。**検索完了時には喋らず、次の GPS で左右と距離を測り直す**。
+- iPhone の「走破マップ」に専用の ON/OFF（既定 ON）と「観光案内の出典」を置く。
+  走行履歴の記録や県境の通知とは独立して切り替えられる。ログのカテゴリは `sightseeing`。
+  新たな位置権限・背景モード・外部依存は追加していない。
+
+2026-09-06 に全 173 テストが成功。左右・ナビ優先・繰り返し・測位の鮮度・原稿の位置照合・
+施設カテゴリ・再試行の間隔・旧検索の拒否・取り消した発話の完了・施設 ID の揺れの
+10 か所を一時的に崩し、ビルドの失敗ではなくテストの失敗として検出することも確認した。
+実検索では白川八幡神社に解説が付くことと、左右それぞれの読み上げ文を確認済み。
+**実車での聞こえ方と、紹介する距離・頻度の体感は未確認**。
 
 ### ひと走りの収穫（`TripSummary`）
 

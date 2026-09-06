@@ -19,11 +19,13 @@ final class CarPlayInstrumentClusterSceneDelegate: UIResponder,
         let coordinator = CarPlayInstrumentClusterCoordinator(controller: instrumentClusterController)
         coordinator.apply(contentStyle: templateApplicationInstrumentClusterScene.contentStyle)
         self.coordinator = coordinator
+        SightseeingAdvisor.shared.setConnected(true, sceneID: templateApplicationInstrumentClusterScene.session.persistentIdentifier)
     }
 
     func templateApplicationInstrumentClusterScene(
         _ templateApplicationInstrumentClusterScene: CPTemplateApplicationInstrumentClusterScene,
         didDisconnectInstrumentClusterController instrumentClusterController: CPInstrumentClusterController) {
+        SightseeingAdvisor.shared.setConnected(false, sceneID: templateApplicationInstrumentClusterScene.session.persistentIdentifier)
         coordinator?.stop()
         coordinator = nil
     }

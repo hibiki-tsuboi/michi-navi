@@ -14,6 +14,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         coordinator.start()
         coordinator.apply(contentStyle: templateApplicationScene.contentStyle)
         self.coordinator = coordinator
+        SightseeingAdvisor.shared.setConnected(true, sceneID: templateApplicationScene.session.persistentIdentifier)
     }
 
     /// 車がトンネルや日没で昼夜を切り替えてくる。
@@ -38,6 +39,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
     func templateApplicationScene(_ templateApplicationScene: CPTemplateApplicationScene,
                                   didDisconnectInterfaceController interfaceController: CPInterfaceController,
                                   from window: CPWindow) {
+        SightseeingAdvisor.shared.setConnected(false, sceneID: templateApplicationScene.session.persistentIdentifier)
         coordinator?.stop()
         coordinator = nil
     }

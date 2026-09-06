@@ -15,6 +15,7 @@ final class VoiceGuidance: NSObject {
     private let navigation = NavigationController.shared
     private let session = AVAudioSession.sharedInstance()
     private let synthesizer = AVSpeechSynthesizer()
+    private var utterances = SpeechUtterances()
 
     private var scheduler: VoicePromptScheduler?
     /// 案内中のルート。これが変わったらリルートとみなす。
@@ -88,6 +89,20 @@ final class VoiceGuidance: NSObject {
         VisitAdvisor.shared.notice
             .sink { [weak self] in self?.announce($0) }
             .store(in: &cancellables)
+
+        SightseeingAdvisor.shared.notice
+            .sink { [weak self] in
+                self?.announce(.sightseeing(name: $0.spot.name, side: $0.side, detail: $0.spot.detail))
+            }
+            .store(in: &cancellables)
+
+        SightseeingAdvisor.shared.$isEnabled
+            .combineLatest(SightseeingAdvisor.shared.$isConnected)
+            .sink { [weak self] enabled, connected in
+                guard let self, !(enabled && connected), self.utterances.isSightseeing else { return }
+                self.stopSpeaking()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - 読み直し
@@ -130,8 +145,10 @@ final class VoiceGuidance: NSObject {
         announce(prompt)
     }
 
-    /// 初めての土地についての短いひと言。県境・街・道で、案内音声を邪魔しない条件を揃える。
+    /// 土地や名所についての短いひと言。県境・街・道・観光で、他の音声に重ねない条件を揃える。
     private func announce(_ prompt: VoicePrompt) {
+        // 観光案内を意味の分からない通知音に置き換えない。Siri・通話中も黙る。
+        if prompt.isSightseeing, session.promptStyle != .normal { return }
         // **抱えない。** `speak(_:)` は聞き取り中の到着・経由地通過を `pendingPrompt` へ
         // 溜めるが、県境は溜めても意味が無い（聞き取りが終わるころにはとうに過ぎている）。
         // しかも溜めれば、抱えていた到着のひと言を押しのけることになる。
@@ -250,6 +267,8 @@ final class VoiceGuidance: NSObject {
     // MARK: - 読み上げ
 
     private func speak(_ prompt: VoicePrompt) {
+        // 解説の途中でも、曲がる案内や到着が来たら即座に譲る。
+        if utterances.isSightseeing, !prompt.isSightseeing { stopSpeaking() }
         // 聞き取り中に届くのは到着・経由地通過だけ（予告は `handle(progress:)` で
         // 止めてある）。どちらも**その瞬間しか流れない出来事**なので、落とすと
         // 二度と来ない。抱えておいて、聞き取りが終わってから読む。
@@ -267,16 +286,17 @@ final class VoiceGuidance: NSObject {
         case .short:
             playTone()
         default:
-            speak(text: prompt.spokenText)
+            speak(text: prompt.spokenText, sightseeing: prompt.isSightseeing)
         }
     }
 
-    private func speak(text: String) {
+    private func speak(text: String, sightseeing: Bool = false) {
         guard activateSession() else { return }
         playingCount += 1
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = preferredVoice
+        utterances.insert(utterance, sightseeing: sightseeing)
         synthesizer.speak(utterance)
     }
 
@@ -297,6 +317,7 @@ final class VoiceGuidance: NSObject {
     }
 
     private func stopSpeaking() {
+        utterances.cancel()
         synthesizer.stopSpeaking(at: .immediate)
         tonePlayer?.stop()
         tonePlayer = nil
@@ -354,6 +375,11 @@ final class VoiceGuidance: NSObject {
         playingCount = max(playingCount - 1, 0)
         releaseSessionIfIdle()
     }
+
+    fileprivate func finishSpeaking(_ id: ObjectIdentifier) {
+        guard utterances.finish(id) else { return }
+        finishPlaying()
+    }
 }
 
 // MARK: - AVSpeechSynthesizerDelegate
@@ -364,12 +390,16 @@ extension VoiceGuidance: AVSpeechSynthesizerDelegate {
     // MainActor へ積み直す。
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finishPlaying() }
+        // identity だけ使うが、actor に届くまで本体も保持する。ID だけ渡すと解放後の
+        // アドレスが次の発話に再利用され得る。発話のプロパティには両スレッドとも触れない。
+        nonisolated(unsafe) let completed = utterance
+        Task { @MainActor in self.finishSpeaking(ObjectIdentifier(completed)) }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finishPlaying() }
+        nonisolated(unsafe) let completed = utterance
+        Task { @MainActor in self.finishSpeaking(ObjectIdentifier(completed)) }
     }
 }
 

@@ -21,12 +21,14 @@ final class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDas
                                                       window: window)
         coordinator.start()
         self.coordinator = coordinator
+        SightseeingAdvisor.shared.setConnected(true, sceneID: templateApplicationDashboardScene.session.persistentIdentifier)
     }
 
     func templateApplicationDashboardScene(
         _ templateApplicationDashboardScene: CPTemplateApplicationDashboardScene,
         didDisconnect dashboardController: CPDashboardController,
         from window: UIWindow) {
+        SightseeingAdvisor.shared.setConnected(false, sceneID: templateApplicationDashboardScene.session.persistentIdentifier)
         coordinator?.stop()
         coordinator = nil
     }

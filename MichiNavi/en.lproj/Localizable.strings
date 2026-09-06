@@ -236,3 +236,26 @@
 "約 %.1f km²" = "About %.1f km²";
 "アプリを開いているあいだに走った道とメッシュが、ここに残ります" = "Roads and map cells covered while the app is open appear here.";
 "走破マップを見る" = "View Coverage Map";
+/* 観光音声ガイド */
+"神社" = "Shrines";
+"寺院" = "Temples";
+"CarPlayで観光案内を読み上げる" = "Announce landmarks in CarPlay";
+"観光案内の出典" = "Landmark guide sources";
+"公式の解説を読む" = "Read the official description";
+"近くの神社やお城などを、左右の方向とともに紹介します。曲がる案内を優先し、解説を確認できた場所では見どころも添えます。" = "Introduces nearby shrines, castles, and other landmarks on your left or right. Navigation directions take priority. Includes a short description where verified information is available.";
+"左手に%@があります。%@" = "On your left is %1$@. %2$@";
+"右手に%@があります。%@" = "On your right is %1$@. %2$@";
+"左手に%@があります。" = "On your left is %@.";
+"右手に%@があります。" = "On your right is %@.";
+"白川八幡神社" = "Shirakawa Hachiman Shrine";
+"鶴岡八幡宮" = "Tsurugaoka Hachimangu";
+"善光寺" = "Zenkoji Temple";
+"熱田神宮" = "Atsuta Jingu";
+"松本城" = "Matsumoto Castle";
+"犬山城" = "Inuyama Castle";
+"どぶろく祭りで知られる神社です。" = "This shrine is known for its Doburoku Festival.";
+"源頼朝が鎌倉のこの場所に移した神社です。" = "Minamoto no Yoritomo moved this shrine to its present site in Kamakura.";
+"特定の宗派に属さないお寺です。" = "This temple does not belong to any single Buddhist sect.";
+"三種の神器の一つ、草薙の剣をご神体とする神社です。" = "This shrine enshrines the Kusanagi sword, one of Japan's three imperial regalia.";
+"五重六階の天守が残る国宝のお城です。" = "This National Treasure castle has a surviving keep with five tiers and six floors.";
+"木曽川のほとりに立つ、国宝の天守を持つお城です。" = "This castle stands by the Kiso River, and its keep is a National Treasure.";

@@ -29,9 +29,16 @@ enum VoicePrompt: Equatable {
     case firstCity(name: String)
     /// まもなく、案内開始時点では走ったことのなかった道へ入る。
     case newRoad(distance: CLLocationDistance)
+    /// 車の左右にある名所。解説を確認できない施設は、名前だけを読む。
+    case sightseeing(name: String, side: SightseeingGuide.Side, detail: String?)
     /// 到着したときの「収穫」（`TripSummary`）。**この走行で初めて通った土地だけを数える。**
     /// 初めてが 1 つも無ければそもそも作られないので、ここに 0 は来ない。
     case harvest(prefecture: String?, cities: Int, totalPrefectures: Int, totalCities: Int)
+
+    var isSightseeing: Bool {
+        if case .sightseeing = self { return true }
+        return false
+    }
 
     var spokenText: String {
         switch self {
@@ -64,6 +71,13 @@ enum VoicePrompt: Equatable {
                 return String(localized: "まもなく初めて走る道に入ります")
             }
             return String(localized: "\(Formatters.spokenDistance(distance))先から、初めて走る道です")
+        case let .sightseeing(name, side, detail):
+            switch (side, detail) {
+            case let (.left, .some(detail)): return String(localized: "左手に\(name)があります。\(detail)")
+            case let (.right, .some(detail)): return String(localized: "右手に\(name)があります。\(detail)")
+            case (.left, .none): return String(localized: "左手に\(name)があります。")
+            case (.right, .none): return String(localized: "右手に\(name)があります。")
+            }
         case let .harvest(prefecture, cities, totalPrefectures, totalCities):
             // **1 回につきひと言**（`VisitAdvisor.Notice` と同じ決めごと）。県と街の
             // 両方が初めてでも 2 つ並べない。県のほうを先に取るのは、数十キロに 1 回しか

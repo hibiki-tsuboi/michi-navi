@@ -9,6 +9,7 @@ import SwiftUI
 struct TrackSheet: View {
     @ObservedObject private var store = TrackStore.shared
     @ObservedObject private var advisor = VisitAdvisor.shared
+    @ObservedObject private var sightseeing = SightseeingAdvisor.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var isClearing = false
@@ -22,6 +23,24 @@ struct TrackSheet: View {
                 } else {
                     Section { map(coverage).listRowInsets(EdgeInsets()) }
                     Section { summary(coverage) }
+                }
+
+                Section {
+                    Toggle(String(localized: "CarPlayで観光案内を読み上げる"), isOn: $sightseeing.isEnabled)
+                    NavigationLink(String(localized: "観光案内の出典")) {
+                        List(SightseeingFacts.entries) { entry in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(entry.name).font(.headline)
+                                Text(entry.detail)
+                                if let url = URL(string: entry.source) {
+                                    Link(String(localized: "公式の解説を読む"), destination: url)
+                                }
+                            }
+                        }
+                        .navigationTitle(String(localized: "観光案内の出典"))
+                    }
+                } footer: {
+                    Text(String(localized: "近くの神社やお城などを、左右の方向とともに紹介します。曲がる案内を優先し、解説を確認できた場所では見どころも添えます。"))
                 }
 
                 ForEach(store.visitsByPrefecture, id: \.prefecture) { group in

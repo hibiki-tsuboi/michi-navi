@@ -53,14 +53,16 @@ final class CarPlayMapViewController: UIViewController {
     private let style: Style
     private let mapView = MKMapView()
     private var routeOverlay: MKPolyline?
-    /// 通ってきたところ。経路の線の**上に**重ねて塗り替える。
+    /// 通ってきたところ。青と同じ形を持ち、描く範囲だけを分ける。
     private var travelledOverlay: TravelledPolyline?
-    /// 最後に塗り替えた地点までの距離。これだけ進むまで引き直さない。
-    private var travelledDistance: CLLocationDistance?
+    /// 青の描き始めとグレーの描き終わり。両方で同じ境目を使い、重ね塗りを避ける。
+    private var travelledStrokeEnd: CGFloat = 0
+    /// 最後に塗り分けたときの残り距離。50m 変わるまで更新しない。
+    private var displayedRemainingDistance: CLLocationDistance?
 
     /// 塗り替えを引き直す間隔。時速 60km ならおよそ 3 秒に 1 回。
     private static let travelledStep: CLLocationDistance = 50
-    /// 通ってきたところの色。**不透明**（下に経路の青が敷いてある）。
+    /// 通ってきたところの色。細い線でも昼夜とも読み取れる不透明の灰色。
     ///
     /// 昼夜で入れ替わらない固定色にしてある。`systemGray` のような動的な色は
     /// 夜に明るくなるので、**済んだところが残りより目立つ**という逆の効き方をする
@@ -235,8 +237,12 @@ final class CarPlayMapViewController: UIViewController {
 
         guard let route else { return }
 
-        mapView.addOverlay(route.polyline, level: .aboveRoads)
         routeOverlay = route.polyline
+        let travelled = TravelledPolyline(points: route.polyline.points(), count: route.polyline.pointCount)
+        travelledOverlay = travelled
+        // 通過済みと未通過が同じ道を通るルートでは、これから通る青を上にする。
+        mapView.addOverlay(travelled, level: .aboveRoads)
+        mapView.addOverlay(route.polyline, level: .aboveRoads)
 
         // ダッシュボードとメーター内ではピンを出さない。狭い画面では読み取れないうえ、
         // ガイドが求める「clutter の少ない最小限の地図」から外れる。
@@ -261,25 +267,50 @@ final class CarPlayMapViewController: UIViewController {
     /// 通ったぶんは画面の下端から外れている。全体表示にしたときと、曲がった直後に
     /// 後ろへ伸びる線が「どこまで来たか」を示す。
     ///
-    /// **経路の線の上に重ねて隠す**（残りぶんを描き直すのではなく）。あちらは数千点
-    /// あって、進むたびに作り直すと 1 秒ごとに全長ぶんの点を舐めることになる。
-    /// **そのぶん色は不透明でなければならない**——透かすと下の青が出るだけで、
-    /// 地図が透けるわけではない。
+    /// 青の上に細いグレーを重ねると、青が縁として残る。そこで同じ形の線を使い、
+    /// グレーの `strokeEnd` と青の `strokeStart` を同じ位置にして塗り分ける。
+    /// 線は経路の切り替え時だけ作り、走行中は描く範囲だけを更新する。
     func showTravelled(_ progress: RouteProgress, of route: NavRoute) {
-        let travelled = max(0, route.distance - progress.distanceRemaining)
-        // 毎秒引き直さない。数メートルでは絵が変わらないので、作り直すだけ無駄。
-        if let travelledDistance, abs(travelled - travelledDistance) < Self.travelledStep { return }
+        guard let routeOverlay, routeOverlay === route.polyline, let travelledOverlay else { return }
+        let remaining = max(0, progress.distanceRemaining)
+        // 最後の 50m 未満は間引かず、残りが 0 になったら青を最後まで消す。
+        if let previous = displayedRemainingDistance,
+           abs(remaining - previous) < Self.travelledStep,
+           remaining > 0 || previous == 0 { return }
 
-        clearTravelled()
-        travelledDistance = travelled
+        displayedRemainingDistance = remaining
+        travelledStrokeEnd = Self.strokeLocation(on: routeOverlay, remaining: remaining)
 
-        let coordinates = route.travelled(remaining: progress.distanceRemaining)
-        guard coordinates.count >= 2 else { return }
+        if let renderer = mapView.renderer(for: travelledOverlay) as? MKPolylineRenderer {
+            renderer.strokeEnd = travelledStrokeEnd
+            renderer.setNeedsDisplay()
+        }
+        if let renderer = mapView.renderer(for: routeOverlay) as? MKPolylineRenderer {
+            renderer.strokeStart = travelledStrokeEnd
+            renderer.setNeedsDisplay()
+        }
+    }
 
-        let line = TravelledPolyline(coordinates: coordinates, count: coordinates.count)
-        // 経路より**あとに**足す。同じ level なら後から足したほうが上に描かれる。
-        mapView.addOverlay(line, level: .aboveRoads)
-        travelledOverlay = line
+    /// 描画用の線の終点から残り距離を測り、MapKit の描画範囲へ変換する。
+    /// step の座標列は描画用の線より粗いので、点の添字を共用してはいけない。
+    /// 距離の割合をそのまま使わず、緯度や点の間隔を含めて線の上の位置を求める。
+    private static func strokeLocation(on line: MKPolyline, remaining: CLLocationDistance) -> CGFloat {
+        guard line.pointCount >= 2 else { return 0 }
+        guard remaining > 0 else { return 1 }
+
+        let points = line.points()
+        var distanceToEnd = remaining
+        for index in stride(from: line.pointCount - 1, through: 1, by: -1) {
+            let length = points[index].distance(to: points[index - 1])
+            guard length > 0 else { continue }
+            if distanceToEnd <= length {
+                let start = line.location(atPointIndex: index - 1)
+                let end = line.location(atPointIndex: index)
+                return end - (end - start) * CGFloat(distanceToEnd / length)
+            }
+            distanceToEnd -= length
+        }
+        return 0
     }
 
     /// これまでに走った道を敷く。**案内には一切関わらない**（`TrackStore` が
@@ -335,7 +366,8 @@ final class CarPlayMapViewController: UIViewController {
             mapView.removeOverlay(travelledOverlay)
             self.travelledOverlay = nil
         }
-        travelledDistance = nil
+        travelledStrokeEnd = 0
+        displayedRemainingDistance = nil
     }
 
     func follow(location: CLLocation, animated: Bool = true) {
@@ -737,11 +769,14 @@ extension CarPlayMapViewController: MKMapViewDelegate {
         if polyline is TrackPolyline {
             renderer.strokeColor = Self.trackColor
             renderer.lineWidth = Self.trackWidth
+        } else if polyline is TravelledPolyline {
+            renderer.strokeColor = Self.travelledColor
+            // 通過済みは補助情報なので、これから通る青の半分の太さにする。
+            renderer.lineWidth = style.isWide ? 4 : 3
+            renderer.strokeEnd = travelledStrokeEnd
         } else {
-            renderer.strokeColor = polyline is TravelledPolyline ? Self.travelledColor : UIColor.systemBlue
-            // 経路と、その上に重ねる済んだぶんは**同じ太さでなければならない。**
-            // 細いと下の青が縁として残り、太いと通っていないところまで塗る。
-            //
+            renderer.strokeColor = .systemBlue
+            renderer.strokeStart = travelledStrokeEnd
             // 2026-09-05 に 10 / 8 から落とした（実機の CarPlay で「太い」と言われた）。
             // 遠い画面なので iPhone の 6pt より太くするのは正しいが、**上限は
             // 「地図の道路を覆わないこと」**——走行縮尺（`cameraDistance` 500m）では

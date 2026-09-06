@@ -7,7 +7,7 @@ import Testing
 ///
 /// 呼ぶのは 2 か所で、**どちらも切りすぎ・切らなすぎが画面に出ない**。
 /// `RangeAdvisor` は届く範囲を切って補給先を探すので、長く切れば届かない場所を勧め、
-/// 短く切れば手前ばかり勧める。`CarPlayMapViewController` は通ってきたところを塗るので、
+/// 短く切れば手前ばかり勧める。iPhone の地図は通ってきたところを塗るので、
 /// ずれても「なんとなく合っている線」が出る。
 @MainActor
 struct RouteMeasurementTests {

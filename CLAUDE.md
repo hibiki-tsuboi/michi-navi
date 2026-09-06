@@ -1752,12 +1752,6 @@ CarPlay 層は触らずに済む設計。
   案内ロジックではなく見た目の設定なので、あえて `NavigationController` にも `Core/` にも
   置いていない。iPhone 側が常に進行方向を上にしているのは**意図した非対称**で、揃えるなら
   iPhone にも切り替えを出すところまでやること。片方だけ追従させると変えられない設定になる。
-  - **進行方向表示の傾きは 10 度**（2026-09-06 に 45 度から変更）。建物が経路へ
-    張り出し、青い線が薄くなる範囲を減らすため。新宿・サンフランシスコの実地図に
-    経路線を載せた `MKMapView` で 45 / 30 / 20 / 10 度を比較し、浅い斜め表示を選んだ。
-    `showsBuildings = false` と `.flat` だけでは経路表示中の建物は消えなかった。
-    [MapKit の仕様](https://developer.apple.com/documentation/mapkit/mkmapview/showsbuildings)でも
-    オーバーレイがあると `showsBuildings` は無効になる。完全な非表示を保証する変更ではない。
 - **昼夜（`contentStyle`）を扱うのはセンターディスプレイ側だけ**。地図は
   `overrideUserInterfaceStyle` に流せば trait collection 経由で切り替わり、テンプレートは
   CarPlay が自前で切り替える。Dashboard のシーンに `contentStyle` は無く、渡される

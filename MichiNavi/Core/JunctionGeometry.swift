@@ -2,45 +2,17 @@ import CoreGraphics
 import CoreLocation
 import MapKit
 
-/// 曲がる地点の前後だけを切り出した、**経路そのものの形**。
+/// 経路から測った、入ってくる向きを基準とする出口の角度。
 ///
-/// MapKit は交差点のデータを一切返さない（形も、通らない側の道も、車線も）。返ってくるのは
-/// たどる線だけなので、曲がり方を知りたければその線から測るしかない。ここが出すのは
-/// 測った結果だけで、**見せ方は持たない**。行き先が 2 つあるため:
-///
-///   1. 交差点の拡大図（`JunctionImage`）
-///   2. `CPManeuver.junctionExitAngle`。**車のメーター・HUD へ送られる**
-///
-/// `ManeuverDirection`（`Core/`）と `ManeuverKind`（`CarPlay/`）を分けているのと同じ形。
-/// 測る計算は案内の見た目とは無関係なので、そのために `Core/` へ CarPlay を持ち込まない。
-///
-/// **絵と角度は必ず同じ値から作ること。** 別々に測ると、案内カードの図と車の HUD が
-/// 食い違って出る余地ができる。
-///
-/// 点の座標系は**メートル・進行方向が +y**。北上げのままだと、同じ右折でも走っている
-/// 向きによって形が変わって見比べられないので、入ってくる向きを上に揃えてある。
+/// CarPlay がロータリーの `CPManeuver.junctionExitAngle` として車のメーター・HUD へ送る。
+/// ここでは測定だけを行い、CarPlay の型への変換は表示層で行う。
+/// 計算中の座標系はメートル・進行方向が +y。入ってくる向きが変わっても同じ角度を返す。
 struct JunctionGeometry {
-    /// 曲がる地点へ入ってくる線。進行順（最後の点が曲がる地点）。
-    let approach: [CGPoint]
-    /// 曲がる地点から出ていく線。先頭が曲がる地点。
-    let departure: [CGPoint]
     /// 出ていく向きが、入ってくる向きからどれだけ振れているか（ラジアン）。
     /// 0 が直進、正が右。
     let turn: CGFloat
 
-    /// **曲がる地点そのもの以外で、たどる線がどれだけ曲がっているか**（ラジアン、常に正）。
-    ///
-    /// 入ってくる側と出ていく側それぞれについて、入口の向きと出口の向きの差を測り、
-    /// 大きいほうを採る。**矢印アイコンが言えないことを測っている**——「右に曲がる」は
-    /// `ManeuverDirection` がすでに出しているので、拡大図が足せるのは「曲がった先で
-    /// もう一度曲がる」「入りながら曲がっている」といった**線そのものの形**だけ。
-    /// 使うかどうかは見せ方の判断なので、しきい値は `JunctionImage` が持つ。
-    let bend: CGFloat
-
-    /// 曲がる地点の手前と先を、それぞれどれだけ入れるか。
-    ///
-    /// 広げるほど拡大図の縮尺が小さくなり、肝心の曲がり角が潰れる。**曲がる直前に見て
-    /// 分かる範囲**に絞る。
+    /// 向きの測定に使う、曲がる地点の手前と先の範囲。
     private static let approachDistance: CLLocationDistance = 100
     private static let departureDistance: CLLocationDistance = 100
 
@@ -48,7 +20,7 @@ struct JunctionGeometry {
     /// 細かい点で向きが跳ねる。
     private static let headingSample: CLLocationDistance = 25
 
-    /// `stepIndex` の区間の終わり（＝曲がる地点）の形。測れなければ nil。
+    /// `stepIndex` の区間の終わり（＝曲がる地点）の角度。測れなければ nil。
     static func make(for route: NavRoute, stepIndex: Int) -> JunctionGeometry? {
         guard route.stepEndIndices.indices.contains(stepIndex) else { return nil }
         let junctionIndex = route.stepEndIndices[stepIndex]
@@ -75,46 +47,10 @@ struct JunctionGeometry {
 
         guard let heading = heading(of: approach) else { return nil }
         let angle = atan2(heading.x, heading.y)
-        let rotatedApproach = approach.map { rotate($0, by: angle) }
         let rotatedDeparture = departure.map { rotate($0, by: angle) }
 
         guard let turn = turnAngle(departure: rotatedDeparture) else { return nil }
-        return JunctionGeometry(approach: rotatedApproach,
-                                departure: rotatedDeparture,
-                                turn: turn,
-                                bend: max(bend(of: rotatedApproach), bend(of: rotatedDeparture)))
-    }
-
-    /// 線の入口と出口の向きの差（ラジアン、常に正）。
-    ///
-    /// **両端とも `headingSample` メートルぶんで測る。** 前後 1 点だけで見ると、交差点の
-    /// 中の細かい点で向きが跳ねて、まっすぐな道が曲がっていることになる。
-    static func bend(of points: [CGPoint]) -> CGFloat {
-        guard let entry = leadingVector(of: points), let exit = heading(of: points) else { return 0 }
-
-        let cross = entry.x * exit.y - entry.y * exit.x
-        let dot = entry.x * exit.x + entry.y * exit.y
-        return abs(atan2(cross, dot))
-    }
-
-    /// 先頭から `headingSample` メートルぶんの向き。`heading(of:)` の裏返し。
-    private static func leadingVector(of points: [CGPoint]) -> CGPoint? {
-        guard let start = points.first else { return nil }
-
-        var reference = points[points.count - 1]
-        var travelled: Double = 0
-        for index in 1 ..< points.count {
-            travelled += hypot(points[index].x - points[index - 1].x,
-                               points[index].y - points[index - 1].y)
-            if travelled >= headingSample {
-                reference = points[index]
-                break
-            }
-        }
-
-        let vector = CGPoint(x: reference.x - start.x, y: reference.y - start.y)
-        guard hypot(vector.x, vector.y) > 0 else { return nil }
-        return vector
+        return JunctionGeometry(turn: turn)
     }
 
     // MARK: - 座標の切り出し

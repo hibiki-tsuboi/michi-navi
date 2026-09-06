@@ -340,9 +340,8 @@ final class CarPlayMapViewController: UIViewController {
 
     /// 引き直す線と、地図から外す線。
     ///
-    /// **選ぶところを描くところから離してある**ので、地図を持たずに確かめられる
-    /// （`JunctionGeometry` ↔ `JunctionImage` と同じ分け方）。`drawn` はいま地図に載って
-    /// いる線の点の数。
+    /// **選ぶところを描くところから離してある**ので、地図を持たずに確かめられる。
+    /// `drawn` はいま地図に載っている線の点の数。
     static func trackChanges(for tracks: [TrackStore.Track], drawn: [UUID: Int]) -> TrackChanges {
         var changes = TrackChanges()
         var stale = Set(drawn.keys)
@@ -781,8 +780,7 @@ extension CarPlayMapViewController: MKMapViewDelegate {
             // 遠い画面なので iPhone の 6pt より太くするのは正しいが、**上限は
             // 「地図の道路を覆わないこと」**——走行縮尺（`cameraDistance` 500m）では
             // 1pt がおよそ 0.5m なので、10pt は 2 車線ぶんの幅になり、交差点の形と
-            // 分岐の角度が線の下に隠れる。`JunctionImage` が拡大図で足そうとしている
-            // ものを、地図の側で消すことになっていた。
+            // 分岐の角度が線の下に隠れる。
             renderer.lineWidth = style.isWide ? 8 : 6
         }
         renderer.lineCap = .round

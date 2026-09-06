@@ -953,15 +953,10 @@ final class CarPlayCoordinator: NSObject {
         let kind = ManeuverKind.inferred(from: step.instruction)
 
         let maneuver = CPManeuver()
-        // 交差点の形を 1 度だけ測って、**絵と角度の両方をここから作る**。別々に測ると、
-        // 案内カードの図と車の HUD が食い違って出る余地ができる。
-        let junction = JunctionGeometry.make(for: route, stepIndex: stepIndex)
-        // 交差点の拡大図。MapKit は交差点のデータを返さないので、経路そのものの形を
-        // 曲がる地点のまわりだけ拡大して描く。曲がらない指示では nil が返る。
-        // **Dashboard 用は渡さない。** 指定しなければ CarPlay がこれを使う。
-        maneuver.junctionImage = junction.flatMap {
-            JunctionImage.make(for: $0, direction: kind.direction)
-        }
+        // 経路の線だけの拡大図は意味が伝わりにくいため、junctionImage は渡さない。
+        // 案内カードは指示文と方向アイコンで案内し、出口の角度はロータリーでだけ測る。
+        let junction = kind.direction == .roundabout
+            ? JunctionGeometry.make(for: route, stepIndex: stepIndex) : nil
         apply(junction: junction, direction: kind.direction, to: maneuver)
         // **候補は「長い順」に並べる。** CarPlay は先頭から見て**入るものを選ぶ**ので、
         // 1 件しか渡さないと入らなかったときに省略される。地名と道路名を落とした
@@ -1010,16 +1005,15 @@ final class CarPlayCoordinator: NSObject {
 
     /// 交差点の種別と、出ていく向きを車へ渡す。
     ///
-    /// **角度を渡すのはロータリーだけ。** ふつうの交差点は `maneuverType` と拡大図で
+    /// **角度を渡すのはロータリーだけ。** ふつうの交差点は `maneuverType` で
     /// 曲がる向きが伝わるので角度が足す情報が無く、いっぽうロータリーは「何番目の出口か」
     /// を送れていない（`ManeuverKind` は `.enterRoundabout` までしか出せない）ため、
     /// 角度がどちらへ抜けるかを伝える唯一の手段になる。
     ///
     /// **基準の取り方は推測を含む。** ヘッダは "the angle of the exit road" としか書いて
     /// おらず、何を 0 度とするかを決めていない。ここでは**進行方向を 0 度、時計回りを正**
-    /// として [0, 360) に正規化している。案内カードの拡大図とまったく同じ測定
-    /// （`JunctionGeometry`）から作っているので、**車が描く向きと画面の図はこの規約が
-    /// 正しい限り一致する**。対応した車でしか確かめようがないので、送った値をログに残す。
+    /// として [0, 360) に正規化している。`JunctionGeometry` が経路から測った角度を使う。
+    /// 対応した車でしか確かめようがないので、送った値をログに残す。
     ///
     /// `junctionElementAngles`（通らない側の道）は渡さない。MapKit がそのデータを
     /// 返さないうえ、でっち上げると「そこに道がある」と車に言うことになる。

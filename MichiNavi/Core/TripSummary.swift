@@ -16,8 +16,7 @@ import Foundation
 ///   **知らない道を選ぶ理由**になる。距離だとただ長く走った日が勝つ。
 ///
 /// **測るだけで、出し方は決めない。** 読み上げるかどうかは `VoiceGuidance` が
-/// `VisitAdvisor.isEnabled` を見て決める（`SolarPosition` ↔ `SunGlareAdvisor`、
-/// `JunctionGeometry` ↔ `JunctionImage` と同じ分け方）。
+/// `VisitAdvisor.isEnabled` を見て決める（`SolarPosition` ↔ `SunGlareAdvisor` と同じ分け方）。
 ///
 /// 材料は `TrackStore` がもう持っているものだけで、問い合わせも許可も 1 件も増えない。
 /// 裏返して、**`TrackStore.isRecording` を切ると `visits` が増えないので必ず黙る**。

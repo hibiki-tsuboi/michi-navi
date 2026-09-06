@@ -12,6 +12,7 @@
 "%@ までのルートを計算中…" = "Finding a route to %@…";
 "%@ 着になります" = "You'd arrive at %@";
 "%@に入りました" = "Now entering %@";
+"%@へ" = "To %@";
 "%@に入りました。%@を走るのは初めてです" = "Now entering %@. This is your first time driving through %@";
 "%@周辺です。案内を終了します" = "You're arriving at %@. Ending guidance.";
 "%@を設定" = "Set %@";
@@ -55,6 +56,7 @@
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";
 "さがす" = "Find one";
 "そのまま" = "Stay";
+"進む道路" = "Next road";
 "どこへ向かいますか" = "Where are you heading?";
 "まだ記録がありません" = "Nothing recorded yet";
 "まもなく" = "now";

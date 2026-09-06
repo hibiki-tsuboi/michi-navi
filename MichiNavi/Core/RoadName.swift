@@ -3,8 +3,8 @@ import Foundation
 /// 指示文から「曲がった先の道路名」を取り出す。「国道156号を右方向」の「国道156号」、
 /// 「市役所前で左方向 百万石通り」の「百万石通り」にあたる部分。
 ///
-/// 行き先は `CPManeuver.roadFollowingManeuverVariants` ひとつで、**車のメーター・HUD が
-/// 「いま曲がって入る道はどこか」を出すのに使う**。MapKit の `MKRoute.Step` は道路名を
+/// CarPlayの案内カードと `CPManeuver.roadFollowingManeuverVariants` に使い、
+/// 車のメーター・HUDと同じ道路名を出す。MapKit の `MKRoute.Step` は道路名を
 /// 別のプロパティで返さないので、指示文から拾うしかない（`ManeuverDirection` や
 /// `RoadNumber` と同じ事情）。
 ///
@@ -40,6 +40,10 @@ enum RoadName {
     /// 番号を持つ道（`RoadNumber`）が先。「国道156号」は番号そのものが名前として通って
     /// いるうえ、表記のゆれが無い。
     static func first(in instruction: String) -> String? {
+        // 「国道156号から県道45号へ」では、離れる道を大きく案内してはいけない。
+        // 進む先が書かれていない場合も、元の道を代わりに返さない。
+        let instruction = instruction.range(of: "から", options: .backwards)
+            .map { String(instruction[$0.upperBound...]) } ?? instruction
         if let numbered = RoadNumber.first(in: instruction) {
             return String(instruction[numbered.range])
         }
@@ -51,6 +55,8 @@ enum RoadName {
     private static func japaneseName(in instruction: String) -> String? {
         for suffix in suffixes {
             guard let found = instruction.range(of: suffix) else { continue }
+            // 「臨海道路接続バイパス」の途中の「道路」を名前の終わりにしない。
+            if found.upperBound < instruction.endIndex, isNamePart(instruction[found.upperBound]) { continue }
 
             var start = found.lowerBound
             var length = 0
@@ -62,6 +68,8 @@ enum RoadName {
             }
             // 語尾だけで名前を持たないもの（「高速道路に入る」の「道路」）は捨てる。
             guard length > 0 else { continue }
+            // 上限で名前の途中から切り出した場合は、別の道路名に見えるので捨てる。
+            if start > instruction.startIndex, isNamePart(instruction[instruction.index(before: start)]) { continue }
 
             let name = String(instruction[start ..< found.upperBound])
             guard !excluded.contains(name) else { continue }

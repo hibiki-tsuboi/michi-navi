@@ -58,4 +58,16 @@ struct RoadNameTests {
         // 「国道156号」と「○○通り」が同じ文にあっても、番号のほうを返す。
         #expect(RoadName.first(in: "国道156号を右方向 玉川通り") == "国道156号")
     }
+
+    @Test("離れる道路ではなく、進む先の道路名を案内する")
+    func destinationRoadWinsOverSource() {
+        #expect(RoadName.first(in: "国道156号から県道45号へ右折") == "県道45号")
+        #expect(RoadName.first(in: "環八通りから国道246号へ左折") == "国道246号")
+        #expect(RoadName.first(in: "国道156号から右折") == nil)
+    }
+
+    @Test("長い道路名の末尾だけを別の名前として案内しない")
+    func doesNotCutOffLongNames() {
+        #expect(RoadName.first(in: "北海道中央連絡臨海道路接続バイパスを右折") == nil)
+    }
 }

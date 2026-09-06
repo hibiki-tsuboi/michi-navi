@@ -953,8 +953,7 @@ final class CarPlayCoordinator: NSObject {
         let kind = ManeuverKind.inferred(from: step.instruction)
 
         let maneuver = CPManeuver()
-        // 経路の線だけの拡大図は意味が伝わりにくいため、junctionImage は渡さない。
-        // 案内カードは指示文と方向アイコンで案内し、出口の角度はロータリーでだけ測る。
+        // 出口の角度は、車のメーター・HUDへ渡すロータリーでだけ測る。
         let junction = kind.direction == .roundabout
             ? JunctionGeometry.make(for: route, stepIndex: stepIndex) : nil
         apply(junction: junction, direction: kind.direction, to: maneuver)
@@ -984,11 +983,10 @@ final class CarPlayCoordinator: NSObject {
         maneuver.maneuverType = kind.type
         // ロータリーの回り方に効く。既定は右側通行なので、渡さないと日本では逆に描かれる。
         maneuver.trafficSide = DrivingSideLocator.shared.current.carPlaySide
-        // 曲がった先の道路名。**車のメーター・HUD 側にしか出ない**（案内カードには
-        // 指示文がそのまま出る）ので、拾えなければ渡さないだけでよい。
-        // 裏返すと**こちらの画面をいくら見ても当たっているか分からない**ので、
-        // 拾えた・拾えなかったの両方をログに残す。
+        // 曲がった先の道路名を大きく表示する。元の指示文も残し、交差点名や出口の情報を落とさない。
+        // Dashboardも同じ画像を使う。拾えない道路は画像を作らず、通常の案内だけにする。
         let road = RoadName.first(in: step.instruction)
+        maneuver.junctionImage = RoadNameImage.make(for: road, direction: kind.direction)
         if let road { maneuver.roadFollowingManeuverVariants = [road] }
         CarPlayVehicleLog.roadName(road, from: step.instruction)
         // **距離と時間は同じ値から出す。** `distance` は走っている区間だけ「残り」に

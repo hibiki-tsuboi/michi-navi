@@ -411,11 +411,15 @@ final class CarPlayCoordinator: NSObject {
 
         case let .navigating(route):
             previewedRoute = nil
-            mapTemplate.hideTripPreviews()
+            // リルートでは同じ案内セッションを継続する。候補を閉じるのは案内へ入るときだけ。
+            if entered { mapTemplate.hideTripPreviews() }
             mapViewController.show(route: route)
             if entered { recenterMap("navigating") }
             applyButtons(for: .navigating)
             beginSessionIfNeeded(for: route)
+            // 測位を待たずに到着予定・残り時間・残り距離を出す。
+            // phase の willSet 中なので、経路は受け取った値を使う。
+            updateTripEstimates(for: route, progress: navigation.progress)
         }
     }
 
@@ -432,7 +436,7 @@ final class CarPlayCoordinator: NSObject {
     }
 
     private func apply(progress: RouteProgress) {
-        guard let trip = currentTrip, let route = navigation.currentRoute else { return }
+        guard navigationSession != nil, let route = navigation.currentRoute else { return }
 
         // **止めるかどうかを先に決める。** ここは `$progress` の sink の中なので
         // `navigation.progress` はまだ 1 つ前の値。**受け取った `progress` を渡す**
@@ -449,10 +453,8 @@ final class CarPlayCoordinator: NSObject {
         // 残り時間の色で、見込みからどれだけ遅れているかを示す（`TrafficCondition`）。
         // **測り直すまでは `.default`**。3 分おきの測り直しが 1 度も走っていないうちに
         // 色を出すと、根拠の無い緑を出発直後に見せることになる。
-        mapTemplate.update(CPTravelEstimates(distanceRemaining: .meters(progress.distanceRemaining),
-                                             timeRemaining: progress.timeRemaining),
-                           for: trip,
-                           with: navigation.trafficCondition?.timeRemainingColor ?? .default)
+        updateTripEstimates(for: route, progress: progress,
+                            color: navigation.trafficCondition?.timeRemainingColor ?? .default)
 
         if let activeManeuver {
             let timeToManeuver = estimatedTime(forDistance: progress.distanceToNextManeuver, on: route)
@@ -474,6 +476,7 @@ final class CarPlayCoordinator: NSObject {
                                                            additionalRoutesButtonTitle: String(localized: "他のルート"),
                                                            overviewButtonTitle: String(localized: "全体表示"))
         mapTemplate.showTripPreviews([trip], textConfiguration: configuration)
+        mapTemplate.updateEstimates(tripEstimates(for: routes[0], progress: nil), for: trip)
     }
 
     /// 候補ルートすべてを 1 つの `CPTrip` にまとめる。
@@ -800,10 +803,20 @@ final class CarPlayCoordinator: NSObject {
         session.currentLaneGuidance = nil
         session.upcomingManeuvers = upcoming
         activeManeuver = upcoming.first
+        updateTripEstimates(for: route, progress: progress,
+                            color: navigation.trafficCondition?.timeRemainingColor ?? .default)
         // 車が持っている経路をここで控える。次に渡し直すときの理由（外れたのか、
         // 止めていたものを戻すだけなのか）はこれと比べて決める。
         handedOverSignature = route.signature
         return true
+    }
+
+    /// 案内中の到着予定を更新する。候補表示用の currentTrip ではなく、
+    /// 実際に案内しているセッションの trip を宛先にする。
+    private func updateTripEstimates(for route: NavRoute, progress: RouteProgress?,
+                                     color: CPTimeRemainingColor = .default) {
+        guard let trip = navigationSession?.trip else { return }
+        mapTemplate.update(tripEstimates(for: route, progress: progress), for: trip, with: color)
     }
 
     /// 目的地までの残りの見積もり。進捗が出ていなければ経路全体の値を使う。
@@ -1572,6 +1585,7 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         // 「この経路について」が出す対象もここで動かす。動かさないと、候補を切り替えても
         // 先頭の詳細が出続ける（`advisoryNotices` は候補ごとに違うので実害が出る）。
         previewedRoute = route
+        mapTemplate.updateEstimates(tripEstimates(for: route, progress: nil), for: trip)
         mapViewController.show(route: route)
         mapViewController.showRouteOverview(route)
     }

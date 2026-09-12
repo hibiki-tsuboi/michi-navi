@@ -51,3 +51,8 @@ fastlane/test_output
 # ── Claude Code のローカル設定 ──
 # settings.json は共有してよいが、local はマシン固有の許可設定なので除外。
 .claude/settings.local.json
+
+# ツールが吐く一時ファイル（コミットに紛れ込みやすい）
+__pycache__/
+*.pyc
+.playwright-mcp/

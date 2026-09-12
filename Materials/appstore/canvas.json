@@ -1,0 +1,79 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "Brief.dc.html",
+      "x": 1382,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "Tracks.dc.html",
+      "x": 2764,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "Exploration.dc.html",
+      "x": 4146,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "Harvest.dc.html",
+      "x": 5528,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "CarPlay.dc.html",
+      "x": 6910,
+      "y": 0,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "DirectionA.dc.html",
+      "x": 0,
+      "y": 2988,
+      "w": 1242,
+      "h": 2688
+    },
+    {
+      "file": "DirectionB.dc.html",
+      "x": 1382,
+      "y": 2988,
+      "w": 1242,
+      "h": 2688
+    }
+  ],
+  "annotations": [
+    {
+      "id": "note-size",
+      "x": 0,
+      "y": -220,
+      "w": 900,
+      "text": "App Store 用 1242×2688px（6.5インチ）。左から 1〜6 枚目の並び。"
+    },
+    {
+      "id": "note-alts",
+      "x": 0,
+      "y": 2808,
+      "w": 900,
+      "text": "見せ方の別案（低精細）。A＝明るい地に黒文字、B＝画面を全面に出して下帯にコピー。"
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

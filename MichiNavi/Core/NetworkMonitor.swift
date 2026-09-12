@@ -23,7 +23,7 @@ final class NetworkMonitor {
     @Published private(set) var isOnline = true
 
     private let monitor = NWPathMonitor()
-    private let queue = DispatchQueue(label: "jp.hibiki.michinavi.network")
+    private let queue = DispatchQueue(label: "jp.hibiki.tsubonavi.network")
 
     private init() {}
 

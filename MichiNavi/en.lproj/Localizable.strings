@@ -1,4 +1,4 @@
-/* MichiNavi の UI 文言。キーは日本語そのもの。
+/* つぼナビ の UI 文言。キーは日本語そのもの。
    プロジェクトの developmentRegion が en なので、ja.lproj が無いと
    日本語の端末でも en.lproj（英語）に落ちる。両方を必ず置くこと。 */
 
@@ -31,7 +31,6 @@
 "47 のうち %lld" = "%lld of 47";
 "ATM・銀行" = "ATM & Banks";
 "EV充電" = "EV charging";
-"MichiNavi で目的地を選んでください" = "Choose a destination in MichiNavi";
 "Uターン" = "U-turn";
 "km" = "km";
 "「%@」は見つかりませんでした" = "Couldn't find \"%@\"";
@@ -56,6 +55,8 @@
 "この言語の音声入力に対応していません" = "Voice input isn't available for this language";
 "さがす" = "Find one";
 "そのまま" = "Stay";
+"つぼナビ" = "TsuboNavi";
+"つぼナビで目的地を選んでください" = "Choose a destination in TsuboNavi";
 "進む道路" = "Next road";
 "どこへ向かいますか" = "Where are you heading?";
 "まだ記録がありません" = "Nothing recorded yet";

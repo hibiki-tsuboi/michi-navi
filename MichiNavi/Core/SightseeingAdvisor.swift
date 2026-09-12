@@ -54,10 +54,13 @@ final class SightseeingAdvisor: ObservableObject {
     func update(_ location: CLLocation, now: Date, hasActiveRoute: Bool,
                 progress: RouteProgress?, isRerouting: Bool) {
         guard isConnected, isEnabled, SightseeingGuide.usable(location, now: now) else { return }
-        if let notice = guide.notice(near: location, spots: spots, now: now, hasActiveRoute: hasActiveRoute,
-                                     progress: progress, isRerouting: isRerouting) {
-            logger.info("notice \(notice.spot.name, privacy: .public) side=\(String(describing: notice.side), privacy: .public)")
-            self.notice.send(notice)
+        // **流すだけで使い切らない。** 読むかどうかは `VoiceGuidance` が決めるので、
+        // 実際に読んだと知らせが返ってきてから記録する（[didAnnounce(_:now:)]）。
+        // 見送られたぶんは次の測位でまた候補に挙がる。
+        if let candidate = guide.candidate(near: location, spots: spots, now: now,
+                                           hasActiveRoute: hasActiveRoute,
+                                           progress: progress, isRerouting: isRerouting) {
+            self.notice.send(candidate)
         }
 
         // 位置更新ごとに問い合わせない。失敗も 1 分空け、同じ場所の成功結果は 10 分使う。
@@ -85,6 +88,17 @@ final class SightseeingAdvisor: ObservableObject {
             self.searchID = nil
             // ここでは喋らない。通信中に車が進んでいるので、次の実測位置で判定し直す。
         }
+    }
+
+    /// 読み上げた側から「実際に読んだ」と知らせてもらう。
+    ///
+    /// **読まれなかったひと言で施設を使い切らない**ためにここで分けている
+    /// （`SightseeingGuide.candidate(near:spots:now:hasActiveRoute:progress:isRerouting:)`）。
+    /// `VoiceGuidance` は読み上げ中・聞き取り中・通話中に見送るので、そのぶんは
+    /// 記録も 3 分の間隔も始めない。
+    func didAnnounce(_ notice: SightseeingGuide.Notice, now: Date = Date()) {
+        logger.info("notice \(notice.spot.name, privacy: .public) side=\(String(describing: notice.side), privacy: .public)")
+        guide.consume(notice, now: now)
     }
 
     private func cancelSearch() {

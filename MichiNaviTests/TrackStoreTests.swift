@@ -19,6 +19,39 @@ struct TrackStoreTests {
         SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: north), accuracy: accuracy)
     }
 
+    /// **読み込みを待つあいだに記録した点を落とさない。**
+    ///
+    /// 購読はファイルの読み直しより先に始まるので、そのあいだに来た測位は `tracks` へ
+    /// 入っている。読み込んだぶんで上書きすると**その走行の線だけが地図から抜け、
+    /// 次の起動で戻ってくる**（ファイルには追記済みなので）という読めない消え方をする。
+    @Test("読み込みを待つあいだに記録した点を、読み込んだぶんの後ろへ繋ぐ")
+    func restoreKeepsPointsRecordedWhileLoading() {
+        let stored = [point(north: 0, seconds: 0), point(north: 100, seconds: 10)]
+        let recorded = [point(north: 200, seconds: 20), point(north: 300, seconds: 30)]
+
+        let restored = TrackStore.restore(stored: stored, recorded: recorded)
+        #expect(restored.tracks.count == 1)
+        #expect(restored.tracks[0].coordinates.count == 4)
+        // 次の間引きと切れ目の判定は、**いちばん新しい点**から測る。
+        #expect(restored.last == recorded.last)
+    }
+
+    @Test("読み込みを待つあいだに何も記録していなければ、読み込んだぶんの最後を引き継ぐ")
+    func restoreCarriesTheStoredTail() {
+        let stored = [point(north: 0, seconds: 0), point(north: 100, seconds: 10)]
+        let restored = TrackStore.restore(stored: stored, recorded: [])
+        #expect(restored.tracks.count == 1)
+        #expect(restored.last == stored.last)
+    }
+
+    /// 切れ目の判定は繋ぎ直しでも同じ関数を通る（`extend`）。またぐ点を境に線が分かれる。
+    @Test("繋ぎ直しでも切れ目は判定する")
+    func restoreStillSplitsOnGaps() {
+        let stored = [point(north: 0, seconds: 0)]
+        let recorded = [point(north: 600, seconds: 10)]
+        #expect(TrackStore.restore(stored: stored, recorded: recorded).tracks.count == 2)
+    }
+
     @Test("粗い測位は記録しない")
     func poorAccuracyIsDropped() {
         #expect(TrackStore.shouldRecord(fix(north: 0, accuracy: 100), after: nil) == false)

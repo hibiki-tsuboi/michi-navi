@@ -271,7 +271,7 @@ final class NavigationController: ObservableObject {
                 return
             }
 
-            let prepared = decorate(candidates, explorationDuration: duration)
+            let prepared = await decorate(candidates, explorationDuration: duration)
             let ranked = ExplorationDrive.ranked(prepared, targetDuration: duration)
             guard !Task.isCancelled, !ranked.isEmpty else { return }
             phase = .previewing(ranked)
@@ -421,15 +421,22 @@ final class NavigationController: ObservableObject {
         for index in routes.indices {
             routes[index].hiddenWaypointIDs = hiddenWaypointIDs
         }
-        return decorate(routes, explorationDuration: explorationDuration)
+        return await decorate(routes, explorationDuration: explorationDuration)
     }
 
     /// 履歴との照合・経路の性格・ドライブブリーフを、同じ出発時刻で候補全部へ載せる。
+    ///
+    /// **履歴との照合だけメインアクターの外へ出す。** あちらは経路を 25m ごとに標本化した
+    /// うえで経路の外接矩形に入る走行履歴を全部索引するので、**貯まるほど重くなる**。
+    /// ここは経路計算のたびと引き直しのたびに通る道なので、メインスレッドでやると
+    /// 運転者が経路を待っているあいだに画面が止まる。ほかの 2 つ（`RouteCharacter` と
+    /// `DriveBrief`）は経路の点数と標本 200 点ぶんで収まるので、そのまま残す。
     private func decorate(_ rawRoutes: [NavRoute],
-                          explorationDuration: TimeInterval?) -> [NavRoute] {
+                          explorationDuration: TimeInterval?) async -> [NavRoute] {
         var routes = rawRoutes
         let noveltyTracks = noveltyBaselineTracks ?? TrackStore.shared.tracks
-        let novelty = RouteNovelty.analyses(for: routes, tracks: noveltyTracks)
+        let novelty = await RouteNovelty.analyses(routes: routes.map(\.coordinates),
+                                                  tracks: noveltyTracks.map(\.coordinates))
         let characters = RouteCharacter.tags(for: routes)
         let departure = Date()
         for index in routes.indices {
@@ -664,17 +671,10 @@ final class NavigationController: ObservableObject {
             // 待っているあいだに引き直しが挟まっていたら、測った値は前の経路のもの。捨てる。
             guard case let .navigating(current) = phase, current.id == route.id else { return }
 
-            // 渋滞回避の提案からこの経路へ切り替えることがある。通常の `calculateRoutes` を
-            // 通らない候補にも、ひと走りの開始時点の履歴で区間表を載せておく。
-            let novelty = RouteNovelty.analyses(
-                for: [candidate],
-                tracks: noveltyBaselineTracks ?? TrackStore.shared.tracks
-            )[0]
-            candidate.newRoadPercentage = novelty.percentage
-            candidate.newRoadProfile = novelty.profile
-            candidate.explorationDuration = route.explorationDuration
-            candidate.hiddenWaypointIDs = route.hiddenWaypointIDs
-
+            // **数字の反映を先に済ませる。** 下の履歴との照合はメインアクターの外へ出すので
+            // 待ちが入り、そのあいだに引き直しが挟まると `guidance` が別の engine になる。
+            // 運転者がいちばん見る数字を、待ちの向こう側へ置かない。
+            //
             // **差し替える前に控える。** `applyMeasuredTimeRemaining` を通したあとの
             // 見込みは測った値そのものになるので、渋滞かどうかを見る差が消える。
             let projected = progress?.timeRemaining
@@ -683,7 +683,21 @@ final class NavigationController: ObservableObject {
             guidance?.applyMeasuredTimeRemaining(candidate.expectedTravelTime)
 
             guard let projected, let stepIndex else { return }
-            travelTimeMeasured.send(TravelTimeMeasurement(route: current,
+
+            // 渋滞回避の提案からこの経路へ切り替えることがある。通常の `calculateRoutes` を
+            // 通らない候補にも、ひと走りの開始時点の履歴で区間表を載せておく。
+            let baseline = noveltyBaselineTracks ?? TrackStore.shared.tracks
+            let novelty = await RouteNovelty.analyses(routes: [candidate.coordinates],
+                                                      tracks: baseline.map(\.coordinates))[0]
+            candidate.newRoadPercentage = novelty.percentage
+            candidate.newRoadProfile = novelty.profile
+            candidate.explorationDuration = route.explorationDuration
+            candidate.hiddenWaypointIDs = route.hiddenWaypointIDs
+
+            // **もう一度確かめる。** 照合を待っているあいだに引き直しが挟まっていれば、
+            // 渡す候補は捨てた経路との比較になる（`TrafficAdvisor` がその差で勧めてくる）。
+            guard case .navigating(let latest) = phase, latest.id == route.id else { return }
+            travelTimeMeasured.send(TravelTimeMeasurement(route: latest,
                                                           candidate: candidate,
                                                           projectedTimeRemaining: projected,
                                                           stepIndex: stepIndex))

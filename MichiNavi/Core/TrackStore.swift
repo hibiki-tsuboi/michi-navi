@@ -100,6 +100,11 @@ final class TrackStore: ObservableObject {
     private let file = TrackFile()
     /// 最後に記録した点。間引きと切れ目の判定に使う。
     private var last: Point?
+    /// ファイルの読み直しが済んだか。**消したあとに読み込みが戻ってくる道**も塞ぐので、
+    /// `clear()` でも立てる（立てないと、消したはずの線が非同期に生き返る）。
+    private var hasRestored = false
+    /// 読み直しを待つあいだに記録した点。読み終わったら読み込んだぶんの後ろへ繋ぐ。
+    private var pendingPoints: [Point] = []
     /// 最後に市区町村を引いた地点。
     private var geocodedNear: CLLocation?
     private var isGeocoding = false
@@ -113,19 +118,39 @@ final class TrackStore: ObservableObject {
                                             from: defaults.data(forKey: Self.visitsKey) ?? Data())) ?? []
     }
 
+    /// **購読を先に始める。** 読み直しを待つあいだの測位も記録する。ファイルへはどのみち
+    /// 追記されるので、ここで捨てると**その走行の線だけが地図から抜けて、次の起動で
+    /// 戻ってくる**という読めない消え方をする。
     func start() {
-        Task {
-            let points = Self.decode(await file.load())
-            tracks = Self.tracks(from: points)
-            // **最後の点を引き継ぐ。** 引き継がないと、起動直後の 1 点が前回の続きから
-            // 50m 以内でも記録され、しかも切れ目の判定を通らずに前の線へ繋がる。
-            last = points.last
-        }
-
         LocationService.shared.$location
             .compactMap { $0 }
             .sink { [weak self] in self?.handle(location: $0) }
             .store(in: &cancellables)
+
+        Task {
+            let stored = Self.decode(await file.load())
+            // 待っているあいだに記録を消されたら、読み込んだぶんを戻さない。
+            guard !hasRestored else { return }
+            hasRestored = true
+            // **読み込んだぶんの後ろへ繋ぎ直す。** 上書きすると、待っているあいだに
+            // 記録した点が落ちる。切れ目の判定は `tracks(from:)` が通す `extend` の 1 か所のまま。
+            let restored = Self.restore(stored: stored, recorded: pendingPoints)
+            pendingPoints = []
+            tracks = restored.tracks
+            // **最後の点を引き継ぐ。** 引き継がないと、起動直後の 1 点が前回の続きから
+            // 50m 以内でも記録され、しかも切れ目の判定を通らずに前の線へ繋がる。
+            last = restored.last
+        }
+    }
+
+    /// 読み込んだぶんと、読み込みを待つあいだに記録したぶんを 1 本に繋ぐ。
+    ///
+    /// **純粋な計算にしてあるのはテストから触るため。** 実物の `start()` はファイルと
+    /// `LocationService` を掴んでいて、競合の窓（読み込み中に測位が来る）をテストから
+    /// 作れない。落とすとここが落ちる。
+    static func restore(stored: [Point], recorded: [Point]) -> (tracks: [Track], last: Point?) {
+        let points = stored + recorded
+        return (tracks(from: points), points.last)
     }
 
     // MARK: - 集計
@@ -155,6 +180,8 @@ final class TrackStore: ObservableObject {
         let point = Point(coordinate: location.coordinate, time: location.timestamp)
         Self.extend(&tracks, with: point, after: last)
         last = point
+        // 読み直しがまだなら控えておく。あちらが戻ってきたときに後ろへ繋ぎ直す。
+        if !hasRestored { pendingPoints.append(point) }
 
         let record = Self.encode(point)
         Task { await file.append(record) }
@@ -264,6 +291,9 @@ final class TrackStore: ObservableObject {
     // MARK: - 消す
 
     func clear() {
+        // **読み直しがまだでも、戻ってきたぶんで復活させない。**
+        hasRestored = true
+        pendingPoints = []
         tracks = []
         visits = []
         last = nil

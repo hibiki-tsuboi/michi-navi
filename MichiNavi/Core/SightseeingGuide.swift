@@ -15,8 +15,15 @@ struct SightseeingGuide {
     /// 市街地で施設の数だけ喋り続けない。案内を引き直しても、この記録は捨てない。
     static let minimumInterval: TimeInterval = 180
 
-    mutating func notice(near location: CLLocation, spots: [SightseeingSpot], now: Date,
-                         hasActiveRoute: Bool, progress: RouteProgress?, isRerouting: Bool) -> Notice? {
+    /// いま紹介できる施設。**決めるだけで、使い切らない**（[consume(_:now:)]）。
+    ///
+    /// 読むかどうかを最後に決めるのは `VoiceGuidance.announce`（読み上げ中・聞き取り中・
+    /// 通話中は見送る）なので、ここで記録まで進めると**読まれなかったひと言で施設を
+    /// 使い切る**——アプリ起動中その施設は二度と出ず、3 分の間隔だけが始まる。
+    /// 曲がる案内で見送ったぶんを後で紹介できる（`skippedTurnDoesNotConsumeSpot`）のと
+    /// 同じ扱いを、声の側の見送りにも揃える。
+    func candidate(near location: CLLocation, spots: [SightseeingSpot], now: Date,
+                   hasActiveRoute: Bool, progress: RouteProgress?, isRerouting: Bool) -> Notice? {
         guard Self.usable(location, now: now), !isRerouting else { return nil }
         if hasActiveRoute {
             // 出発直後・逸脱中・到着直前は、距離が長くても運転の案内を優先する。
@@ -30,11 +37,14 @@ struct SightseeingGuide {
                   let side = Self.side(of: spot.coordinate, from: location) else { return nil }
             return (Notice(spot: spot, side: side), location.distance(from: spot.location))
         }
-        guard let next = candidates.min(by: { $0.1 < $1.1 })?.0 else { return nil }
-        // 読めなかった案内を後追いしない。通過後や折り返した後に同じ施設を紹介しない。
-        announced.append(next.spot)
+        return candidates.min(by: { $0.1 < $1.1 })?.0
+    }
+
+    /// **実際に読み上げたぶんだけ記録する。** 通過後や折り返した後に同じ施設を紹介しない、
+    /// という約束はここで果たす。間隔もここから数え始める。
+    mutating func consume(_ notice: Notice, now: Date) {
+        announced.append(notice.spot)
         lastAnnouncement = now
-        return next
     }
 
     static func usable(_ location: CLLocation, now: Date) -> Bool {

@@ -37,6 +37,33 @@ struct RouteNoveltyTests {
         #expect((195 ... 205).contains(distance))
     }
 
+    /// **照合する履歴の絞り込みは、描画用の線ではなく案内用の座標列で決める。**
+    ///
+    /// 照合は経路計算のたびと引き直しのたびに走り、履歴が貯まるほど重くなるので
+    /// メインアクターの外へ出した。そのぶん渡せるのは座標列だけになり（`MKPolyline` は
+    /// 境界を越えられない）、**外接矩形も `polyline` ではなく座標から出している**。
+    /// `MKRoute.polyline` は steps の座標列とは別物なので、枠を取り違えると
+    /// **照合対象の履歴ごと落ちて、走った道が「初めて」になる**。
+    @Test("履歴の絞り込みは描画用の線ではなく案内用の座標列で決まる")
+    func historyIsFilteredByGuidanceCoordinates() async {
+        // 描画用の線だけを遠くへ置いた経路。案内に使う座標列は元のまま。
+        let elsewhere = MKPolyline(coordinates: [SyntheticRoute.coordinate(north: 500_000),
+                                                 SyntheticRoute.coordinate(north: 501_000)], count: 2)
+        let skewed = NavRoute(name: route.name, distance: route.distance,
+                              expectedTravelTime: route.expectedTravelTime, polyline: elsewhere,
+                              steps: route.steps, advisoryNotices: [], destination: route.destination,
+                              waypoints: [], waypointStepIndices: [],
+                              coordinates: route.coordinates, stepEndIndices: route.stepEndIndices)
+
+        // 同じ道を走った履歴。座標列で絞れていれば走行済みになる。
+        #expect(RouteNovelty.percentage(for: skewed, tracks: [track(route.coordinates)]) == 0)
+
+        // メインアクターの外へ出す入口も同じ答え。
+        let offActor = await RouteNovelty.analyses(routes: [skewed.coordinates],
+                                                   tracks: [route.coordinates])
+        #expect(offActor[0].percentage == 0)
+    }
+
     @Test("同じ道を走っていれば初めての区間は無い")
     func identicalTrackIsNotNew() {
         #expect(RouteNovelty.percentage(for: route, tracks: [track(route.coordinates)]) == 0)

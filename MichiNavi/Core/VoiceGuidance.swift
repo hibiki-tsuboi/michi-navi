@@ -91,8 +91,14 @@ final class VoiceGuidance: NSObject {
             .store(in: &cancellables)
 
         SightseeingAdvisor.shared.notice
-            .sink { [weak self] in
-                self?.announce(.sightseeing(name: $0.spot.name, side: $0.side, detail: $0.spot.detail))
+            .sink { [weak self] notice in
+                // **読んだときだけ知らせ返す。** 見送ったぶんで施設を使い切らないため
+                // （`SightseeingAdvisor.didAnnounce(_:now:)`）。`PassthroughSubject` は
+                // 同期に届くので、ここで返せば送った側はその場で結果を受け取れる。
+                guard self?.announce(.sightseeing(name: notice.spot.name,
+                                                  side: notice.side,
+                                                  detail: notice.spot.detail)) == true else { return }
+                SightseeingAdvisor.shared.didAnnounce(notice)
             }
             .store(in: &cancellables)
 
@@ -146,21 +152,26 @@ final class VoiceGuidance: NSObject {
     }
 
     /// 土地や名所についての短いひと言。県境・街・道・観光で、他の音声に重ねない条件を揃える。
-    private func announce(_ prompt: VoicePrompt) {
+    ///
+    /// **読み上げに回したかを返す。** 観光案内は見送られたぶんを送った側が使い切らない
+    /// ようにしているので（`SightseeingAdvisor.didAnnounce(_:now:)`）、
+    /// 「黙った」ことを呼び元へ伝える口が要る。
+    @discardableResult
+    private func announce(_ prompt: VoicePrompt) -> Bool {
         // 観光案内を意味の分からない通知音に置き換えない。Siri・通話中も黙る。
-        if prompt.isSightseeing, session.promptStyle != .normal { return }
+        if prompt.isSightseeing, session.promptStyle != .normal { return false }
         // **抱えない。** `speak(_:)` は聞き取り中の到着・経由地通過を `pendingPrompt` へ
         // 溜めるが、県境は溜めても意味が無い（聞き取りが終わるころにはとうに過ぎている）。
         // しかも溜めれば、抱えていた到着のひと言を押しのけることになる。
         guard !isSuspended else {
             VisitLog.silenced("suspended")
-            return
+            return false
         }
         // 読み上げ中には重ねない。`AVSpeechSynthesizer` は捨てずに順に読むので、
         // 重ねると曲がる指示のほうが数秒遅れて出る。
         guard !synthesizer.isSpeaking, playingCount == 0 else {
             VisitLog.silenced("speaking")
-            return
+            return false
         }
         // 曲がり角が近いときは黙る。予告のしきい値（1000 / 500 / 200 / まもなく）のうち
         // 下 3 つをこれで覆う。1000m の予告と重なる余地は残るが、そちらは遅れるだけで
@@ -169,10 +180,11 @@ final class VoiceGuidance: NSObject {
            let progress = navigation.progress,
            progress.distanceToNextManeuver <= Self.quietDistance {
             VisitLog.silenced("maneuver-near")
-            return
+            return false
         }
 
         speak(prompt)
+        return true
     }
 
     /// 次の曲がり角までこれより近ければ、探索についてのひと言は見送る。

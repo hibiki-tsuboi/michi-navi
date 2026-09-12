@@ -2,22 +2,79 @@ import CoreLocation
 import Foundation
 import MapKit
 
-/// 候補ルートのうち、これまでの走行記録と重ならない距離の割合を測る。
+/// 候補ルートのうち、これまでの走行記録と重ならない距離の測り方。
 ///
 /// `TrackStore` の点は 50m 以上動いたときだけ残るため、点どうしの完全一致では測れない。
 /// 履歴と候補を短い間隔で標本化し、近さに加えて線の向きも合うところを「走行済み」とする。
 /// 向きを見ないと、交差しただけの道路まで走行済みになってしまう。
+///
+/// **ここに残しているのは `NavRoute` や `TrackStore` を触る入口だけ。** 実際の照合は
+/// 下の `nonisolated extension` にあり、**メインアクターの外で走る**（そこの説明を参照）。
 enum RouteNovelty {
+    /// 複数候補を 1 つの履歴索引でまとめて測る。**同期版**。
+    ///
+    /// **`await` できる呼び元は下の非同期版を使うこと**（`NavigationController.decorate`）。
+    /// こちらはメインスレッドで走るので、長い経路と貯まった履歴では止まる。
+    /// 残してあるのはテストと、経路 1 本だけを測る軽い呼び元のため。
+    static func analyses(for routes: [NavRoute], tracks: [TrackStore.Track]) -> [Analysis] {
+        measure(routes: routes.map(\.coordinates), tracks: tracks.map(\.coordinates))
+    }
+
+    static func percentages(for routes: [NavRoute], tracks: [TrackStore.Track]) -> [Int] {
+        analyses(for: routes, tracks: tracks).map(\.percentage)
+    }
+
+    static func percentage(for route: NavRoute, tracks: [TrackStore.Track]) -> Int {
+        analyses(for: [route], tracks: tracks).first?.percentage ?? 0
+    }
+
+    /// iPhone のブリーフと CarPlay の候補説明で同じ文言を使う。
+    static func label(for percentage: Int) -> String {
+        return String.localizedStringWithFormat(String(localized: "初めての道 %lld%%"),
+                                                Int64(percentage))
+    }
+
+    /// 通知済みの区間をひと走りのあいだ覚える。リルートで経路の距離基準が変わっても、
+    /// 開始地点が近ければ同じ道として二度知らせない。
+    struct AnnouncementGate {
+        private var announcedStarts: [CLLocationCoordinate2D] = []
+
+        mutating func shouldAnnounce(_ stretch: Profile.Stretch, hasJoinedRoute: Bool) -> Bool {
+            guard hasJoinedRoute else { return false }
+            let start = CLLocation(latitude: stretch.startCoordinate.latitude,
+                                   longitude: stretch.startCoordinate.longitude)
+            guard !announcedStarts.contains(where: {
+                start.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) <= 150
+            }) else { return false }
+
+            announcedStarts.append(stretch.startCoordinate)
+            return true
+        }
+    }
+}
+
+// MARK: - 照合そのもの（メインアクターの外）
+
+/// **ここから下は座標だけを見る純粋な計算で、メインアクターの外で走らせる。**
+///
+/// 経路を 25m ごとに標本化したうえで、経路の外接矩形に入る走行履歴を全部索引する。
+/// 呼ばれるのは**経路計算のたびと引き直しのたび**なので、メインスレッドでやると
+/// **運転者が経路を待っているあいだに画面が止まる**（履歴が貯まるほど効く）。
+///
+/// そのために渡すのは `[[CLLocationCoordinate2D]]` だけにしてある。`NavRoute` は
+/// `MKPolyline` と `MKMapItem` を抱えていて境界を越えられないので、**外接矩形も
+/// `polyline` ではなく座標列から出す**（走る経路は同じなので枠は変わらない）。
+nonisolated extension RouteNovelty {
     /// 候補表示の割合と、走行中に使う未走行区間。**同じ標本から作る**ことで、
     /// 出発前に見た数字と走り始めてからの判定が食い違わない。
-    struct Analysis {
+    struct Analysis: Sendable {
         let percentage: Int
         let profile: Profile
     }
 
     /// 案内開始時点で初めてだった区間。距離は経路先頭からの累積メートル。
-    struct Profile: Equatable {
-        struct Stretch: Equatable {
+    struct Profile: Equatable, Sendable {
+        struct Stretch: Equatable, Sendable {
             let startDistance: CLLocationDistance
             let endDistance: CLLocationDistance
             /// リルート後も同じ区間を二度知らせないための照合位置。
@@ -33,7 +90,7 @@ enum RouteNovelty {
             }
         }
 
-        enum Progress: Equatable {
+        enum Progress: Equatable, Sendable {
             /// 次の初めての区間までの距離。
             case approaching(distance: CLLocationDistance)
             /// この経路で、ここまでに走った初めての道の合計。
@@ -79,53 +136,45 @@ enum RouteNovelty {
         }
     }
 
-    /// 通知済みの区間をひと走りのあいだ覚える。リルートで経路の距離基準が変わっても、
-    /// 開始地点が近ければ同じ道として二度知らせない。
-    struct AnnouncementGate {
-        private var announcedStarts: [CLLocationCoordinate2D] = []
-
-        mutating func shouldAnnounce(_ stretch: Profile.Stretch, hasJoinedRoute: Bool) -> Bool {
-            guard hasJoinedRoute else { return false }
-            let start = CLLocation(latitude: stretch.startCoordinate.latitude,
-                                   longitude: stretch.startCoordinate.longitude)
-            guard !announcedStarts.contains(where: {
-                start.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) <= 150
-            }) else { return false }
-
-            announcedStarts.append(stretch.startCoordinate)
-            return true
-        }
-    }
-
     /// GPS の誤差と、実際の車線から MapKit の道路中心線までのずれを吸収する幅。
     /// 広げすぎると隣の道路を走行済みにするので、`TrackStore.accuracyLimit` より狭くする。
-    static let matchingDistance: CLLocationDistance = 35
+    static var matchingDistance: CLLocationDistance { 35 }
     /// 急なカーブの標本どうしは多少向きがずれる一方、交差道路（およそ 90 度）は落としたい。
-    static let maximumAxisDifference = Double.pi / 4
+    static var maximumAxisDifference: Double { .pi / 4 }
     /// 履歴と候補を測る間隔。照合幅より細かくし、同じ線の標本が必ず近くに来るようにする。
-    private static let sampleSpacing: CLLocationDistance = 25
+    private static var sampleSpacing: CLLocationDistance { 25 }
     /// これより短い未走行区間は知らせない。GPS の取りこぼしを「新しい道」と言わないため。
-    private static let minimumStretchDistance: CLLocationDistance = 200
+    private static var minimumStretchDistance: CLLocationDistance { 200 }
     /// 未走行区間の間にある短い既知道路は橋渡しする。交差点だけ走行済みだった場合に、
     /// 同じ道への通知が続けて出るのを防ぐ。
-    private static let maximumKnownGap: CLLocationDistance = 100
+    private static var maximumKnownGap: CLLocationDistance { 100 }
 
-    /// 複数候補を 1 つの履歴索引でまとめて測る。
-    /// ルートごとに全走行履歴を索引し直さないための入口。
-    static func percentages(for routes: [NavRoute], tracks: [TrackStore.Track]) -> [Int] {
-        analyses(for: routes, tracks: tracks).map(\.percentage)
+    /// **メインアクターから外して測る。**
+    ///
+    /// `Task.detached` で明示しているのは、`nonisolated` な `async` 関数が呼び元の
+    /// 隔離を継ぐかどうかが Swift のバージョンと upcoming feature で変わるため
+    /// （SE-0461）。ここは「必ずメインスレッドを離れる」ことに意味があるので、
+    /// 読んで分かる書き方にしてある。
+    static func analyses(routes: [[CLLocationCoordinate2D]],
+                         tracks: [[CLLocationCoordinate2D]]) async -> [Analysis] {
+        await Task.detached { measure(routes: routes, tracks: tracks) }.value
     }
 
     /// 割合と走行中の区間を、共通の履歴索引でまとめて測る。
-    static func analyses(for routes: [NavRoute], tracks: [TrackStore.Track]) -> [Analysis] {
-        guard let firstCoordinate = routes.first?.coordinates.first else {
+    static func measure(routes: [[CLLocationCoordinate2D]],
+                        tracks: [[CLLocationCoordinate2D]]) -> [Analysis] {
+        guard let firstCoordinate = routes.first?.first else {
             return routes.map { _ in Analysis(percentage: 0,
                                                profile: Profile(totalDistance: 0, stretches: [])) }
         }
 
+        // **外接矩形は座標列から出す。** `MKPolyline` は境界を越えられないうえ、
+        // 走る経路は同じなので枠も変わらない（`NavRoute.coordinates` は steps の連結）。
         var bounds = MKMapRect.null
-        for route in routes where !route.coordinates.isEmpty {
-            bounds = bounds.union(route.polyline.boundingMapRect)
+        for coordinates in routes {
+            for coordinate in coordinates {
+                bounds = bounds.union(MKMapRect(origin: MKMapPoint(coordinate), size: MKMapSize()))
+            }
         }
 
         // ルートの枠のすぐ外にある履歴も照合対象にする。候補はいずれも同じ出発地・目的地を
@@ -137,17 +186,7 @@ enum RouteNovelty {
         let history = HistoryIndex(tracks: tracks,
                                    near: bounds,
                                    referenceLatitude: firstCoordinate.latitude)
-        return routes.map { analysis(for: $0, history: history) }
-    }
-
-    static func percentage(for route: NavRoute, tracks: [TrackStore.Track]) -> Int {
-        analyses(for: [route], tracks: tracks).first?.percentage ?? 0
-    }
-
-    /// iPhone のブリーフと CarPlay の候補説明で同じ文言を使う。
-    static func label(for percentage: Int) -> String {
-        return String.localizedStringWithFormat(String(localized: "初めての道 %lld%%"),
-                                                Int64(percentage))
+        return routes.map { analysis(coordinates: $0, history: history) }
     }
 
     private struct Piece {
@@ -164,8 +203,9 @@ enum RouteNovelty {
         var isNew: Bool
     }
 
-    private static func analysis(for route: NavRoute, history: HistoryIndex) -> Analysis {
-        let points = route.coordinates.map(MKMapPoint.init)
+    private static func analysis(coordinates: [CLLocationCoordinate2D],
+                                 history: HistoryIndex) -> Analysis {
+        let points = coordinates.map(MKMapPoint.init)
         guard points.count >= 2 else {
             return Analysis(percentage: 0, profile: Profile(totalDistance: 0, stretches: []))
         }
@@ -265,7 +305,11 @@ enum RouteNovelty {
         return difference
     }
 
-    private struct HistoryIndex {
+    /// **`nonisolated extension` は入れ子の型の中身までは効かない**（そちらで宣言した
+    /// 関数とプロパティだけ）。`init` も `contains` も `Cell` の `Hashable` も照合の本体から
+    /// 呼ぶので、**型そのものを `nonisolated` にして中まで通す**（入れ子の型にも効く）。
+    /// 付け忘れると警告だけ出て、メインスレッドで走る。
+    nonisolated private struct HistoryIndex {
         struct Cell: Hashable {
             let x: Int
             let y: Int
@@ -279,13 +323,14 @@ enum RouteNovelty {
         let cellSize: Double
         let buckets: [Cell: [Sample]]
 
-        init(tracks: [TrackStore.Track], near bounds: MKMapRect, referenceLatitude: CLLocationDegrees) {
+        init(tracks: [[CLLocationCoordinate2D]], near bounds: MKMapRect,
+             referenceLatitude: CLLocationDegrees) {
             let metersPerPoint = MKMetersPerMapPointAtLatitude(referenceLatitude)
-            cellSize = matchingDistance * 2 / max(metersPerPoint, .leastNonzeroMagnitude)
+            cellSize = RouteNovelty.matchingDistance * 2 / max(metersPerPoint, .leastNonzeroMagnitude)
 
             var result: [Cell: [Sample]] = [:]
-            for track in tracks {
-                let points = track.coordinates.map(MKMapPoint.init)
+            for coordinates in tracks {
+                let points = coordinates.map(MKMapPoint.init)
                 for (start, end) in zip(points, points.dropFirst()) {
                     let segmentBounds = MKMapRect(
                         x: min(start.x, end.x),
@@ -297,7 +342,7 @@ enum RouteNovelty {
 
                     let length = start.distance(to: end)
                     guard length > 0 else { continue }
-                    let pieces = max(Int(ceil(length / sampleSpacing)), 1)
+                    let pieces = max(Int(ceil(length / RouteNovelty.sampleSpacing)), 1)
                     let axis = atan2(end.y - start.y, end.x - start.x)
 
                     for index in 0 ..< pieces {
@@ -317,14 +362,14 @@ enum RouteNovelty {
             // メルカトル図法では 1 地図点の長さが緯度で変わる。高緯度の長い検索半径でも
             // 隣接セルを取りこぼさないよう、その地点で必要なセル数を求める。
             let metersPerPoint = MKMetersPerMapPointAtLatitude(point.coordinate.latitude)
-            let radiusInPoints = matchingDistance / max(metersPerPoint, .leastNonzeroMagnitude)
+            let radiusInPoints = RouteNovelty.matchingDistance / max(metersPerPoint, .leastNonzeroMagnitude)
             let radius = max(Int(ceil(radiusInPoints / cellSize)), 1)
 
             for x in (center.x - radius) ... (center.x + radius) {
                 for y in (center.y - radius) ... (center.y + radius) {
                     for sample in buckets[Cell(x: x, y: y)] ?? [] {
-                        guard point.distance(to: sample.point) <= matchingDistance else { continue }
-                        if RouteNovelty.axisDifference(axis, sample.axis) <= maximumAxisDifference {
+                        guard point.distance(to: sample.point) <= RouteNovelty.matchingDistance else { continue }
+                        if RouteNovelty.axisDifference(axis, sample.axis) <= RouteNovelty.maximumAxisDifference {
                             return true
                         }
                     }

@@ -1620,11 +1620,19 @@ extension CarPlayCoordinator: CPMapTemplateDelegate {
         // 押しっぱなしのまま「完了」へ移れる。終了が来ない経路なのでここでも止める。
         stopSustainedPan()
         recenterMap("panning done")
-        // パンに入る前のボタンへ戻す。案内中に入った場合もあるので状態を見て選ぶ。
-        if case .navigating = navigation.phase {
-            applyNavigatingButtons()
-        } else {
-            applyIdleButtons()
+        // パンに入る前のボタンへ戻す。**段階は 4 つとも見分けること**——
+        // 案内中かどうかだけで分けていたころは、**ルート提示中に入って抜けると
+        // 待機中の並びになり「ブリーフ」が消えていた**（そこからは段階が動くまで戻らない）。
+        //
+        // **`applyButtons(for:)` は通さない。** あちらの `isPanningInterfaceVisible` ガードが
+        // まだ下りていなかった場合に、ここで貼り直せなくなる（＝拡大・縮小と「完了」だけが
+        // 残って抜け道が消える）。
+        switch PhaseKind(navigation.phase) {
+        case .previewing: applyPreviewingButtons()
+        case .navigating: applyNavigatingButtons()
+        // **計算中でも貼り直す。** 段階の反映のほうは計算中にテンプレートを触らない
+        // 決まりだが、ここは「パン中の 2 つ」から戻す場所なので、何もしないと戻れない。
+        case .idle, .calculating: applyIdleButtons()
         }
     }
 

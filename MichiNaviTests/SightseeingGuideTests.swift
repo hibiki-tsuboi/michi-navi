@@ -56,8 +56,8 @@ struct SightseeingGuideTests {
                        location(accuracy: -1), location(accuracy: 60), location(course: -1),
                        location(courseAccuracy: -1), location(courseAccuracy: 40)]
         for loc in invalid {
-            var guide = SightseeingGuide()
-            #expect(guide.notice(near: loc, spots: [spot()], now: now,
+            let guide = SightseeingGuide()
+            #expect(guide.candidate(near: loc, spots: [spot()], now: now,
                                  hasActiveRoute: false, progress: nil, isRerouting: false) == nil)
         }
         #expect(SightseeingGuide.usable(location(), now: now))
@@ -83,13 +83,25 @@ struct SightseeingGuideTests {
             (location(), progress(distance: 1500), true)
         ]
         for (loc, progress, rerouting) in states {
-            var guide = SightseeingGuide()
-            #expect(guide.notice(near: loc, spots: [spot()], now: now,
+            let guide = SightseeingGuide()
+            #expect(guide.candidate(near: loc, spots: [spot()], now: now,
                                  hasActiveRoute: true, progress: progress, isRerouting: rerouting) == nil)
         }
-        var guide = SightseeingGuide()
-        #expect(guide.notice(near: location(), spots: [spot()], now: now,
+        let guide = SightseeingGuide()
+        #expect(guide.candidate(near: location(), spots: [spot()], now: now,
                              hasActiveRoute: true, progress: progress(distance: 1500), isRerouting: false) != nil)
+    }
+
+    /// 決めて、**読み上げたことにする**。実物の順番（`SightseeingAdvisor` が決め、
+    /// `VoiceGuidance` が読んでから `didAnnounce` で使い切る）をテストでも踏む。
+    @discardableResult
+    private func announced(_ guide: inout SightseeingGuide, near location: CLLocation,
+                           spots: [SightseeingSpot], now: Date) -> SightseeingGuide.Notice? {
+        guard let notice = guide.candidate(near: location, spots: spots, now: now,
+                                           hasActiveRoute: false, progress: nil,
+                                           isRerouting: false) else { return nil }
+        guide.consume(notice, now: now)
+        return notice
     }
 
     @Test("近い施設を一つ選び、間隔を空けても同じ施設は繰り返さない")
@@ -97,33 +109,55 @@ struct SightseeingGuideTests {
         var guide = SightseeingGuide()
         let near = spot("near")
         let far = spot("far", east: -180, north: 180)
-        let first = guide.notice(near: location(), spots: [far, near], now: now,
-                                 hasActiveRoute: false, progress: nil, isRerouting: false)
+        let first = announced(&guide, near: location(), spots: [far, near], now: now)
         #expect(first?.spot.id == "near")
-        #expect(guide.notice(near: location(age: -60), spots: [near, far], now: now.addingTimeInterval(60),
-                             hasActiveRoute: false, progress: nil, isRerouting: false) == nil)
-        #expect(guide.notice(near: location(age: -200), spots: [near], now: now.addingTimeInterval(200),
-                             hasActiveRoute: false, progress: nil, isRerouting: false) == nil)
-        #expect(guide.notice(near: location(age: -200), spots: [near, far], now: now.addingTimeInterval(200),
-                             hasActiveRoute: false, progress: nil, isRerouting: false)?.spot.id == "far")
+        #expect(announced(&guide, near: location(age: -60), spots: [near, far],
+                          now: now.addingTimeInterval(60)) == nil)
+        #expect(announced(&guide, near: location(age: -200), spots: [near],
+                          now: now.addingTimeInterval(200)) == nil)
+        #expect(announced(&guide, near: location(age: -200), spots: [near, far],
+                          now: now.addingTimeInterval(200))?.spot.id == "far")
     }
 
     @Test("曲がる案内で見送った施設は、通過前なら後で紹介できる")
     func skippedTurnDoesNotConsumeSpot() {
-        var guide = SightseeingGuide()
-        #expect(guide.notice(near: location(), spots: [spot()], now: now, hasActiveRoute: true,
+        let guide = SightseeingGuide()
+        #expect(guide.candidate(near: location(), spots: [spot()], now: now, hasActiveRoute: true,
                              progress: progress(distance: 400), isRerouting: false) == nil)
-        #expect(guide.notice(near: location(), spots: [spot()], now: now, hasActiveRoute: true,
+        #expect(guide.candidate(near: location(), spots: [spot()], now: now, hasActiveRoute: true,
                              progress: progress(distance: 2000), isRerouting: false) != nil)
+    }
+
+    /// **声の側で見送ったぶんも使い切らない。**
+    ///
+    /// 読むかどうかを最後に決めるのは `VoiceGuidance.announce`（読み上げ中・聞き取り中・
+    /// 通話中は黙る）。決めた時点で記録まで進めると、**読まれなかったひと言でその施設が
+    /// アプリ起動中ずっと出なくなり、3 分の間隔だけが始まる**。曲がる案内で見送ったぶんを
+    /// 後で紹介できる（上の `skippedTurnDoesNotConsumeSpot`）のと同じ扱いに揃えてある。
+    @Test("決めただけでは施設を使い切らない（読み上げられなければ次も候補に挙がる）")
+    func candidateDoesNotConsumeUntilAnnounced() throws {
+        var guide = SightseeingGuide()
+        let only = spot()
+
+        // 何度決め直しても、消費していないので同じ施設が返る。
+        for _ in 0 ..< 3 {
+            #expect(guide.candidate(near: location(), spots: [only], now: now, hasActiveRoute: false,
+                                    progress: nil, isRerouting: false)?.spot.id == only.id)
+        }
+
+        // 読み上げたと知らせたぶんだけ使い切る。以降は間隔も効き始める。
+        let spoken = try #require(guide.candidate(near: location(), spots: [only], now: now,
+                                                  hasActiveRoute: false, progress: nil, isRerouting: false))
+        guide.consume(spoken, now: now)
+        #expect(guide.candidate(near: location(age: -200), spots: [only], now: now.addingTimeInterval(200),
+                                hasActiveRoute: false, progress: nil, isRerouting: false) == nil)
     }
 
     @Test("再検索で識別子が変わっても同じ施設を紹介し直さない")
     func changedIdentifierDoesNotRepeat() {
         var guide = SightseeingGuide()
-        #expect(guide.notice(near: location(), spots: [spot("first")], now: now,
-                             hasActiveRoute: false, progress: nil, isRerouting: false) != nil)
-        #expect(guide.notice(near: location(age: -240), spots: [spot("second", east: 110)],
-                             now: now.addingTimeInterval(240), hasActiveRoute: false,
-                             progress: nil, isRerouting: false) == nil)
+        #expect(announced(&guide, near: location(), spots: [spot("first")], now: now) != nil)
+        #expect(announced(&guide, near: location(age: -240), spots: [spot("second", east: 110)],
+                          now: now.addingTimeInterval(240)) == nil)
     }
 }

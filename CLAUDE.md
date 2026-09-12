@@ -6,11 +6,17 @@ MichiNavi は CarPlay 対応のカーナビ iOS アプリ。地図・検索・�
 外部依存（SPM パッケージ）はゼロ。
 
 **利用者に出る名前は「つぼナビ」**（2026-09-12 に「みちナビ」から変えた。
-`INFOPLIST_KEY_CFBundleDisplayName`）。**ターゲット名・スキーム名・ディレクトリ・型名は
-`MichiNavi` のまま**なので、`-scheme MichiNavi` も `MichiNavi.app` もクラッシュログの
-`MichiNavi-*.ips` も旧名で出る。**バンドル ID だけは `jp.hibiki.tsubonavi` へ揃えた**ので、
-ログの述語（`subsystem == ...`）と実機の App ID は新しいほうを見ること。
-**別コンテナになるので、旧 ID で貯めた走破マップ・履歴・ピンは引き継がれない。**
+`INFOPLIST_KEY_CFBundleDisplayName`）。**内部の名前はすべて `MichiNavi` のまま**——
+ターゲット名・スキーム名・ディレクトリ・型名に加えて、**バンドル ID も
+`jp.hibiki.michinavi`**。ログの述語（`subsystem == ...`）も実機の App ID もこちら。
+
+一度 `jp.hibiki.tsubonavi` へ変えて同日に戻した。**表示名と違って、バンドル ID を
+動かすと払うものがある**のが理由で、2 つある。**CarPlay の制限付き entitlement は
+App ID ごとに有効化し直しが要る**（承認はアカウントに付くので再申請は不要だが、
+新しい App ID でケイパビリティを入れてプロファイルを作り直すまで実機ビルドが落ちる）。
+そして**バンドル ID が変わると別コンテナになり、実走で貯めた走破マップ・履歴・ピンが
+引き継がれない**（「初めて」の通算はマイルでいう残高なので、ここが消えるのは重い）。
+利用者に見えるのは表示名だけなので、内部を追従させても得るものが無い。
 
 ## ビルドと実行
 
@@ -39,10 +45,7 @@ xed .
 - **制限付き entitlement は、アカウントへの承認だけでは足りない**。App ID 側でケイパビリティを
   有効化しないとプロビジョニングプロファイルに含まれず、承認前とまったく同じ
   `Entitlement com.apple.developer.carplay-maps not found and could not be included in profile.`
-  で実機ビルドが落ちる。**2026-09-12 にバンドル ID を `jp.hibiki.tsubonavi` へ変えたので、
-  この作業はやり直しが要る**——承認そのものはアカウントに付くので申請は要らないが、
-  新しい App ID でケイパビリティを有効化してプロファイルを作り直すまで、上のエラーで落ちる。
-  バンドル ID を増やすときも同じ作業が要る。
+  で実機ビルドが落ちる。`jp.hibiki.michinavi` では設定済み。バンドル ID を増やすときは同じ作業が要る。
 - **ファイル追加は `MichiNavi/` に置くだけ**。`PBXFileSystemSynchronizedRootGroup` を使っているので
   ターゲットへの登録は自動。`project.pbxproj` を手で編集しない。
 
@@ -497,7 +500,7 @@ Combine の使い分けにも意味がある:
 
     ```bash
     xcrun simctl spawn booted log stream --style compact --level info \
-      --predicate 'subsystem == "jp.hibiki.tsubonavi" AND category == "visit"'
+      --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "visit"'
     ```
 - **催促は `CPNavigationAlert` で出す**（`CPAlertTemplate` ではない）。あちらは画面を覆って
   操作を求めるので、催促のために運転者の手を止めさせることになる。
@@ -1521,7 +1524,7 @@ CarPlay 層は触らずに済む設計。
 
   ```bash
   xcrun simctl spawn booted log stream --style compact --level info \
-    --predicate 'subsystem == "jp.hibiki.tsubonavi" AND category == "route"'
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "route"'
   ```
 - **引き直しの見分けは `NavRoute.id` ではなく `NavRoute.signature`**。`id` は生成のたびに
   変わる UUID なので、**同じ道を同じ順に曲がる経路でも別物になる**。`VoiceGuidance` は
@@ -2079,7 +2082,7 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 
   ```bash
   xcrun simctl spawn booted log stream --style compact --level info \
-    --predicate 'subsystem == "jp.hibiki.tsubonavi" AND category == "parking"'
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "parking"'
   ```
 
   **データ側と経路側の心配は 2026-08-16 に潰した**（MapKit を直接叩いて実測）。
@@ -2152,7 +2155,7 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
   ```bash
   log collect --device --last 1h --output michinavi.logarchive
   log show michinavi.logarchive --style compact --info \
-    --predicate 'subsystem == "jp.hibiki.tsubonavi" AND category == "gesture"'
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "gesture"'
   ```
 
   Mac を繋いだまま流し見るなら Console.app（Action → Include Info Messages を入れる）。
@@ -2176,7 +2179,7 @@ CarPlay entitlement（`com.apple.developer.carplay-maps`）は 2026-08-15 に承
 
   ```bash
   xcrun simctl spawn booted log stream --style compact --level info \
-    --predicate 'subsystem == "jp.hibiki.tsubonavi" AND category == "vehicle"'
+    --predicate 'subsystem == "jp.hibiki.michinavi" AND category == "vehicle"'
   ```
 
   こちらは CarPlay Simulator で起こせるのでシミュレータ相手でよい。実機から後で

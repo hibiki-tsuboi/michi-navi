@@ -4,9 +4,27 @@ import UIKit
 /// 同じ指示をセンター画面・Dashboard・通知・車のメーターへ渡す。
 /// 属性付きの文だけが古い短縮形に戻る、といった表示先ごとの食い違いを防ぐ。
 enum ManeuverCard {
-    static func make(for instruction: ManeuverInstruction) -> CPManeuver {
+    /// 高速の上で出すカードの地色。**日本の案内標識と同じ緑**（一般道は青の
+    /// `CPMapTemplate.guidanceBackgroundColor`）。
+    ///
+    /// **`systemGreen` は使わない。** 明るすぎて白い文字が沈むうえ（白とのコントラスト比は
+    /// 2.2:1。いまの青は 4.0:1、この緑は 6.6:1）、「成功」を知らせる色に見える。標識の緑は
+    /// 暗く、白抜きで読ませるために選ばれている値なので、そちらへ寄せる。
+    /// **固定の色にする。** 夜に明るくなる動的な色だと、標識と同じ色という理由が消える
+    /// （走った道の灰色を `systemGray` にしないのと同じ）。**昼夜の地図に重ねて選んだ。**
+    ///
+    /// **`private` にしていないのはテストのため。** `CPManeuver.cardBackgroundColor` は
+    /// 渡した色をそのまま返さず、`UIDynamicAppDefinedColor` に包んで持つ（CarPlay の外で
+    /// 解決すると白になる）ので、**読み返して確かめられない**。色を見るなら渡す側を見る。
+    static let highwayColor = UIColor(red: 0x00 / 255, green: 0x6B / 255, blue: 0x3C / 255, alpha: 1)
+
+    static func make(for instruction: ManeuverInstruction, onHighway: Bool = false) -> CPManeuver {
         let kind = ManeuverKind(instruction)
         let maneuver = CPManeuver()
+        // 日本の案内標識は高速が緑、一般道が青。`cardBackgroundColor` は
+        // `guidanceBackgroundColor` より優先されるので、指示ごとに切り替えられる
+        // （センター・Dashboard・メーター内の 3 画面ともこの値を読む）。
+        if onHighway { maneuver.cardBackgroundColor = highwayColor }
         maneuver.instructionVariants = instruction.variants
         maneuver.dashboardInstructionVariants = instruction.compactVariants
         maneuver.notificationInstructionVariants = instruction.compactVariants

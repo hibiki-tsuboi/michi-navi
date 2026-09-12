@@ -221,6 +221,8 @@ final class CarPlayCoordinator: NSObject {
         // 曲がる指示は警告ではないので、経路の線と同じ青に揃える。
         // 渡した色は `pauseTrip` のカードにも波及するため、あちらは色を明示して切り離す
         // （[replaceRoute] と [refreshTripPause]）。
+        // **これは一般道の色**。高速の上では `ManeuverCard` が指示ごとに緑を渡して上書きする
+        // （日本の案内標識と同じ色分け）。
         mapTemplate.guidanceBackgroundColor = .systemBlue
         applyIdleButtons()
         interfaceController.setRootTemplate(mapTemplate, animated: true, completion: nil)
@@ -881,10 +883,14 @@ final class CarPlayCoordinator: NSObject {
     /// 引き直したあとの並びは `resumeTrip(updatedRouteInformation:)` が運ぶので、
     /// こちらから足す必要はない。
     private func rebuildManeuvers(for route: NavRoute, stepIndex: Int, isNewSession: Bool) {
+        // 走っているあいだ高速の上にいるかは、指示文を頭から辿らないと決まらない
+        // （入口と出口で状態が変わる）。カードの地色をそこから決める。
+        let onHighway = HighwaySections.map(of: route.steps.map(\.instruction))
         routeManeuvers = route.steps.enumerated().map { index, step in
             makeManeuver(for: step,
                          at: index,
                          on: route,
+                         onHighway: onHighway[index],
                          distance: index == stepIndex ? currentDistanceToManeuver(default: step.distance) : step.distance)
         }
         maneuverRouteID = route.id
@@ -943,9 +949,10 @@ final class CarPlayCoordinator: NSObject {
     private func makeManeuver(for step: NavStep,
                               at stepIndex: Int,
                               on route: NavRoute,
+                              onHighway: Bool,
                               distance: CLLocationDistance) -> CPManeuver {
         let instruction = ManeuverInstruction(step.instruction)
-        let maneuver = ManeuverCard.make(for: instruction)
+        let maneuver = ManeuverCard.make(for: instruction, onHighway: onHighway)
         // 出口の角度は、車のメーター・HUDへ渡すロータリーでだけ測る。
         let junction = instruction.direction == .roundabout
             ? JunctionGeometry.make(for: route, stepIndex: stepIndex) : nil

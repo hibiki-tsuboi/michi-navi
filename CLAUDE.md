@@ -1598,6 +1598,31 @@ CarPlay 層は触らずに済む設計。
 - **`CPMapTemplate.guidanceBackgroundColor` は必ず設定する**。**渡さないと案内カードが
   真っ赤に出る**（2026-08-16 に CarPlay で実測。曲がる指示は警告ではないので、
   そのままにはできない）。経路の線と揃えて `systemBlue` を渡している。
+  - **これは一般道の色で、高速の上では緑にする**（2026-09-12）。日本の案内標識が
+    高速道路＝緑・一般道＝青なので、案内カードもそれに合わせる。
+    `CPManeuver.cardBackgroundColor` が優先されるので**指示 1 件ごとに切り替えられる**
+    （センター・Dashboard・メーター内の 3 画面ともこの値を読む。26.2 のランタイムで確認:
+    `CPSNavigationCardViewController._updateCardBackgroundColors` /
+    `CPSDashboardManeuversCardView._updateStyleOverridesForSubviews` /
+    `CPSInstrumentClusterCardViewController.showManeuvers:`）。
+    - **どの step が高速かは `HighwaySections`（`Core/`）が決める。** MapKit は道路種別を
+      返さないので指示文から読むしかない。**見るのはひとつ前の step の指示文**
+      （`steps[i].instruction` は step i の終わりの操作なので、走っている道はひとつ前の
+      操作で入った道。`routeRoadNames` と同じ理屈）。入口と出口で状態が変わるぶんは
+      頭から辿って引き継ぐ——高速の途中の指示は道路名を名乗らないことがあり、そこで
+      青へ戻すと**同じ道を走っているのに色が点滅する**。**最初の step は必ず青**
+      （出発地の道を教えてくれる指示文が無い）。
+    - **緑にする側は日本語の語だけで判定する。** 高速＝緑は**日本の案内標識の決まり**で、
+      国によって逆になる（フランスは autoroute が青、route nationale が緑）。日本の標識
+      だけを描く `RoadShieldImage` と同じ扱いで、英語の指示文では青のまま。
+      **青へ戻す側（出口）は言語を問わない。** 間違えるなら一般道を緑にしないほうへ倒す。
+    - **`systemGreen` は使わない。** 白い文字とのコントラスト比が 2.2:1 しかなく
+      （青は 4.0:1、選んだ #006B3C は 6.6:1）、「成功」を知らせる色に見える。
+      **昼夜の地図の上に候補を描き出して選んだ**（色は画面で決める、のいつもの手）。
+      **固定の色にする**——夜に明るくなる動的な色では、標識と同じという理由が消える。
+    - **渡した色は読み返せない。** `cardBackgroundColor` は渡した `UIColor` を
+      `UIDynamicAppDefinedColor` に包んで持つので、CarPlay の外で解決すると**白が返る**
+      （テストで実測）。確かめるのは渡す側（`ManeuverCard.highwayColor`）。
   - **色を渡す口は 3 つあり、`CPManeuver.cardBackgroundColor` → `guidanceBackgroundColor`
     → CarPlay の既定、の順に優先される**（前 2 つはヘッダに明記。3 つ目は
     `-[CPSNavigationCardViewController _updateCardBackgroundColors]` の分岐）。
@@ -1801,6 +1826,9 @@ CarPlay 層は触らずに済む設計。
 - **文言マッチの表は訳さない。日英を同じ配列に並べる。** `ManeuverDirection`（MapKit の指示文）と
   `VoiceCommand`（話し言葉）がこれにあたる。どちらも**端末の言語で入力が変わる**ので、
   「いまの言語の表」を選ぶのではなく両方を持って両方を見る。
+  - **例外は「国ごとに答えが違う」もの。** `RoadShieldImage`（標識の形）と
+    `HighwaySections`（高速＝緑）は**日本語の語だけ**を見る。日英を並べると、他の国で
+    間違った標識・逆の色を出すことになる。**英語を足したくなったらここを読むこと。**
 
 ## テスト
 

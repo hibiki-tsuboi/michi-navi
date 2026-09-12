@@ -40,6 +40,27 @@ struct ManeuverCardTests {
         #expect((card.value(forKey: "highwayExitLabel") as? String ?? "").isEmpty)
     }
 
+    /// 日本の案内標識と同じ色分け。一般道は `guidanceBackgroundColor` の青に任せ、
+    /// 高速のときだけカード側で上書きする。
+    @Test("高速の指示だけ地色を変える")
+    func highwayCardIsSignGreen() {
+        let ordinary = ManeuverCard.make(for: ManeuverInstruction("交差点を右折します"))
+        #expect(ordinary.cardBackgroundColor == nil)
+
+        let highway = ManeuverCard.make(for: ManeuverInstruction("竹橋JCTで左車線を走行して首都高速3号線へ"),
+                                        onHighway: true)
+        #expect(highway.cardBackgroundColor != nil)
+
+        // **カードから読み返さない。** `cardBackgroundColor` は渡した色を
+        // `UIDynamicAppDefinedColor` に包んで持つので、CarPlay の外で解決すると白になる。
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        let readable = ManeuverCard.highwayColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        #expect(readable)
+        #expect(green > red && green > blue)
+        // **白抜きで読ませる濃さ。** `systemGreen`（0.78）のような明るい緑では文字が沈む。
+        #expect(green < 0.5)
+    }
+
     @Test("出口番号は方面や道路番号と分けて車へ渡す")
     func exitNumberIsNotRoadNumber() {
         let exit = ManeuverCard.make(for: ManeuverInstruction("Take exit 23B on the left toward Route 246"))

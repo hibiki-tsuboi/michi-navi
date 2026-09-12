@@ -1,0 +1,12 @@
+title: つぼナビ
+description: 走った道が地図に残るカーナビ（iOS / CarPlay）
+lang: ja
+theme: jekyll-theme-minimal
+
+# front matter に layout を書かずに済ませる。書き忘れると
+# レイアウト無しの素の HTML になり、見た目だけが崩れる。
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default

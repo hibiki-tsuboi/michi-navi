@@ -1,3 +1,7 @@
+---
+title: プライバシーポリシー
+---
+
 # プライバシーポリシー
 
 **つぼナビ**（iOS / CarPlay 向けカーナビアプリ。バンドル ID: `jp.hibiki.michinavi`）

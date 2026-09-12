@@ -53,6 +53,17 @@ xed .
   WeatherKit・Speech が内部で張る HTTPS だけで、OS と標準フレームワーク経由の TLS は
   免除にあたる。**独自の暗号を足すか、Apple のフレームワーク以外で通信を始めたら、
   この申告を見直すこと**（書類＝CCATS や自己分類レポートが要るのはそちら側に倒れたとき）。
+- **サポートとプライバシーポリシーは `docs/` から GitHub Pages で出す**（2026-09-12）。
+  App Store Connect は**どちらも公開 URL を必須で要求する**ので、リポジトリに Markdown を
+  置くだけでは足りない。publishing source は main の `/docs`。
+  - サポート: `https://hibiki-tsuboi.github.io/michi-navi/`（`docs/index.md`）
+  - プライバシーポリシー: 同 `/privacy.html`（`docs/privacy.md`）
+  - **front matter の無い `.md` は Jekyll が HTML にしない**——そのまま配られるので、
+    ブラウザには Markdown の生テキストが出る。ページを足すときは必ず付けること。
+    `layout` は `docs/_config.yml` の `defaults` で与えているので `title` だけでよい。
+  - **`docs/privacy.md` は実装と揃っていることが前提**。位置情報の許可の範囲・端末に
+    残すもの・Apple へ送るものを変えたら、ここも直す。**審査で読まれるのは実装ではなく
+    こちら**なので、食い違うと通らない。
 - **ファイル追加は `MichiNavi/` に置くだけ**。`PBXFileSystemSynchronizedRootGroup` を使っているので
   ターゲットへの登録は自動。`project.pbxproj` を手で編集しない。
 

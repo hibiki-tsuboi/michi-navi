@@ -222,8 +222,8 @@ final class CarPlayCoordinator: NSObject {
         // 渡した色は `pauseTrip` のカードにも波及するため、あちらは色を明示して切り離す
         // （[replaceRoute] と [refreshTripPause]）。
         // **これは一般道の色**。高速の上では `ManeuverCard` が指示ごとに緑を渡して上書きする
-        // （日本の案内標識と同じ色分け）。
-        mapTemplate.guidanceBackgroundColor = .systemBlue
+        // （日本の案内標識と同じ色分け）。値は緑と対にして `ManeuverCard` に置いてある。
+        mapTemplate.guidanceBackgroundColor = ManeuverCard.ordinaryColor
         applyIdleButtons()
         interfaceController.setRootTemplate(mapTemplate, animated: true, completion: nil)
 

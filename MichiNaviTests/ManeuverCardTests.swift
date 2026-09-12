@@ -1,5 +1,6 @@
 import CarPlay
 import Testing
+import UIKit
 @testable import MichiNavi
 
 @MainActor
@@ -59,6 +60,30 @@ struct ManeuverCardTests {
         #expect(green > red && green > blue)
         // **白抜きで読ませる濃さ。** `systemGreen`（0.78）のような明るい緑では文字が沈む。
         #expect(green < 0.5)
+    }
+
+    /// **どちらの地色にも白い文字が載る。** 4.5:1 は WCAG AA の下限で、`systemBlue`
+    /// （4.0:1）や「明るい青」（#0A84FF で 3.6:1）はここで落ちる。走行中に一瞬で読む
+    /// 文字なので、標識と同じく彩度で青さを出し、輝度は上げない。
+    @Test("案内カードの地色は白い文字が読める濃さ")
+    func signColorsCarryWhiteText() {
+        #expect(Self.contrastWithWhite(of: ManeuverCard.ordinaryColor) >= 4.5)
+        #expect(Self.contrastWithWhite(of: ManeuverCard.highwayColor) >= 4.5)
+
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        let readable = ManeuverCard.ordinaryColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        #expect(readable)
+        #expect(blue > green && blue > red)
+    }
+
+    /// WCAG のコントラスト比（白＝相対輝度 1.0 との比）。
+    private static func contrastWithWhite(of color: UIColor) -> CGFloat {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        _ = color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 1.05 / (0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue) + 0.05)
     }
 
     @Test("出口番号は方面や道路番号と分けて車へ渡す")

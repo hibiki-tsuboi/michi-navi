@@ -303,6 +303,18 @@ final class VoiceGuidance: NSObject {
     /// `.short` のときは言葉ではなくトーンで知らせる。
     private func playTone() {
         guard activateSession() else { return }
+        // **鳴らす前に、前のトーンを閉じる。** `tonePlayer` の席は 1 つしかないので、
+        // 続けて鳴らすと前の `AVAudioPlayer` は代入で解放されるが、**解放でも `stop()` でも
+        // `audioPlayerDidFinishPlaying` は来ない**。数え上げだけが残って `playingCount` が
+        // 0 に戻らなくなる。
+        //
+        // そうなると 2 つとも壊れる。`releaseSessionIfIdle` が二度と通らないので
+        // **音楽をダックしたまま・ポッドキャストを止めたまま**になり（このクラスが
+        // いちばん避けたい状態）、`announce` の `playingCount == 0` も永久に満たされない
+        // ので**県境・初めての街・初めての道・観光がアプリを終えるまで黙る**。
+        //
+        // **到着と収穫は必ず続けて積む**（`arrived` の sink）ので、`.short` では毎回起きる。
+        releaseTonePlayer()
 
         do {
             let player = try AVAudioPlayer(data: Self.toneData)
@@ -314,6 +326,17 @@ final class VoiceGuidance: NSObject {
             NSLog("[MichiNavi] トーンの再生に失敗: \(error.localizedDescription)")
             releaseSessionIfIdle()
         }
+    }
+
+    /// 鳴っているトーンを止めて、数え上げだけ戻す。
+    ///
+    /// **`releaseSessionIfIdle` は通さない。** 呼び元はこの直後に次の音を鳴らすので、
+    /// ここでセッションを手放すと有効化のやり直しになる（そのぶん音楽への出入りも増える）。
+    private func releaseTonePlayer() {
+        guard let player = tonePlayer else { return }
+        player.stop()
+        tonePlayer = nil
+        playingCount = max(playingCount - 1, 0)
     }
 
     private func stopSpeaking() {
@@ -406,8 +429,15 @@ extension VoiceGuidance: AVSpeechSynthesizerDelegate {
 // MARK: - AVAudioPlayerDelegate
 
 extension VoiceGuidance: AVAudioPlayerDelegate {
+    /// **いま鳴っている本人からの通知だけ数える。** `stopSpeaking()` や差し替えで捨てた
+    /// プレイヤーの遅い通知をそのまま数えると、次に始めた音の再生数を減らしてしまう
+    /// （読み上げ側で `SpeechUtterances` がやっているのと同じ用心）。
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        // identity だけ使うが、actor に届くまで本体も保持する。ID だけ渡すと解放後の
+        // アドレスが次のプレイヤーに再利用され得る（`speechSynthesizer` と同じ理由）。
+        nonisolated(unsafe) let finished = player
         Task { @MainActor in
+            guard self.tonePlayer === finished else { return }
             self.tonePlayer = nil
             self.finishPlaying()
         }

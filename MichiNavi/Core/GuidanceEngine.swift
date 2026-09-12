@@ -77,6 +77,9 @@ final class GuidanceEngine {
     /// 数えると、止まったまま引き直しが走る。しかも引き直しても始点は同じ車道へ
     /// 寄るので何も変わらず、「再検索中」のカードと「ルートを再検索しました」の
     /// 読み上げが数秒おきに繰り返される。
+    ///
+    /// **到着の条件でもある**（[progress(travelled:snappedTo:distanceFromRoute:isOffRoute:canArrive:)]）。
+    /// 乗る前に終端へ吸着しうるので、乗っていないうちは着いたことにしない。
     private var hasJoinedRoute = false
 
     /// 最初の測位の位置。経路に乗らないまま走り出したときに判定を復活させる基準
@@ -210,6 +213,19 @@ final class GuidanceEngine {
     }
 
     /// 経路上の進んだ距離から進捗を組み立てる。実測と推測で共通。
+    ///
+    /// **到着には [hasJoinedRoute] も要る。** 残距離は経路への吸着から出しているが、
+    /// 中心線から離れているときの吸着先は [nearestPointOnRoute] の**全体探索**が決める。
+    /// そのため**走り出す前に経路の終端へ吸着することがありうる**——周回ルート
+    /// （探索ドライブ）は出発地＝目的地なので、駐車場から始めると最初の 1 点で
+    /// 残り 0m になり、「案内開始」を押した瞬間に到着して終わっていた
+    /// （実測: 全長 8.0km の周回、中心線から 120m 外で残り 9m）。
+    ///
+    /// **始まっていないものは終われない**、というのがここの線引き。目的地の手前で
+    /// 駐車場へ折れる場面（到着を逸脱より先に見る理由）は必ず一度経路に乗っているので
+    /// 変わらない。落ちるのは**一度も経路に乗らないまま終端へ吸着した場合**だけで、
+    /// そこは案内としても到着ではなく引き直しの領分（出発地から 100m 離れれば
+    /// [canJudgeOffRoute] が逸脱を数え始める）。
     private func progress(travelled: CLLocationDistance,
                           snappedTo coordinate: CLLocationCoordinate2D,
                           distanceFromRoute: CLLocationDistance,
@@ -226,7 +242,7 @@ final class GuidanceEngine {
                              snappedCoordinate: coordinate,
                              distanceFromRoute: distanceFromRoute,
                              isOffRoute: isOffRoute,
-                             hasArrived: canArrive && remaining <= arrivalThreshold,
+                             hasArrived: canArrive && hasJoinedRoute && remaining <= arrivalThreshold,
                              hasJoinedRoute: hasJoinedRoute)
     }
 

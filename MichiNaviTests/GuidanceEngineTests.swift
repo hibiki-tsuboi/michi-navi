@@ -135,6 +135,69 @@ struct GuidanceEngineTests {
         #expect(engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 990))).hasArrived)
     }
 
+    /// **周回ルートで、走り出す前に到着させない。**
+    ///
+    /// 中心線から 50m 以上外れている測位は経路全体から最寄り点を探し直す
+    /// （`nearestPointOnRoute`）ので、**吸着先が終端になりうる**。探索ドライブは
+    /// 出発地＝目的地なので、駐車場や施設の中から始めるとその 1 点目で残りが 0m になり、
+    /// 「案内開始」を押した瞬間に「周辺です。案内を終了します」で終わっていた。
+    ///
+    /// 吸着そのものは止められない（止めると折り返しやトンネル明けで経路を見失う）ので、
+    /// **乗るまで着かせない**ほうで塞いである。`hasJoinedRoute` の条件を外すとここで落ちる。
+    @Test("周回ルートの出発時に、経路の終端へ吸着して即到着しない")
+    func doesNotArriveBeforeJoiningALoop() {
+        let engine = GuidanceEngine(route: SyntheticRoute.shaped(Self.loop))
+
+        // 駐車場の中。中心線から 120m 外で、**復路の終端のほうが往路の始点より近い**。
+        let parked = SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: -120), speed: 0)
+        let progress = engine.update(with: parked)
+
+        #expect(progress.hasJoinedRoute == false)
+        // 吸着は起きている（全体探索の結果）。**それを到着にしないことがここの要。**
+        #expect(progress.distanceRemaining < 50)
+        #expect(progress.hasArrived == false)
+    }
+
+    /// 上の裏返し。**乗って一周すれば、これまでどおり到着する。**
+    /// これが無いと「周回では永久に着かない」という直しすぎに気づけない。
+    @Test("周回ルートでも、一度乗ってしまえば終端で到着する")
+    func arrivesAfterRidingTheWholeLoop() {
+        let engine = GuidanceEngine(route: SyntheticRoute.shaped(Self.loop))
+        _ = engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: -120), speed: 0))
+
+        for corner in [SyntheticRoute.coordinate(north: 0, east: 30),
+                       SyntheticRoute.coordinate(north: 2_000, east: 30),
+                       SyntheticRoute.coordinate(north: 2_000, east: 2_000),
+                       SyntheticRoute.coordinate(north: 0, east: 2_000)] {
+            _ = engine.update(with: SyntheticRoute.fix(at: corner))
+        }
+
+        let arrival = engine.update(with: SyntheticRoute.fix(at: SyntheticRoute.coordinate(north: 0, east: -10)))
+        #expect(arrival.hasJoinedRoute)
+        #expect(arrival.hasArrived)
+    }
+
+    /// 出発地へ戻る周回。往路は東へ 30m、復路は西へ 10m ずれて出発地の前を通る。
+    /// **ずらしてあるのは、終端のほうが始点より近くなる形を作るため**——ぴたりと
+    /// 重ねると最寄り点の比較が引き分けになり、先に見た始点が勝って症状が出ない。
+    private static let loop: [CLLocationCoordinate2D] = {
+        var coordinates: [CLLocationCoordinate2D] = []
+        for north in stride(from: 0.0, through: 2_000, by: 50) {
+            coordinates.append(SyntheticRoute.coordinate(north: north, east: 30))
+        }
+        for east in stride(from: 30.0, through: 2_000, by: 50) {
+            coordinates.append(SyntheticRoute.coordinate(north: 2_000, east: east))
+        }
+        for north in stride(from: 2_000.0, through: 0, by: -50) {
+            coordinates.append(SyntheticRoute.coordinate(north: north, east: 2_000))
+        }
+        for east in stride(from: 2_000.0, through: -10, by: -50) {
+            coordinates.append(SyntheticRoute.coordinate(north: 0, east: east))
+        }
+        coordinates.append(SyntheticRoute.coordinate(north: 0, east: -10))
+        return coordinates
+    }()
+
     // MARK: - 測位が途切れているあいだ
 
     @Test("推測は最後の速度で経路上を進める")

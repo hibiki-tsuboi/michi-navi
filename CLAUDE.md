@@ -46,6 +46,13 @@ xed .
   有効化しないとプロビジョニングプロファイルに含まれず、承認前とまったく同じ
   `Entitlement com.apple.developer.carplay-maps not found and could not be included in profile.`
   で実機ビルドが落ちる。`jp.hibiki.michinavi` では設定済み。バンドル ID を増やすときは同じ作業が要る。
+- **暗号化の輸出申告は「免除」で通る**（`INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO`、
+  2026-09-12）。入れてあるのは App Store Connect がビルドを上げるたびに聞いてくるのを
+  止めるため。**根拠は「自前の暗号がひとつも無い」こと**——`CryptoKit` / `CommonCrypto` /
+  `Security` / Keychain はどこにも無く、`URLSession` すら使っていない。通信は MapKit・
+  WeatherKit・Speech が内部で張る HTTPS だけで、OS と標準フレームワーク経由の TLS は
+  免除にあたる。**独自の暗号を足すか、Apple のフレームワーク以外で通信を始めたら、
+  この申告を見直すこと**（書類＝CCATS や自己分類レポートが要るのはそちら側に倒れたとき）。
 - **ファイル追加は `MichiNavi/` に置くだけ**。`PBXFileSystemSynchronizedRootGroup` を使っているので
   ターゲットへの登録は自動。`project.pbxproj` を手で編集しない。
 

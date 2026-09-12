@@ -349,6 +349,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MichiNavi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "つぼナビ";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "画面を消していても案内を続けるため、バックグラウンドでも位置情報を使用します。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "現在地の表示と目的地までのルート案内に位置情報を使用します。";
@@ -389,6 +390,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MichiNavi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "つぼナビ";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.navigation";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "画面を消していても案内を続けるため、バックグラウンドでも位置情報を使用します。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "現在地の表示と目的地までのルート案内に位置情報を使用します。";

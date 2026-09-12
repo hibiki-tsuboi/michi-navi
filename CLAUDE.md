@@ -99,6 +99,27 @@ Combine の使い分けにも意味がある:
 | `CarPlay/` | `CPxxx` テンプレート ↔ `NavigationController` の変換。センターディスプレイ・Dashboard・メーター内の 3 画面と、車そのものへの受け渡し | 案内ロジックを持たない |
 | `Phone/` | SwiftUI 画面 | 同上 |
 
+**iPhone は縦固定**（`INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone`、2026-09-12）。
+理由は 2 つで、どちらも「この画面は停まっているときに使うもの」から来ている。
+
+- **運転中に使わない画面だから**（そのための CarPlay）。横で使う場面＝ダッシュへの横置き
+  マウントは、その前提の外にある。ピンの編集を「…」で見せることにしたのと同じ判断。
+- **ルート提示が横に収まらない。** iPhone 17 Pro の横は高さ 402pt（下端の安全領域を引いて
+  およそ 381pt）なのに、`.previewing` では上バー（検索＋ピン 2 つ ≈ 90pt）と提示パネル
+  （行き先名・要約・**展開済みのドライブブリーフ**・到着時刻から逆算・ボタン ≈ 350pt）が
+  両方 `safeAreaInset` で出る。合計およそ 440pt。`bottomPanel` はスクロールを持たないので、
+  **地図が潰れたうえで内容が切れる**。しかも**ブリーフの項目数は経路しだいで増える**
+  （注意・日差し・初めての道・候補との違い・曲がる回数・立ち寄り先）ので、長いルートほど悪化する。
+  待機画面のほうは横でも成立していた（2026-09-12 にシミュレータで確認）。
+
+**CarPlay には効かない。** あちらは別シーン（`CPTemplateApplicationScene`）で、向きは
+ヘッドユニットが決める（ガイドにも App の向き設定についての記述は無い。p.66）。
+**ただし実機で見てはいない**——26.4 以降のシミュレータは CarPlay を出すと落ちるため
+（→「踏み抜きやすい前提」）。**iPad は 4 方向のまま**（高さがあるので破綻しない）。
+
+**横を戻すなら、先に提示パネルと `ExplorationDriveSheet`**（`.presentationDetents([.medium])`
+も横ではほとんど高さが無い）**をスクロールできるようにすること。** 向きだけ足すと切れる。
+
 共有シングルトンは 19 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /

@@ -22,8 +22,16 @@ enum ManeuverCard {
         if let exitLabel = instruction.exitLabel { maneuver.highwayExitLabel = exitLabel }
 
         let road = RoadName.first(in: instruction.original)
-        maneuver.junctionImage = RoadNameImage.make(for: road, direction: instruction.direction,
-                                                   signpost: instruction.signpost)
+        // **センターディスプレイの案内カードには渡さない**（2026-09-12）。あちらは
+        // `CPSPrimaryManeuverView.fitJunctionViewToHeight` が NO で、渡した 140×100pt が
+        // そのままカードの高さになる。カードの下端が到着予定トレイの上端に届くと、
+        // CarPlay は `_checkNavigationCardHelperViewForETAFit` から `_setETAViewHidden:` を
+        // 呼んで**トレイごと消す**（こちらから出し入れする API は無い）。道路名は指示文にも
+        // `roadFollowingManeuverVariants` にも入っているので、**運転者がいちばん見る
+        // 到着予定と引き換えにはしない**。Dashboard は同じメソッドが YES ＝画像を高さに
+        // 合わせて縮めるので、あちらにだけ渡す。
+        maneuver.dashboardJunctionImage = RoadNameImage.make(for: road, direction: instruction.direction,
+                                                            signpost: instruction.signpost)
         if let road { maneuver.roadFollowingManeuverVariants = [road] }
         CarPlayVehicleLog.roadName(road, from: instruction.original)
         return maneuver

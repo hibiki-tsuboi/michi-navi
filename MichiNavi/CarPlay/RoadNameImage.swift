@@ -1,7 +1,10 @@
 import UIKit
 
-/// 案内カードに、これから入る道路を大きな文字で示す。
+/// Dashboard の案内カードに、これから入る道路を大きな文字で示す。
 /// 交差点の画像枠を使うが、経路の形や次の次の操作は描かない。
+///
+/// **センターディスプレイには渡さない。** あちらは画像の高さがそのまま案内カードの
+/// 高さになり、伸びたぶん CarPlay が到着予定トレイを消す（理由は `ManeuverCard`）。
 enum RoadNameImage {
     private static let size = CGSize(width: 140, height: 100)
     private static let textArea = CGRect(x: 8, y: 30, width: 124, height: 62)

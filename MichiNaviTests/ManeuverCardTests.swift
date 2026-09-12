@@ -32,7 +32,10 @@ struct ManeuverCardTests {
             #expect(variant.contains("左車線"))
             #expect(variant.contains("渋谷、東名方面"))
         }
-        #expect(card.junctionImage != nil)
+        // **センターの案内カードには画像を渡さない。** 渡すとカードが伸びて、
+        // CarPlay が下部の到着予定トレイを自動で消す（`ManeuverCard` の理由）。
+        #expect(card.junctionImage == nil)
+        #expect(card.dashboardJunctionImage != nil)
         // SDKでは非Optionalだが、出口でないmaneuverにはまだ値を設定していない。
         #expect((card.value(forKey: "highwayExitLabel") as? String ?? "").isEmpty)
     }

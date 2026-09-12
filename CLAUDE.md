@@ -851,7 +851,9 @@ UUID に戻すと同じ場所が毎回別物になり、重複排除もお気に
 5. **案内カードに経路の線だけの拡大図は出さない**（2026-09-06）。曲がる前後の経路を
    1 本の矢印にした補助図は、利用者から「分かりづらいのでいらない」と指摘されたため削除した。
    代わりに**曲がった先の道路名・道路番号を大きな文字で表示する**（`RoadNameImage`）。
-   `CPManeuver.junctionImage` に渡し、Dashboardも同じ画像を使う。
+   **渡すのは Dashboard だけ**（`CPManeuver.dashboardJunctionImage`、2026-09-12 に変えた）。
+   センターディスプレイの `junctionImage` へ渡すと案内カードが画像のぶん伸びて、
+   **下部の到着予定トレイが CarPlay の判断で消える**（→「踏み抜きやすい前提」）。
    - **方面が書かれていれば道路名より優先する**（2026-09-06）。`ManeuverInstruction.signpost`が
      「渋谷、東名方面」の地名をそのまま拾い、「方面」の見出しと大きな文字で示す。
      方面がなければ実際に書かれたJCT/IC・ランプ名・出口番号を使う。複数の地名やひらがなを削らない。
@@ -954,6 +956,23 @@ CarPlay 層は触らずに済む設計。
 - **CarPlay の案内カードには次の指示を 1 件だけ表示する**。2 件目は下段に先読みとして
   出て、いま行う指示と混同しやすい。通常更新・リルートからの再開・ルート共有の
   `currentManeuvers` をすべて 1 件に揃える。全経路の `maneuvers` は削らない。
+- **下部の到着予定トレイは、案内カードが伸びると CarPlay が勝手に消す**（2026-09-12 に
+  実車で「カードが急に大きくなってトレイが消える」と言われて調べた）。
+  `CPSMapTemplateViewController._checkNavigationCardHelperViewForETAFit` がレイアウトのたびに
+  **案内カードの下端**と**トレイの上端**（安全領域の下端 − トレイの高さ − 8pt）を比べ、
+  重なっていれば `_setETAViewHidden:YES` を呼ぶ。ホスト側のログにも
+  `Navigation card max Y: %f, eta min Y: %f, view size: %@` が出る（26.2 のランタイムで確認）。
+  **トレイを出し入れする公開 API は無いので、こちらで守れるのはカードの高さだけ。**
+  - **伸ばす当人は `CPManeuver.junctionImage`。** センターの `CPSPrimaryManeuverView` は
+    `fitJunctionViewToHeight` が **NO** なので、渡した画像（上限 140×100pt）の高さが
+    そのままカードに足される。入り切らないときは
+    `shortestJunctionViewlayoutConfigurationForSize:` が**指示文を落とす**レイアウト
+    （`JunctionViewNoInstruction`）まで選ぶ。**Dashboard の同名メソッドは YES**＝高さに
+    合わせて縮めるので、あちらへ渡すぶんには伸びない。
+  - トレイを隠す道はほかに 3 つあるが、どれも一時的——ルート提示中
+    （`_reloadPreviewsView`）、`CPNavigationAlert` を出しているあいだ
+    （`_setNavigationAlertView:visible:`。こちらの alert はすべて 8〜20 秒で消える）、
+    案内の開始と終了。**`pauseTrip` では隠れない**（「再検索中」のカードとトレイは同時に出る）。
 - **自アプリが前面でないあいだ、指示と助言はバナーとして出る**。出すかどうかは
   `CPMapTemplateDelegate` の 3 つの callback で決められるが、**実装しているのは
   更新の可否だけ**（`shouldUpdateNotificationFor`）。

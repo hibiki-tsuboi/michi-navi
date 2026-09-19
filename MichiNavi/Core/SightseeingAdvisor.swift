@@ -45,6 +45,10 @@ final class SightseeingAdvisor: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func reload() {
+        isEnabled = defaults.object(forKey: "sightseeing.enabled") as? Bool ?? true
+    }
+
     func setConnected(_ connected: Bool, sceneID: String = "main") {
         if connected { connections.insert(sceneID) } else { connections.remove(sceneID) }
         isConnected = !connections.isEmpty

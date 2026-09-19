@@ -23,7 +23,7 @@ final class TrackStore: ObservableObject {
     static let shared = TrackStore()
 
     /// 測位 1 回ぶん。ファイルに落とすのもこの形。
-    struct Point: Equatable {
+    nonisolated struct Point: Equatable, Sendable {
         let coordinate: CLLocationCoordinate2D
         let time: Date
 
@@ -35,7 +35,7 @@ final class TrackStore: ObservableObject {
     }
 
     /// ひと続きの走行。地図にはこれを 1 本の線として描く。
-    struct Track: Identifiable {
+    nonisolated struct Track: Identifiable, Sendable {
         let id = UUID()
         let started: Date
         var coordinates: [CLLocationCoordinate2D]
@@ -86,9 +86,9 @@ final class TrackStore: ObservableObject {
     ///
     /// **繋いだままにしないこと。** アプリを閉じているあいだに移動したぶんは測っていないので、
     /// 繋ぐと**走っていない直線が街をまたいで引かれる**。
-    static let splitDistance: CLLocationDistance = 500
+    nonisolated static let splitDistance: CLLocationDistance = 500
     /// 同上。時間のほうが先に空くこともある（トンネル・信号待ちでの取りこぼし）。
-    static let splitInterval: TimeInterval = 120
+    nonisolated static let splitInterval: TimeInterval = 120
     /// 市区町村を引き直す間隔。逆ジオコーディングは連打しない（`DrivingSideLocator` と同じ）。
     /// 市区町村をまたいだことに気づける程度に短く、1 回の走行で数十回に収まる程度には長く。
     static let geocodeInterval: CLLocationDistance = 3_000
@@ -97,7 +97,11 @@ final class TrackStore: ObservableObject {
     private static let visitsKey = "tracks.visits"
     private static let recordingKey = "tracks.recording"
 
-    private let file = TrackFile()
+    private let file: TrackFile
+    private var fileWriteTask: Task<Void, Never>?
+    private var fileWriteError: Error?
+    @Published private(set) var isTransferring = false
+    private var geocodeGeneration = 0
     /// 最後に記録した点。間引きと切れ目の判定に使う。
     private var last: Point?
     /// ファイルの読み直しが済んだか。**消したあとに読み込みが戻ってくる道**も塞ぐので、
@@ -110,8 +114,9 @@ final class TrackStore: ObservableObject {
     private var isGeocoding = false
     private var cancellables = Set<AnyCancellable>()
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, fileURL: URL? = nil) {
         self.defaults = defaults
+        file = TrackFile(url: fileURL)
         // 未設定なら入り。`bool(forKey:)` は無いときも false を返すので、存在を見てから読む。
         isRecording = defaults.object(forKey: Self.recordingKey) as? Bool ?? true
         visits = (try? JSONDecoder().decode([Visit].self,
@@ -174,8 +179,9 @@ final class TrackStore: ObservableObject {
 
     // MARK: - 記録
 
-    private func handle(location: CLLocation) {
-        guard isRecording, Self.shouldRecord(location, after: last) else { return }
+    /// 復元直後の間引きも実際の測位入口で検証できるよう、モジュール内から呼べる形にする。
+    func handle(location: CLLocation) {
+        guard !isTransferring, isRecording, Self.shouldRecord(location, after: last) else { return }
 
         let point = Point(coordinate: location.coordinate, time: location.timestamp)
         Self.extend(&tracks, with: point, after: last)
@@ -184,7 +190,7 @@ final class TrackStore: ObservableObject {
         if !hasRestored { pendingPoints.append(point) }
 
         let record = Self.encode(point)
-        Task { await file.append(record) }
+        enqueueFileOperation { try await $0.append(record) }
 
         geocodeIfNeeded(at: location)
     }
@@ -198,17 +204,18 @@ final class TrackStore: ObservableObject {
 
     /// 点を足す。**続きにするか別の線にするかの判定はここ 1 か所**で、
     /// ファイルから読み直すときも同じ関数を通る（`tracks(from:)`）。
-    static func extend(_ tracks: inout [Track], with point: Point, after previous: Point?) {
-        guard var track = tracks.last, let previous, !isBreak(from: previous, to: point) else {
+    nonisolated static func extend(_ tracks: inout [Track], with point: Point, after previous: Point?) {
+        guard !tracks.isEmpty, let previous, !isBreak(from: previous, to: point) else {
             tracks.append(Track(started: point.time, coordinates: [point.coordinate], distance: 0))
             return
         }
-        track.coordinates.append(point.coordinate)
-        track.distance += MKMapPoint(previous.coordinate).distance(to: MKMapPoint(point.coordinate))
-        tracks[tracks.count - 1] = track
+        // 復元では数万点を続けて足す。末尾をコピーすると座標配列の全コピーを点ごとに繰り返す。
+        let index = tracks.count - 1
+        tracks[index].coordinates.append(point.coordinate)
+        tracks[index].distance += MKMapPoint(previous.coordinate).distance(to: MKMapPoint(point.coordinate))
     }
 
-    static func tracks(from points: [Point]) -> [Track] {
+    nonisolated static func tracks(from points: [Point]) -> [Track] {
         var result: [Track] = []
         var previous: Point?
         for point in points {
@@ -218,7 +225,7 @@ final class TrackStore: ObservableObject {
         return result
     }
 
-    private static func isBreak(from previous: Point, to point: Point) -> Bool {
+    nonisolated private static func isBreak(from previous: Point, to point: Point) -> Bool {
         let interval = point.time.timeIntervalSince(previous.time)
         if interval < 0 || interval > splitInterval { return true }
         return MKMapPoint(previous.coordinate).distance(to: MKMapPoint(point.coordinate)) > splitDistance
@@ -234,9 +241,11 @@ final class TrackStore: ObservableObject {
         if let geocodedNear, location.distance(from: geocodedNear) < Self.geocodeInterval { return }
 
         isGeocoding = true
+        let generation = geocodeGeneration
         Task {
             defer { isGeocoding = false }
             guard let visit = await Self.visit(at: location) else { return }
+            guard generation == geocodeGeneration, !isTransferring else { return }
             // 引けたときだけ基準を進める。失敗を覚えると、次の測位でまた引いてしまう。
             geocodedNear = location
             remember(visit)
@@ -246,6 +255,7 @@ final class TrackStore: ObservableObject {
     /// 貯めて、流す。**`private` にしていないのはテストから呼ぶため**（`isFirst` は
     /// ここでしか決まらないので、外からは 2 度目かどうかを確かめようがない）。
     func remember(_ visit: Visit) {
+        guard !isTransferring else { return }
         let isFirst = !visits.contains(where: { $0.id == visit.id })
         if isFirst {
             visits.append(visit)
@@ -291,6 +301,8 @@ final class TrackStore: ObservableObject {
     // MARK: - 消す
 
     func clear() {
+        guard !isTransferring else { return }
+        geocodeGeneration += 1
         // **読み直しがまだでも、戻ってきたぶんで復活させない。**
         hasRestored = true
         pendingPoints = []
@@ -299,15 +311,68 @@ final class TrackStore: ObservableObject {
         last = nil
         geocodedNear = nil
         defaults.removeObject(forKey: Self.visitsKey)
-        Task { await file.clear() }
+        enqueueFileOperation {
+            try await $0.clear()
+            self.fileWriteError = nil
+        }
+    }
+
+    // MARK: - バックアップ
+
+    private func enqueueFileOperation(_ operation: @escaping (TrackFile) async throws -> Void) {
+        // Task を作った順と actor が受け取る順に頼らず、追記・消去・書き出しを直列にする。
+        let previous = fileWriteTask
+        fileWriteTask = Task {
+            await previous?.value
+            do { try await operation(file) }
+            catch { fileWriteError = error }
+        }
+    }
+
+    func backupData() async throws -> Data {
+        guard !isTransferring else { throw BackupError.busy }
+        isTransferring = true
+        defer { isTransferring = false }
+        await fileWriteTask?.value
+        if let fileWriteError { throw fileWriteError }
+        return try await file.loadForBackup()
+    }
+
+    func replaceFromBackup(_ data: Data, visits: [Visit], isRecording: Bool,
+                           canCommit: () -> Bool, commit: () -> Void) async throws {
+        guard !isTransferring else { throw BackupError.busy }
+        isTransferring = true
+        geocodeGeneration += 1
+        defer { isTransferring = false }
+        let restored = await Task.detached {
+            let points = Self.decode(data)
+            return (tracks: Self.tracks(from: points), last: points.last)
+        }.value
+        await fileWriteTask?.value
+        guard canCommit() else { throw BackupError.navigationInProgress }
+        try Task.checkCancellation()
+
+        // atomic 書き込みが失敗したら既存のファイル・設定・表示には触れない。
+        try await file.replace(data)
+        // ここからは await も throwing な処理も挟まない。
+        hasRestored = true
+        pendingPoints = []
+        tracks = restored.tracks
+        self.visits = visits
+        self.isRecording = isRecording
+        // 次の点も通常起動と同じ基準で間引く。nil にすると同じ位置を二度記録してしまう。
+        last = restored.last
+        geocodedNear = nil
+        fileWriteError = nil
+        commit()
     }
 
     // MARK: - ファイル
 
     /// 1 点ぶんの大きさ。緯度・経度・時刻の Float64 が 3 つ。
-    static let recordSize = 24
+    nonisolated static let recordSize = 24
 
-    static func encode(_ point: Point) -> Data {
+    nonisolated static func encode(_ point: Point) -> Data {
         var data = Data(capacity: recordSize)
         for value in [point.coordinate.latitude, point.coordinate.longitude, point.time.timeIntervalSince1970] {
             withUnsafeBytes(of: value.bitPattern.littleEndian) { data.append(contentsOf: $0) }
@@ -315,9 +380,7 @@ final class TrackStore: ObservableObject {
         return data
     }
 
-    static func decode(_ data: Data) -> [Point] {
-        // `withUnsafeBytes` に渡すクロージャは MainActor の外なので、
-        // 外側で読んでから持ち込む（静的プロパティを中で参照すると Swift 6 でエラー）。
+    nonisolated static func decode(_ data: Data) -> [Point] {
         let size = recordSize
         let count = data.count / size
         guard count > 0 else { return [] }
@@ -337,7 +400,8 @@ final class TrackStore: ObservableObject {
     }
 }
 
-/// 走った道のファイル。**追記だけ**で、1 点ごとに 24 バイト書く。
+/// 走った道のファイル。通常の記録は追記で、1 点ごとに 24 バイト書く。
+/// バックアップからの復元時だけ、ファイル全体を atomic に置き換える。
 ///
 /// まとめ書きにしていないのは、落ちたときに書けていないぶんが消えるから。24 バイトの
 /// 追記は 50m に 1 回（時速 60km なら 3 秒に 1 回）しか来ないので、案内の邪魔にならない。
@@ -347,27 +411,40 @@ final class TrackStore: ObservableObject {
 private actor TrackFile {
     private let url: URL
 
-    init() {
-        let directory = URL.applicationSupportDirectory
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        url = directory.appending(path: "tracks.bin")
+    init(url: URL?) {
+        self.url = url ?? URL.applicationSupportDirectory.appending(path: "tracks.bin")
     }
 
-    func append(_ data: Data) {
-        guard let handle = try? FileHandle(forWritingTo: url) else {
-            try? data.write(to: url)
+    func append(_ data: Data) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            try replace(data)
             return
         }
+        let handle = try FileHandle(forWritingTo: url)
         defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
+        _ = try handle.seekToEnd()
+        try handle.write(contentsOf: data)
     }
 
     func load() -> Data {
         (try? Data(contentsOf: url)) ?? Data()
     }
 
-    func clear() {
-        try? FileManager.default.removeItem(at: url)
+    func loadForBackup() throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else { return Data() }
+        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size <= BackupArchive.maximumFileSize else { throw BackupError.tooLarge }
+        return try Data(contentsOf: url)
+    }
+
+    func replace(_ data: Data) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try data.write(to: url, options: .atomic)
+    }
+
+    func clear() throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try FileManager.default.removeItem(at: url)
     }
 }

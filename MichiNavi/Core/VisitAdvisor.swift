@@ -76,6 +76,12 @@ final class VisitAdvisor: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func reload() {
+        isEnabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+        previousPrefecture = nil
+        lastNoticed = nil
+    }
+
     private func apply(_ located: TrackStore.Located) {
         VisitLog.located(prefecture: located.prefecture, city: located.city, isFirst: located.isFirst)
 

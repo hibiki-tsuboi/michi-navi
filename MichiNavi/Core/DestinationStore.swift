@@ -31,6 +31,10 @@ final class DestinationStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        reload()
+    }
+
+    func reload() {
         recents = load(key: recentsKey)
         favorites = load(key: favoritesKey)
         parking = loadParking()

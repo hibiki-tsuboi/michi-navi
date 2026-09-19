@@ -231,6 +231,7 @@ final class NavigationController: ObservableObject {
 
     /// 目的地までのルートを計算して提示状態に入る。開始するかは利用者が選ぶ。
     func requestRoutes(to destination: Place) {
+        guard !BackupService.shared.isRestoring else { return }
         route(to: destination) { [weak self] routes in
             self?.phase = .previewing(routes)
         }
@@ -239,6 +240,7 @@ final class NavigationController: ObservableObject {
     /// 時間だけを選び、現在地へ戻る探索ドライブを計算して提示する。
     /// 初めての道の多さと目標時間からのずれを合わせて、上位 3 候補へ絞る。
     func requestExplorationRoutes(duration: TimeInterval) {
+        guard !BackupService.shared.isRestoring else { return }
         guard network.isOnline else {
             lastError = NavigationError.offline.errorDescription
             return
@@ -282,6 +284,7 @@ final class NavigationController: ObservableObject {
     /// CarPlay Dashboard のショートカットのように、提示画面を見てもらえない
     /// 場所から呼ばれる想定。
     func startNavigation(to destination: Place) {
+        guard !BackupService.shared.isRestoring else { return }
         route(to: destination) { [weak self] routes in
             guard let best = routes.first else { return }
             self?.startNavigation(with: best)
@@ -458,6 +461,7 @@ final class NavigationController: ObservableObject {
     /// よらず同じ。既定を `.started` にしてあるのは、外から呼ぶ入口（提示画面の開始
     /// ボタン）がそれだから。
     func startNavigation(with route: NavRoute, reason: RouteChangeReason = .started) {
+        guard !BackupService.shared.isRestoring else { return }
         let isContinuingTrip = activeRoute != nil
         if isContinuingTrip {
             // 引き直し・立ち寄り・利用者の切り替え。新しい経路は現在地を 0m として始まるので、

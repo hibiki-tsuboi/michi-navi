@@ -262,3 +262,35 @@
 "三種の神器の一つ、草薙の剣をご神体とする神社です。" = "This shrine enshrines the Kusanagi sword, one of Japan's three imperial regalia.";
 "五重六階の天守が残る国宝のお城です。" = "This National Treasure castle has a surviving keep with five tiers and six floors.";
 "木曽川のほとりに立つ、国宝の天守を持つお城です。" = "This castle stands by the Kiso River, and its keep is a National Treasure.";
+
+/* バックアップ・機種変更 */
+"バックアップ" = "Backup";
+"バックアップ・機種変更" = "Backup & Transfer";
+"次のiPhoneにも、走った道を。" = "Take your journeys to your next iPhone.";
+"走った道・訪問した街・お気に入り・自宅と職場・目的地履歴・駐車位置・設定を、ひとつのファイルにまとめます。" = "Save your driven roads, visited towns, favorites, home and work, recent destinations, parking location, and settings in one file.";
+"このiPhoneのデータ" = "Data on This iPhone";
+"訪問した市区町村" = "Visited towns and cities";
+"バックアップを書き出す" = "Export Backup";
+"「ファイルに保存」で保管するか、AirDropで新しいiPhoneへ送れます。受け取ったファイルは「ファイル」アプリに保存してください。" = "Choose Save to Files to keep a copy, or AirDrop it to your new iPhone. Save the received backup in the Files app.";
+"バックアップを読み込む" = "Import Backup";
+"ファイルを選ぶと内容を確認できます。復元すると、このiPhoneのデータはバックアップの内容にすべて置き換わります。" = "Choose a file to review its contents. Restoring replaces all app data on this iPhone with the backup.";
+"読み込みは案内を終了し、CarPlayとの接続を解除してから行ってください。" = "End navigation and disconnect CarPlay before importing a backup.";
+"バックアップには移動履歴や自宅などの位置情報が含まれます。ファイル自体にパスワードは付きません。保存先・共有相手を確認してください。" = "Backups contain location data, including your travel history and home. The file is not password protected. Choose carefully where you save it and who you share it with.";
+"データを準備中…" = "Preparing data…";
+"バックアップを復元しました。走破マップやお気に入りをご確認ください。" = "Backup restored. Check your exploration map and favorites.";
+"バックアップの内容" = "Backup Contents";
+"作成日時" = "Created";
+"走行記録の地点" = "Recorded locations";
+"目的地履歴" = "Recent destinations";
+"駐車位置" = "Parking location";
+"このバックアップで復元" = "Restore This Backup";
+"走行記録・保存した地点・設定をすべて置き換えます。現在のデータも残したい場合は、先にバックアップを書き出してください。" = "This replaces all driving records, saved places, and settings. Export a backup first if you want to keep your current data.";
+"復元内容の確認" = "Review Backup";
+"復元中…" = "Restoring…";
+"現在のデータを置き換えますか？" = "Replace your current data?";
+"置き換えて復元" = "Replace and Restore";
+"復元できませんでした" = "Could Not Restore";
+"バックアップを読み取れません。つぼナビで書き出したファイルを選んでください。" = "Could not read the backup. Choose a file exported by TsuboNavi.";
+"このバックアップの形式には対応していません。つぼナビを最新版に更新してください。" = "This backup format is not supported. Update TsuboNavi to the latest version.";
+"バックアップのサイズが上限の128MBを超えています。" = "The backup exceeds the 128 MB size limit.";
+"バックアップの処理中です。完了してからもう一度お試しください。" = "A backup operation is in progress. Try again when it finishes.";

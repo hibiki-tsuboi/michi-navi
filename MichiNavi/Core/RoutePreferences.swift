@@ -71,6 +71,14 @@ final class RoutePreferences: ObservableObject {
         refuelKind = RefuelKind(rawValue: defaults.string(forKey: Self.refuelKey) ?? "") ?? .gasStation
     }
 
+    /// 復元した設定を、両画面が購読している値にも反映する。
+    func reload() {
+        avoidsTolls = defaults.bool(forKey: Self.tollsKey)
+        avoidsHighways = defaults.bool(forKey: Self.highwaysKey)
+        vehicleRange = defaults.double(forKey: Self.rangeKey)
+        refuelKind = RefuelKind(rawValue: defaults.string(forKey: Self.refuelKey) ?? "") ?? .gasStation
+    }
+
     /// `MKDirections.Request` に渡す形。
     var tollPreference: MKDirections.RoutePreference { avoidsTolls ? .avoid : .any }
     var highwayPreference: MKDirections.RoutePreference { avoidsHighways ? .avoid : .any }

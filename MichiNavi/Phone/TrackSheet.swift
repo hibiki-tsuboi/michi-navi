@@ -26,6 +26,15 @@ struct TrackSheet: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        BackupView()
+                    } label: {
+                        Label(String(localized: "バックアップ・機種変更"), systemImage: "arrow.up.arrow.down")
+                    }
+                    .accessibilityIdentifier("tracks.backup")
+                }
+
+                Section {
                     Toggle(String(localized: "CarPlayで観光案内を読み上げる"), isOn: $sightseeing.isEnabled)
                     NavigationLink(String(localized: "観光案内の出典")) {
                         List(SightseeingFacts.entries) { entry in

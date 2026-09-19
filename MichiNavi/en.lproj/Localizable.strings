@@ -187,6 +187,7 @@
 "電話" = "Phone";
 "音声入力がすでに動いています" = "Voice input is already running";
 "音声認識の準備ができませんでした" = "Couldn't get speech recognition ready";
+"音声入出力を開始できませんでした" = "Couldn't start audio input or output";
 "食事" = "Food";
 "駐車場" = "Parking";
 "高速を使う" = "Uses highways";

@@ -266,6 +266,11 @@ Combine の使い分けにも意味がある:
   1 度きり、読み上げごとに切り替えるのは有効・無効だけ。終わったら
   `notifyOthersOnDeactivation` 付きで即座に手放す。**有効なままにすると音楽がダックされ続け、
   ポッドキャストは一時停止したままになる。**
+- **有効化・解除は `AudioSessionController` に集約する**。iOS 27 は非同期 API、26 系は
+  MainActor 外の仕事で同期 API を呼ぶ。読み上げ・録音の操作は完了まで直列化し、
+  解除を待たずに次の有効化を重ねない。空の解除や別の用途へ譲った後の解除は見送る。
+  読み上げは有効化待ちも再生数に含め、停止時に世代を更新して古い予約を鳴らさない。
+  `AudioSessionControllerTests` で完了待ち・中止・録音への受け渡し・失敗後の再試行を検証する。
 - `session.promptStyle` はセッションを有効化する**前**に見る。`none`（通話中・Siri 中）なら
   何もせず返るので、「鳴らす音が無いのにセッションを有効化しない」というガイドラインの
   要求も同時に満たす。`short` のときは音声ファイルを同梱せずに済ませるため、16bit PCM の
@@ -344,8 +349,8 @@ Combine の使い分けにも意味がある:
 - **マイクの形式と認識モデルの形式は違う**ので `AVAudioConverter` を挟む。変換器は
   音声スレッドの中でしか触らない。
 - **`VoiceGuidance` を止めてから聞く**。自分の声が回り込むうえ、オーディオセッションの
-  カテゴリが `.playback` から `.playAndRecord` へ差し替わる。`suspend()` が
-  `isSessionConfigured` を倒すので、次の読み上げでカテゴリが入れ直される。
+  カテゴリが `.playback` から `.playAndRecord` へ差し替わる。共有の
+  `AudioSessionController` が用途の切り替えを検知し、次の読み上げでカテゴリを入れ直す。
   **止める位置に意味がある**: 予告は `handle(progress:)` で、スケジューラに渡す**前**に
   止める。`prompt(for:on:)` は返した時点でそのしきい値を読み上げ済みとして記録するので、
   受け取ってから捨てるとその予告は二度と出てこない。いっぽう到着・経由地通過は
@@ -1108,8 +1113,12 @@ CarPlay 層は触らずに済む設計。
   そこを切り出している。**別インスタンスを混ぜない**こと（`updateEstimates(for:)` の
   宛先が食い違う）。渡しているのは型のほかに次の情報。**車側に届いたかはログと車で確認する**。
   道路名は案内カードの大きな文字でも使うが、メタデータの受け渡しとは別。
-  - **目的地名**（`CPTrip.destinationNameVariants`）。ヘッダが「1 件以上必ず」と要求して
-    いる。名前を持たない地点（座標だけの履歴）があるので、空なら「目的地」で埋める。
+  - **目的地名**。iOS 27 以降は `CPNavigationWaypoint` の初期化で `nameVariants` を渡す。
+    `CPTrip.destinationNameVariants` は 26 系だけで使う。27 の旧 setter は
+    `-[CPNavigationWaypoint setNameVariants:]` を呼び、unrecognized selector で落ちる
+    （2026-09-19 17:12 の実機クラッシュ 2 件をシンボル化し、27 のシミュレータでも再現）。
+    `CarPlayTripTests` は実際に `makeTrip` を通してこの回帰を止める。名前を持たない地点は
+    「目的地」、探索周回は「探索ドライブ」で埋め、住所・タイムゾーンは維持する。
   - **曲がった先の道路名**（`CPManeuver.roadFollowingManeuverVariants` ←`RoadName`）。
     MapKit は道路名を別のプロパティで返さないので指示文から拾う。**取りこぼす側に倒す**
     こと。落ちても車が名前を出さないだけだが、関係のない語を送ると HUD に嘘が出る。

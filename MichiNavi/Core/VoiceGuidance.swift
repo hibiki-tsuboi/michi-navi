@@ -14,6 +14,7 @@ final class VoiceGuidance: NSObject {
 
     private let navigation = NavigationController.shared
     private let session = AVAudioSession.sharedInstance()
+    private let audioSession = AudioSessionController.shared
     private let synthesizer = AVSpeechSynthesizer()
     private var utterances = SpeechUtterances()
 
@@ -24,7 +25,8 @@ final class VoiceGuidance: NSObject {
     /// 引き直した結果が前と同じ経路なら、利用者にとっては何も起きていない。
     private var currentRouteSignature: Int?
 
-    private var isSessionConfigured = false
+    /// 有効化を待っている古い読み上げを、停止後に再生しないための世代。
+    private var playbackGeneration = 0
     /// 音声入力のあいだ読み上げを止めているか。
     private var isSuspended = false
     /// 止めているあいだに届いた 1 回きりの知らせ（到着・経由地通過）。
@@ -224,12 +226,10 @@ final class VoiceGuidance: NSObject {
     ///
     /// 止める理由は 2 つ。自分の声がマイクへ回り込むこと、そして
     /// **オーディオセッションのカテゴリが `.playAndRecord` に差し替わること**。
-    /// `isSessionConfigured` を倒しておくのがここの肝で、こうしないと次の読み上げが
-    /// 録音用のカテゴリのまま鳴り、`.measurement` のせいで妙に小さくなる。
+    /// カテゴリ変更は共有の AudioSessionController が直列に行い、次の読み上げで戻す。
     func suspend() {
         isSuspended = true
         stopSpeaking()
-        isSessionConfigured = false
     }
 
     /// 抱えていた出来事があればここで読む。
@@ -303,18 +303,27 @@ final class VoiceGuidance: NSObject {
     }
 
     private func speak(text: String, sightseeing: Bool = false) {
-        guard activateSession() else { return }
-        playingCount += 1
-
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = preferredVoice
+        // 有効化待ちも再生予約として数える。到着→収穫の順序と観光音声の割り込みを保つ。
         utterances.insert(utterance, sightseeing: sightseeing)
-        synthesizer.speak(utterance)
+        enqueuePlayback {
+            self.synthesizer.speak(utterance)
+        } onFailure: {
+            self.finishSpeaking(ObjectIdentifier(utterance))
+        }
     }
 
     /// `.short` のときは言葉ではなくトーンで知らせる。
     private func playTone() {
-        guard activateSession() else { return }
+        enqueuePlayback {
+            self.startTone()
+        } onFailure: {
+            self.finishPlaying()
+        }
+    }
+
+    private func startTone() {
         // **鳴らす前に、前のトーンを閉じる。** `tonePlayer` の席は 1 つしかないので、
         // 続けて鳴らすと前の `AVAudioPlayer` は代入で解放されるが、**解放でも `stop()` でも
         // `audioPlayerDidFinishPlaying` は来ない**。数え上げだけが残って `playingCount` が
@@ -331,12 +340,14 @@ final class VoiceGuidance: NSObject {
         do {
             let player = try AVAudioPlayer(data: Self.toneData)
             player.delegate = self
-            playingCount += 1
             tonePlayer = player
-            player.play()
+            if !player.play() {
+                tonePlayer = nil
+                finishPlaying()
+            }
         } catch {
             NSLog("[MichiNavi] トーンの再生に失敗: \(error.localizedDescription)")
-            releaseSessionIfIdle()
+            finishPlaying()
         }
     }
 
@@ -352,6 +363,7 @@ final class VoiceGuidance: NSObject {
     }
 
     private func stopSpeaking() {
+        playbackGeneration += 1
         utterances.cancel()
         synthesizer.stopSpeaking(at: .immediate)
         tonePlayer?.stop()
@@ -368,33 +380,15 @@ final class VoiceGuidance: NSObject {
 
     // MARK: - オーディオセッション
 
-    /// ガイドラインが指定する組み合わせ。カテゴリの設定自体は 1 度でよく、
-    /// 読み上げごとに切り替えるのは有効・無効だけ。
-    ///
-    /// - `interruptSpokenAudioAndMixWithOthers`: ポッドキャストや朗読を一時停止させる
-    /// - `duckOthers`: 音楽の音量を下げる
-    private func configureSessionIfNeeded() -> Bool {
-        if isSessionConfigured { return true }
-        do {
-            try session.setCategory(.playback,
-                                    mode: .voicePrompt,
-                                    options: [.interruptSpokenAudioAndMixWithOthers, .duckOthers])
-            isSessionConfigured = true
-            return true
-        } catch {
-            NSLog("[MichiNavi] オーディオセッションの設定に失敗: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    private func activateSession() -> Bool {
-        guard configureSessionIfNeeded() else { return false }
-        do {
-            try session.setActive(true)
-            return true
-        } catch {
-            NSLog("[MichiNavi] オーディオセッションの有効化に失敗: \(error.localizedDescription)")
-            return false
+    private func enqueuePlayback(_ play: @escaping @MainActor () -> Void,
+                                 onFailure: @escaping @MainActor () -> Void) {
+        playingCount += 1
+        let generation = playbackGeneration
+        audioSession.activate(for: .guidance, isNeeded: { [weak self] in
+            self?.playbackGeneration == generation
+        }) { [weak self] ready in
+            guard let self, self.playbackGeneration == generation else { return }
+            if ready { play() } else { onFailure() }
         }
     }
 
@@ -403,7 +397,7 @@ final class VoiceGuidance: NSObject {
     private func releaseSessionIfIdle() {
         guard playingCount == 0, !synthesizer.isSpeaking else { return }
         isAnnouncingArrival = false
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        audioSession.deactivate(for: .guidance)
     }
 
     fileprivate func finishPlaying() {
@@ -447,7 +441,7 @@ extension VoiceGuidance: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         // identity だけ使うが、actor に届くまで本体も保持する。ID だけ渡すと解放後の
         // アドレスが次のプレイヤーに再利用され得る（`speechSynthesizer` と同じ理由）。
-        nonisolated(unsafe) let finished = player
+        let finished = player
         Task { @MainActor in
             guard self.tonePlayer === finished else { return }
             self.tonePlayer = nil

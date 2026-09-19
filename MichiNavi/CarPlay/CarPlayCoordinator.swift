@@ -471,7 +471,7 @@ final class CarPlayCoordinator: NSObject {
     // MARK: - ルート提示
 
     private func showTripPreview(for routes: [NavRoute]) {
-        let trip = makeTrip(for: routes)
+        let trip = Self.makeTrip(for: routes)
         currentTrip = trip
 
         let configuration = CPTripPreviewTextConfiguration(startButtonTitle: String(localized: "案内開始"),
@@ -483,7 +483,8 @@ final class CarPlayCoordinator: NSObject {
 
     /// 候補ルートすべてを 1 つの `CPTrip` にまとめる。
     /// CarPlay ではこうすると「他のルート」で切り替えられる。
-    private func makeTrip(for routes: [NavRoute]) -> CPTrip {
+    /// シーンに依存させず、実際の CPTrip 生成を回帰テストからも通せるようにする。
+    static func makeTrip(for routes: [NavRoute]) -> CPTrip {
         // 直接組み立てた経路でも候補の要約を失わないよう、ブリーフが無い場合だけここで補う。
         let characters = RouteCharacter.tags(for: routes)
         let departure = Date()
@@ -509,6 +510,9 @@ final class CarPlayCoordinator: NSObject {
         }
 
         let route = routes[0]
+        // 名前を持たない履歴にも、案内カードやメーターへ渡せる表示名を補う。
+        let name = route.isExplorationLoop ? String(localized: "探索ドライブ") : route.destination.name
+        let destinationName = name.isEmpty ? String(localized: "目的地") : name
         let trip: CPTrip
         if #available(iOS 26.4, *) {
             // 26.4 で `MKMapItem` 版の初期化は非推奨になり、地点は `CPNavigationWaypoint` で
@@ -518,7 +522,8 @@ final class CarPlayCoordinator: NSObject {
             trip = CPTrip(originWaypoint: CarPlayRouteSharing.waypoint(
                               at: route.coordinates.first ?? route.destination.coordinate,
                               name: String(localized: "現在地")),
-                          destinationWaypoint: CarPlayRouteSharing.waypoint(for: route.destination),
+                          destinationWaypoint: CarPlayRouteSharing.waypoint(for: route.destination,
+                                                                           name: destinationName),
                           routeChoices: choices)
         } else {
             trip = CPTrip(origin: MKMapItem.forCurrentLocation(),
@@ -526,11 +531,12 @@ final class CarPlayCoordinator: NSObject {
                           routeChoices: choices)
         }
 
-        // **目的地名は必ず渡す**（ヘッダが「1 件以上」と要求している）。案内カードや
-        // メーターに出る名前がここから来る。名前を持たない地点（座標だけの履歴）が
-        // あるので、空なら言葉で埋める。
-        let name = route.isExplorationLoop ? String(localized: "探索ドライブ") : route.destination.name
-        trip.destinationNameVariants = [name.isEmpty ? String(localized: "目的地") : name]
+        // iOS 27 の旧 setter は、読み取り専用の waypoint に setNameVariants: を送り
+        // NSInvalidArgumentException で落ちる（2026-09-19 の実機ログと再現テストで確認）。
+        // 27 以降は上の waypoint 初期化で名前を渡し、旧 API は 26 系だけで使う。
+        if #unavailable(iOS 27.0) {
+            trip.destinationNameVariants = [destinationName]
+        }
         // 目的地を車の純正ナビへ渡せることを申告する（ガイド p.60）。対応した車でだけ
         // ルート選択画面に共有ボタンが出るので、いつでも立てておいてよい。
         if #available(iOS 26.1, *) { trip.hasShareableDestination = !route.isExplorationLoop }
@@ -548,7 +554,7 @@ final class CarPlayCoordinator: NSObject {
     private func beginSessionIfNeeded(for route: NavRoute) {
         guard navigationSession == nil else { return }
 
-        let trip = currentTrip ?? makeTrip(for: [route])
+        let trip = currentTrip ?? Self.makeTrip(for: [route])
         currentTrip = trip
         let session = mapTemplate.startNavigationSession(for: trip)
         navigationSession = session

@@ -23,6 +23,7 @@ final class SpeechInput {
         case microphoneDenied
         case unsupportedLanguage
         case modelUnavailable
+        case audioUnavailable
         case heardNothing
 
         var errorDescription: String? {
@@ -31,6 +32,7 @@ final class SpeechInput {
             case .microphoneDenied: String(localized: "マイクの使用が許可されていません")
             case .unsupportedLanguage: String(localized: "この言語の音声入力に対応していません")
             case .modelUnavailable: String(localized: "音声認識の準備ができませんでした")
+            case .audioUnavailable: String(localized: "音声入出力を開始できませんでした")
             case .heardNothing: String(localized: "聞き取れませんでした")
             }
         }
@@ -40,7 +42,7 @@ final class SpeechInput {
     /// iPhone 側に出すときのためと、切り分けのために流している。
     @Published private(set) var partialText = ""
 
-    private let session = AVAudioSession.sharedInstance()
+    private let audioSession = AudioSessionController.shared
     private var engine: AVAudioEngine?
     private var isListening = false
 
@@ -97,8 +99,10 @@ final class SpeechInput {
         // 読み上げを止めるのは**マイクを取る直前**。自分の声が回り込むし、
         // オーディオセッションの持ち主が入れ替わる。初回はこの手前でモデルの取得に
         // 時間がかかることがあり、そこまで黙らせると案内が長く途切れる。
+        try Task.checkCancellation()
         VoiceGuidance.shared.suspend()
-        try activateSession()
+        guard await audioSession.activate(for: .recording).value else { throw Failure.audioUnavailable }
+        try Task.checkCancellation()
         try startEngine(feeding: continuation, to: format)
 
         let text = try await collect(from: transcriber, analyzer: analyzer, input: continuation)
@@ -185,16 +189,6 @@ final class SpeechInput {
 
     // MARK: - マイク
 
-    /// **録音のあいだだけ**カテゴリを差し替える。ふだんは `VoiceGuidance` が
-    /// `.playback` を持っているので、戻しはあちらの `resume` に任せる
-    /// （次の読み上げでカテゴリを入れ直す）。
-    private func activateSession() throws {
-        try session.setCategory(.playAndRecord,
-                                mode: .measurement,
-                                options: [.interruptSpokenAudioAndMixWithOthers, .duckOthers])
-        try session.setActive(true)
-    }
-
     private func startEngine(feeding continuation: AsyncStream<AnalyzerInput>.Continuation,
                              to format: AVAudioFormat) throws {
         let engine = AVAudioEngine()
@@ -223,7 +217,8 @@ final class SpeechInput {
         engine?.stop()
         engine = nil
         // 音楽やポッドキャストをすぐ元に戻す。
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        // 解除を先に予約する。resume() からの再生は解除の完了まで待つ。
+        audioSession.deactivate(for: .recording)
     }
 
     /// マイクの 1 ブロックを認識モデルの形式へ変換する。音声スレッドから呼ばれる。

@@ -197,13 +197,25 @@ final class CarPlayRouteSharing {
     // MARK: - CarPlay の地点表現へ
 
     /// 目的地・経由地を車へ渡す形にする。
-    static func waypoint(for place: Place) -> CPNavigationWaypoint {
+    static func waypoint(for place: Place, name: String? = nil) -> CPNavigationWaypoint {
         withCoordinates([]) { points, count in
             // 進入口（建物のどの入口から入るか）は MapKit が返さないので渡さない。
-            CPNavigationWaypoint(__mapItem: place.mapItem,
-                                 locationThreshold: nil,
-                                 entryPoints: points,
-                                 entryPointsCount: count)
+            let waypoint = CPNavigationWaypoint(__mapItem: place.mapItem,
+                                                locationThreshold: nil,
+                                                entryPoints: points,
+                                                entryPointsCount: count)
+            // iOS 27 は名前を生成時に渡す。住所・タイムゾーンは MapKit の値を保つ。
+            // 保存した Place の mapItem は名前を失うので、place.name を渡す呼び元が決める。
+            if #available(iOS 27.0, *), let name {
+                return CPNavigationWaypoint(__centerPoint: waypoint.centerPoint,
+                                             locationThreshold: waypoint.locationThreshold,
+                                             nameVariants: [name],
+                                             addressVariants: waypoint.addressVariants,
+                                             entryPoints: points,
+                                             entryPointsCount: count,
+                                             timeZone: waypoint.timeZone)
+            }
+            return waypoint
         }
     }
 

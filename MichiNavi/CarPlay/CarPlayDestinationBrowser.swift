@@ -164,7 +164,11 @@ final class CarPlayDestinationBrowser: NSObject {
     private func presentRoutePreferences() {
         let section = CPListSection(items: [avoidItem(\.avoidsTolls, title: String(localized: "有料道路を避ける")),
                                             avoidItem(\.avoidsHighways, title: String(localized: "高速道路を避ける"))])
-        let template = CPListTemplate(title: String(localized: "ルートの引き方"), sections: [section])
+        // 音声案内の入り切りも同じ画面に置く。案内中はナビゲーションバーも `mapButtons` も
+        // 埋まっていて、入口を足すなら何かを外すことになる。車では音量のつまみが
+        // あるので、走り出す前に決めておければ足りる（iPhone 側は案内中も切り替えられる）。
+        let voice = CPListSection(items: [voiceItem()])
+        let template = CPListTemplate(title: String(localized: "ルートの引き方"), sections: [section, voice])
         interfaceController.pushTemplate(template, animated: true, completion: nil)
     }
 
@@ -203,6 +207,25 @@ final class CarPlayDestinationBrowser: NSObject {
             // 走っている案内は引き直さない（次に計算するときから効く）ので、
             // チェックの付き外しだけが押した手応えになる。**戻す先はこの画面**。
             interfaceController.popTemplate(animated: false) { [weak self] _, _ in
+                self?.presentRoutePreferences()
+            }
+            completion()
+        }
+        return item
+    }
+
+    /// 音声案内の 1 行。`avoidItem` と同じく、チェックの有無で状態を示して押すたびに裏返す。
+    private func voiceItem() -> CPListItem {
+        let voice = VoicePreferences.shared
+        let isOn = !voice.isMuted
+        let item = CPListItem(text: String(localized: "音声案内"),
+                              detailText: isOn ? String(localized: "オン") : String(localized: "オフ"),
+                              image: nil,
+                              accessoryImage: isOn ? UIImage(systemName: "checkmark") : nil,
+                              accessoryType: .none)
+        item.handler = { [weak self] _, completion in
+            voice.isMuted.toggle()
+            self?.interfaceController.popTemplate(animated: false) { [weak self] _, _ in
                 self?.presentRoutePreferences()
             }
             completion()

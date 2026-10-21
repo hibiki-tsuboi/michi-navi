@@ -295,3 +295,9 @@
 "このバックアップの形式には対応していません。つぼナビを最新版に更新してください。" = "This backup format is not supported. Update TsuboNavi to the latest version.";
 "バックアップのサイズが上限の128MBを超えています。" = "The backup exceeds the 128 MB size limit.";
 "バックアップの処理中です。完了してからもう一度お試しください。" = "A backup operation is in progress. Try again when it finishes.";
+
+"音声案内" = "Voice guidance";
+"オン" = "On";
+"オフ" = "Off";
+"音声案内をオンにする" = "Turn on voice guidance";
+"音声案内をオフにする" = "Turn off voice guidance";

@@ -15,6 +15,7 @@ struct BackupTests {
         let preferences: RoutePreferences
         let visits: VisitAdvisor
         let sightseeing: SightseeingAdvisor
+        let voice: VoicePreferences
         let service: BackupService
 
         var fileURL: URL { directory.appending(path: "tracks.bin") }
@@ -26,15 +27,18 @@ struct BackupTests {
             preferences = RoutePreferences(defaults: defaults)
             visits = VisitAdvisor(defaults: defaults)
             sightseeing = SightseeingAdvisor(defaults: defaults)
+            voice = VoicePreferences(defaults: defaults)
             let destinations = self.destinations
             let preferences = self.preferences
             let visits = self.visits
             let sightseeing = self.sightseeing
+            let voice = self.voice
             service = BackupService(defaults: defaults, tracks: tracks, canRestore: canRestore) {
                 destinations.reload()
                 preferences.reload()
                 visits.reload()
                 sightseeing.reload()
+                voice.reload()
             }
         }
 
@@ -58,7 +62,7 @@ struct BackupTests {
                                 parking: .init(place: place, date: points[0].time)),
             settings: .init(isRecording: false, announcesVisits: false, sightseeingEnabled: false,
                             avoidsTolls: true, avoidsHighways: true, vehicleRange: 350_000,
-                            refuelKind: "evCharger", mapOrientation: "north"))
+                            refuelKind: "evCharger", mapOrientation: "north", voiceMuted: true))
     }
 
     @Test("別の保存領域へ全データを移し、その場の画面と次回起動の値を揃える")
@@ -92,6 +96,8 @@ struct BackupTests {
         #expect(destination.preferences.refuelKind == .evCharger)
         #expect(!destination.visits.isEnabled && !destination.sightseeing.isEnabled)
         #expect(destination.defaults.string(forKey: "map.orientation") == "north")
+        #expect(destination.voice.isMuted)
+        #expect(VoicePreferences(defaults: destination.defaults).isMuted)
         #expect(destination.defaults.string(forKey: "unrelated.preference") == "keep-me")
         #expect(DestinationStore(defaults: destination.defaults).home?.id == "place-1")
         #expect(RoutePreferences(defaults: destination.defaults).vehicleRange == 350_000)
@@ -145,6 +151,27 @@ struct BackupTests {
         #expect(fixture.tracks.visits.count == 1)
         #expect(fixture.preferences.vehicleRange == 350_000)
         #expect(!fixture.service.isBusy && !fixture.service.isRestoring && !fixture.tracks.isTransferring)
+    }
+
+    @Test("音声案内の項目が無い古いバックアップも読め、鳴らす側へ戻す")
+    func backupWithoutVoiceSettingUnmutes() async throws {
+        let fixture = try Fixture()
+        defer { fixture.clean() }
+        try await fixture.service.restore(example())
+        #expect(fixture.voice.isMuted)
+
+        // 項目を足す前に書き出したファイルを、JSON から項目を抜いて作る。
+        let encoded = try JSONEncoder().encode(example())
+        var json = try #require(try JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var settings = try #require(json["settings"] as? [String: Any])
+        settings.removeValue(forKey: "voiceMuted")
+        json["settings"] = settings
+        let older = try BackupArchive.decode(JSONSerialization.data(withJSONObject: json))
+        #expect(older.settings.voiceMuted == nil)
+
+        try await fixture.service.restore(older)
+        #expect(!fixture.voice.isMuted)
+        #expect(!VoicePreferences(defaults: fixture.defaults).isMuted)
     }
 
     @Test("他のJSONと未対応版は、既存データに触れず読み込み段階で拒否する")

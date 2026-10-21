@@ -295,6 +295,8 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                         Button(String(localized: "案内開始")) { navigation.startNavigation(with: route) }
                             .buttonStyle(.borderedProminent)
+                        Spacer()
+                        VoiceMuteButton()
                     }
                 }
                 .panel()
@@ -317,6 +319,7 @@ struct ContentView: View {
                     }
                 }
                 Spacer()
+                VoiceMuteButton()
                 Button(String(localized: "案内終了"), role: .destructive) { navigation.cancelNavigation() }
                     .buttonStyle(.bordered)
             }
@@ -397,6 +400,28 @@ struct ContentView: View {
 }
 
 /// 探索ドライブの長さだけを決める。周回の方角と道路は履歴を見てアプリが選ぶ。
+/// 音声案内の入り切り。**消音スイッチの代わり**（理由は `VoicePreferences`）。
+///
+/// 案内を始める前（提示）と案内中の両方に出す。マナーモードのまま案内を始めて
+/// 声が出たときに、止める場所がその画面にあることが要る。
+private struct VoiceMuteButton: View {
+    @ObservedObject private var preferences = VoicePreferences.shared
+
+    var body: some View {
+        Button {
+            preferences.isMuted.toggle()
+        } label: {
+            Image(systemName: preferences.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .frame(width: 24)
+        }
+        .buttonStyle(.bordered)
+        .tint(preferences.isMuted ? Color.red : nil)
+        .accessibilityLabel(preferences.isMuted
+                            ? String(localized: "音声案内をオンにする")
+                            : String(localized: "音声案内をオフにする"))
+    }
+}
+
 private struct ExplorationDriveSheet: View {
     let onSelect: (TimeInterval) -> Void
 

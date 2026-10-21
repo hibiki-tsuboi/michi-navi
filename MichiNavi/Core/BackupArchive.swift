@@ -48,6 +48,9 @@ nonisolated struct BackupArchive: Codable, Sendable, Equatable {
         var vehicleRange: Double
         var refuelKind: String
         var mapOrientation: String
+        /// 音声案内を消しているか。**任意項目**にして、この項目が無かったころの
+        /// バックアップも同じ版のまま読めるようにしてある（無ければ鳴らす）。
+        var voiceMuted: Bool? = nil
     }
 
     var pointCount: Int { tracks.count / 24 }

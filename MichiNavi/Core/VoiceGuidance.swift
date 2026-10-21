@@ -15,6 +15,7 @@ final class VoiceGuidance: NSObject {
     private let navigation = NavigationController.shared
     private let session = AVAudioSession.sharedInstance()
     private let audioSession = AudioSessionController.shared
+    private let preferences = VoicePreferences.shared
     private let synthesizer = AVSpeechSynthesizer()
     private var utterances = SpeechUtterances()
 
@@ -104,6 +105,17 @@ final class VoiceGuidance: NSObject {
             }
             .store(in: &cancellables)
 
+        // 消したら、いま読んでいる途中のひと言もその場で止める。押したのに
+        // 最後まで喋り続けると、効いたのかどうか分からない。
+        // `@Published` は `willSet` で流れるので、プロパティではなく流れてきた値を見る。
+        preferences.$isMuted
+            .sink { [weak self] muted in
+                guard muted, let self else { return }
+                self.pendingPrompt = nil
+                self.stopSpeaking()
+            }
+            .store(in: &cancellables)
+
         SightseeingAdvisor.shared.$isEnabled
             .combineLatest(SightseeingAdvisor.shared.$isConnected)
             .sink { [weak self] enabled, connected in
@@ -132,8 +144,11 @@ final class VoiceGuidance: NSObject {
 
         let instruction = route.steps[progress.stepIndex].instruction
         let remaining = progress.distanceToNextManeuver
+        // **消していても読む。** 読み直しは利用者が押した（言った）ときにしか来ないので、
+        // そこで黙ると「押しても何も起きない」になる。消すのは勝手に流れてくる声だけ。
         speak(.maneuver(instruction: instruction,
-                        distance: remaining <= VoicePromptScheduler.imminentThreshold ? nil : remaining))
+                        distance: remaining <= VoicePromptScheduler.imminentThreshold ? nil : remaining),
+              evenIfMuted: true)
     }
 
     // MARK: - 案内指示より優先度の低いひと言
@@ -162,6 +177,11 @@ final class VoiceGuidance: NSObject {
     private func announce(_ prompt: VoicePrompt) -> Bool {
         // 観光案内を意味の分からない通知音に置き換えない。Siri・通話中も黙る。
         if prompt.isSightseeing, session.promptStyle != .normal { return false }
+        // 消しているときは「読まなかった」と返す。観光案内が施設を使い切らないように。
+        guard !preferences.isMuted else {
+            VisitLog.silenced("muted")
+            return false
+        }
         // **抱えない。** `speak(_:)` は聞き取り中の到着・経由地通過を `pendingPrompt` へ
         // 溜めるが、県境は溜めても意味が無い（聞き取りが終わるころにはとうに過ぎている）。
         // しかも溜めれば、抱えていた到着のひと言を押しのけることになる。
@@ -278,7 +298,11 @@ final class VoiceGuidance: NSObject {
 
     // MARK: - 読み上げ
 
-    private func speak(_ prompt: VoicePrompt) {
+    private func speak(_ prompt: VoicePrompt, evenIfMuted: Bool = false) {
+        // **セッションを有効化する前に弾く。** 有効化した時点で音楽はダックされるので、
+        // 声を出さないなら触らないのがいちばん静か。聞き取り中に抱える到着のひと言も
+        // ここで落とす（抱えると、消したあとに鳴る）。
+        guard evenIfMuted || !preferences.isMuted else { return }
         // 解説の途中でも、曲がる案内や到着が来たら即座に譲る。
         if utterances.isSightseeing, !prompt.isSightseeing { stopSpeaking() }
         // 聞き取り中に届くのは到着・経由地通過だけ（予告は `handle(progress:)` で

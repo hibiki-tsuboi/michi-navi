@@ -22,6 +22,7 @@ final class BackupService: ObservableObject {
              RoutePreferences.shared.reload()
              VisitAdvisor.shared.reload()
              SightseeingAdvisor.shared.reload()
+             VoicePreferences.shared.reload()
              NavigationController.shared.dismissArrivalHarvest()
          }) {
         self.defaults = defaults
@@ -86,7 +87,8 @@ final class BackupService: ObservableObject {
                 avoidsHighways: defaults.bool(forKey: "route.avoidsHighways"),
                 vehicleRange: defaults.double(forKey: "route.vehicleRange"),
                 refuelKind: defaults.string(forKey: "route.refuelKind") ?? "gasStation",
-                mapOrientation: defaults.string(forKey: "map.orientation") ?? "heading"))
+                mapOrientation: defaults.string(forKey: "map.orientation") ?? "heading",
+                voiceMuted: defaults.bool(forKey: VoicePreferences.mutedKey)))
     }
 
     private func preferenceValues(for archive: BackupArchive) throws -> [(String, Any?)] {
@@ -107,7 +109,8 @@ final class BackupService: ObservableObject {
             ("route.avoidsHighways", settings.avoidsHighways),
             ("route.vehicleRange", settings.vehicleRange),
             ("route.refuelKind", settings.refuelKind),
-            ("map.orientation", settings.mapOrientation)
+            ("map.orientation", settings.mapOrientation),
+            (VoicePreferences.mutedKey, settings.voiceMuted ?? false)
         ]
     }
 }

@@ -151,13 +151,13 @@ Combine の使い分けにも意味がある:
 **横を戻すなら、先に提示パネルと `ExplorationDriveSheet`**（`.presentationDetents([.medium])`
 も横ではほとんど高さが無い）**をスクロールできるようにすること。** 向きだけ足すと切れる。
 
-共有シングルトンは 19 個: `NavigationController.shared` / `LocationService.shared` /
+共有シングルトンは 20 個: `NavigationController.shared` / `LocationService.shared` /
 `SearchService.shared` / `DestinationStore.shared` / `VoiceGuidance.shared` /
 `SpeechInput.shared` / `DrivingSideLocator.shared` / `RoutePreferences.shared` /
 `NetworkMonitor.shared` / `RestReminder.shared` / `RangeAdvisor.shared` /
 `RouteWeather.shared` / `ParkingAdvisor.shared` / `TrafficAdvisor.shared` /
 `SunGlareAdvisor.shared` / `TrackStore.shared` / `VisitAdvisor.shared` /
-`TripSummary.shared` / `SightseeingAdvisor.shared`。
+`TripSummary.shared` / `SightseeingAdvisor.shared` / `VoicePreferences.shared`。
 特に `LocationService` を共有することで **GPS は常に 1 本しか動かない**。
 
 `RestReminder` / `RangeAdvisor` / `RouteWeather` / `ParkingAdvisor` / `TrafficAdvisor` /
@@ -266,6 +266,23 @@ Combine の使い分けにも意味がある:
   1 度きり、読み上げごとに切り替えるのは有効・無効だけ。終わったら
   `notifyOthersOnDeactivation` 付きで即座に手放す。**有効なままにすると音楽がダックされ続け、
   ポッドキャストは一時停止したままになる。**
+- **案内の声は消音スイッチ（マナーモード）に従わない。従わせないこと。** 2026-10-21 に
+  「ミュートにしているのにナビ開始で鳴る、音量も上がる」と言われて調べた。
+  - 鳴るのは `.playback` だから。スイッチに従うのは `.ambient` / `.soloAmbient` だが、
+    **どちらも背景では鳴らせない**。CarPlay で走っているあいだの iPhone はロック中か
+    別アプリが前面なので、従わせると**案内の声そのものが出なくなる**。スイッチの状態を
+    読む公開 API も無い。Apple のマップも同じ理由でスイッチを無視する。
+  - **音量は上げていない**（システム音量を書き換える API も無い）。スイッチに従う音は
+    着信音量、`.playback` はメディア音量で、2 つが別の値なのでメディア側が大きいと
+    「上がった」と感じる。
+  - 代わりに**アプリ内の入り切り**（`VoicePreferences.isMuted`、`voice.muted`）を置いた。
+    iPhone は提示パネルと案内パネルのスピーカーボタン、CarPlay は「ルートの引き方」の
+    リストの「音声案内」の行（案内中はバーもボタンも埋まっているので、走り出す前だけ）。
+    **消しているときはセッションを有効化しない**（`speak(_:)` の先頭で弾く。有効化した
+    時点で音楽がダックされる）。`announce` は `false` を返すので観光案内は施設を使い切らない。
+    **読み直しだけは消していても読む**——押した（言った）ときにしか来ないので、黙ると
+    「押しても何も起きない」になる。消した瞬間に読み上げ中の声も止め、聞き取り中に
+    抱えていた到着のひと言も捨てる。バックアップでは任意項目（`voiceMuted`。無ければ鳴らす）。
 - **有効化・解除は `AudioSessionController` に集約する**。iOS 27 は非同期 API、26 系は
   MainActor 外の仕事で同期 API を呼ぶ。読み上げ・録音の操作は完了まで直列化し、
   解除を待たずに次の有効化を重ねない。空の解除や別の用途へ譲った後の解除は見送る。
